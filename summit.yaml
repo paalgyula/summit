@@ -1,0 +1,5 @@
+accounts:
+  - name: TEST
+    salt: 9398c11e0e7128c7a56e3fde45b418744ffe9c7f41aaed48ac27e62d3700e223
+    verifier: 3e3f49a5a14a43b870f8de5534e318c63394738c364a71f205a8ba277bb56ff6
+    
