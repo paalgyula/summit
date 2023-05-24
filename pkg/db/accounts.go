@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const SummitConfig = "summit.yaml"
+
 var once sync.Once
 var instance *Database
 
@@ -45,9 +47,16 @@ func (db *Database) Load(path string) error {
 	return nil
 }
 
+func (db *Database) SaveAll() {
+	log.Info().Msg("Saving world state to the datbase")
+
+	f, _ := os.Create(SummitConfig)
+	_ = yaml.NewEncoder(f).Encode(db)
+}
+
 func initDatabase() {
 	instance = &Database{}
-	err := instance.Load("summit.yaml")
+	err := instance.Load(SummitConfig)
 
 	if err != nil {
 		panic(err)
@@ -73,6 +82,11 @@ type Account struct {
 	sessionKey *big.Int
 }
 
+func (a *Account) SetKey(k *big.Int) {
+	a.sessionKey = k
+	a.Session = k.Text(16)
+}
+
 // Verifier gets a big.Int version of the account verifier.
 func (a *Account) Verifier() *big.Int {
 	if a.verifier == nil {
@@ -93,9 +107,5 @@ func (a *Account) Salt() *big.Int {
 
 // SessionKey gets a big.Int version of the account session key.
 func (a *Account) SessionKey() *big.Int {
-	if a.sessionKey == nil {
-		a.sessionKey, _ = new(big.Int).SetString(a.Session, 16)
-	}
-
 	return a.sessionKey
 }

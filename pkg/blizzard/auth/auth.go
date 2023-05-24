@@ -125,9 +125,14 @@ func (rc *RealmClient) HandleProof(pkt *packets.ClientLoginProof) error {
 	} else {
 		response.Error = 0
 		response.Proof.Set(srp.CalculateServerProof(&pkt.A, M, K))
-		rc.log = rc.log.With().Str("account", rc.account.Name).Logger()
+		rc.log = rc.log.With().
+			Str("account", rc.account.Name).
+			Logger()
 
-		rc.account.Session = K.Text(16)
+		rc.account.SetKey(K)
+
+		// Save session key
+		db.GetInstance().SaveAll()
 	}
 
 	return rc.Send(packets.AuthLoginProof, response.MarshalPacket())
@@ -140,20 +145,11 @@ func (rc *RealmClient) HandleRealmList() error {
 	srl.Realms = []packets.Realm{{
 		Icon:          6,
 		Lock:          0,
-		Flags:         packets.RealmFlagNewPlayers | packets.RealmFlagRecommended,
-		Name:          "Summit Pilot",
-		Address:       "127.0.0.1:5000",
-		Population:    0,
-		NumCharacters: 5,
-		Timezone:      1,
-	}, {
-		Icon:          1,
-		Lock:          0,
-		Flags:         packets.RealmFlagNewPlayers | packets.RealmFlagRecommended,
-		Name:          "Summit Pilot PVP",
-		Address:       "127.0.0.1:5000",
-		Population:    0,
-		NumCharacters: 2,
+		Flags:         packets.RealmFlagRecommended,
+		Name:          "The Highest Summit",
+		Address:       "127.0.0.1:5002",
+		Population:    .4,
+		NumCharacters: 0,
 		Timezone:      2,
 	}}
 
@@ -284,7 +280,7 @@ func ReadBytes(buffer io.Reader, length int) ([]byte, error) {
 		}
 
 		if n != length {
-			fmt.Printf("%s\n", hex.Dump(data[:n]))
+			fmt.Printf("WTF: %s\n", hex.Dump(data[:n]))
 			return nil, fmt.Errorf("short read: wanted %v bytes, got %v", length, n)
 		}
 	}

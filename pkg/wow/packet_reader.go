@@ -3,7 +3,11 @@ package wow
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
+	"fmt"
 	"io"
+
+	"github.com/rs/zerolog/log"
 )
 
 type Reader struct {
@@ -14,6 +18,16 @@ func NewPacketReader(bb []byte) *Reader {
 	return &Reader{
 		reader: bytes.NewReader(bb),
 	}
+}
+
+func NewConnectionReader(r io.Reader) *Reader {
+	return &Reader{
+		reader: r,
+	}
+}
+
+func (r *Reader) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
 }
 
 func (r *Reader) ReadL(v any) error {
@@ -47,14 +61,34 @@ func (r *Reader) ReadString() string {
 	return string(bb)
 }
 
-func (r *Reader) ReadReverseBytes(n int) []byte {
+func (r *Reader) ReadBytes(n int) ([]byte, error) {
 	buf := make([]byte, n)
-	r.ReadB(buf)
 
-	return reverse(buf)
+	n2, err := r.Read(buf)
+	if err != nil {
+		return buf, fmt.Errorf("wow.ReadBytes: %w", err)
+	}
+
+	if n2 != n {
+		log.Warn().Err(err).Msgf("readed %d instead of required: %d", n2, n)
+		fmt.Printf("%s", hex.Dump(buf[:n2]))
+	}
+
+	return buf, nil
 }
 
-func reverse(data []byte) []byte {
+func (r *Reader) ReadReverseBytes(n int) []byte {
+	buf := make([]byte, n)
+
+	err := r.ReadB(buf)
+	if err != nil {
+		log.Fatal().Err(err)
+	}
+
+	return ReverseBytes(buf)
+}
+
+func ReverseBytes(data []byte) []byte {
 	for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
 		data[i], data[j] = data[j], data[i]
 	}
