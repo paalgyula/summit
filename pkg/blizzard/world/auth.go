@@ -7,7 +7,7 @@ import (
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
-	"github.com/paalgyula/summit/server/world/data/static"
+	"github.com/paalgyula/summit/pkg/wow/wotlk"
 )
 
 func (gc *GameClient) sendAuthChallenge() {
@@ -30,17 +30,20 @@ type ClientAuthSessionPacket struct {
 	AddonsCompressed []byte
 }
 
-func (gc *GameClient) AuthSessionHandler(data []byte) {
+type BillingDetails struct {
+	BillingTimeRemaining uint32
+	BillingFlags         uint8
+	BillingTimeRested    uint32
+}
+
+func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	r := wow.NewPacketReader(data)
-
-	// fmt.Printf("%s", hex.Dump(data))
-
 	pkt := new(ClientAuthSessionPacket)
 
 	r.ReadL(&pkt.BuildNumber)
 	r.ReadL(&pkt.ServerID)
 
-	pkt.AccountName = r.ReadString()
+	r.ReadString(&pkt.AccountName)
 
 	r.ReadL(&pkt.ClientSeed)
 	r.ReadL(&pkt.Digest)
@@ -53,6 +56,7 @@ func (gc *GameClient) AuthSessionHandler(data []byte) {
 	}
 
 	// TODO: check the digest
+
 	var err error
 	gc.crypt, err = crypt.NewWowcrypt(acc.SessionKey())
 	if err != nil {
@@ -62,7 +66,7 @@ func (gc *GameClient) AuthSessionHandler(data []byte) {
 	gc.log.Debug().Str("key", acc.SessionKey().Text(16)).Send()
 
 	w := wow.NewPacketWriter()
-	w.WriteL(uint8(static.AuthOK))
+	w.WriteL(uint8(wotlk.AUTH_OK))
 	w.WriteL(uint32(0)) // BillingTimeRemaining
 	w.WriteL(uint8(0))  // BillingFlags
 	w.WriteL(uint32(0)) // BillingTimeRested

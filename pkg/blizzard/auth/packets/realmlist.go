@@ -1,18 +1,18 @@
 package packets
 
 import (
-	"bytes"
 	"encoding/binary"
 
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
 // ClientRealmlist packet contains no fields.
-type ClientRealmlist struct{}
+type ClientRealmlist struct {
+	Unknown uint32
+}
 
-func (pkt *ClientRealmlist) UnmarshalPacket(bb []byte) error {
-	var unk uint32
-	return binary.Read(bytes.NewBuffer(bb), binary.LittleEndian, &unk)
+func (pkt *ClientRealmlist) UnmarshalPacket(bb wow.PacketData) error {
+	return binary.Read(bb.Reader(), binary.LittleEndian, &pkt)
 }
 
 type RealmFlag uint8
@@ -47,6 +47,9 @@ type Realm struct {
 	NumCharacters uint8
 	// Timezone
 	Timezone uint8
+
+	// Unknown - needs research whats this
+	Unknown uint8
 }
 
 // ServerRealmlist is made up of a list of realms.
@@ -54,15 +57,40 @@ type ServerRealmlist struct {
 	Realms []Realm
 }
 
-// Bytes converts the ServerRealmlist packet to an array of bytes.
+type realmsHeader struct {
+	Always10 uint8
+	Size     uint16
+	Unk2     uint32
+}
+
+func (pkt *ServerRealmlist) UnmarshalPacket(data wow.PacketData) {
+	r := data.Reader()
+
+	var rh realmsHeader
+	r.ReadL(&rh)
+
+	var realm Realm
+
+	r.ReadL(realm.Icon)
+	r.ReadL(realm.Lock)
+	r.ReadL(realm.Flags)
+	r.ReadString(&realm.Name)
+	r.ReadString(&realm.Address)
+	r.ReadL(realm.Population)
+	r.ReadL(realm.NumCharacters)
+	r.ReadL(realm.Timezone)
+	r.ReadL(realm.Unknown)
+}
+
+// MarshalPacket converts the ServerRealmlist packet to an array of bytes.
 func (pkt *ServerRealmlist) MarshalPacket() []byte {
 	w := wow.NewPacketWriter()
 
 	w.WriteL(uint8(0x10))
-	w.WriteL(uint16(0)) // Size placeholder
+	w.WriteL(uint16(0)) // unk
 	w.WriteL(uint32(0)) // unk
 
-	w.WriteL(uint16(len(pkt.Realms)))
+	w.WriteL(uint16(len(pkt.Realms))) // Size placeholder
 
 	for _, realm := range pkt.Realms {
 		w.WriteL(realm.Icon)
@@ -73,7 +101,7 @@ func (pkt *ServerRealmlist) MarshalPacket() []byte {
 		w.WriteL(realm.Population)
 		w.WriteL(realm.NumCharacters)
 		w.WriteL(realm.Timezone)
-		w.WriteL(uint8(0x2c))
+		w.WriteL(uint8(0x2c)) // TODO: who and why need this?
 	}
 
 	w.WriteL(uint16(0x0010)) // Terminator

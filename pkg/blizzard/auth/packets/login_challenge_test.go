@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/paalgyula/summit/pkg/blizzard/auth/packets"
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -11,7 +12,7 @@ import (
 const testLoginPacket = "WoW\x00\x02\x04\x03\x9e!68x\x00niW\x00SUne<\x00\x00\x00\x7f\x00\x00\x01\x04TEST"
 
 func TestLoginChallenge(t *testing.T) {
-	data := packets.RData{
+	data := wow.RData{
 		Data: []byte(testLoginPacket),
 	}
 

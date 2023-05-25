@@ -47,7 +47,7 @@ func (r *Reader) ReadStringFixed(len int) string {
 	return string(bb)
 }
 
-func (r *Reader) ReadString() string {
+func (r *Reader) ReadString(dest *string) {
 	var bb []byte
 
 	var b byte
@@ -58,7 +58,7 @@ func (r *Reader) ReadString() string {
 		binary.Read(r.reader, binary.LittleEndian, &b)
 	}
 
-	return string(bb)
+	*dest = string(bb)
 }
 
 func (r *Reader) ReadBytes(n int) ([]byte, error) {

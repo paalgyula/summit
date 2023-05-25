@@ -33,7 +33,8 @@ func TestCreatePlayer(t *testing.T) {
 	fmt.Printf("%s", hex.Dump(data))
 
 	r := wow.NewPacketReader(data)
-	accName := r.ReadString()
+	var accName string
+	r.ReadString(&accName)
 
 	assert.Equal(t, "Bela", accName)
 

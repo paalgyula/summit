@@ -56,7 +56,8 @@ type CharacterCreateResult uint8
 
 func (gc *GameClient) CreateCharacter(data []byte) {
 	r := wow.NewPacketReader(data)
-	accName := r.ReadString()
+	var accName string
+	r.ReadString(&accName)
 
 	var request CharacterCreateRequest
 	binary.Read(r, binary.BigEndian, &request)

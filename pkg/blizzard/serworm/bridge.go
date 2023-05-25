@@ -80,7 +80,6 @@ func (b *Bridge) setup() {
 	_, err = loginConn.Read(header)
 	if err != nil {
 		log.Fatal().Err(err).Msgf("%s", hex.Dump(header))
-		// panic(err)
 	}
 
 	fmt.Printf("%s", hex.Dump(header))

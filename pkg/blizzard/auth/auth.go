@@ -15,7 +15,6 @@ import (
 	"github.com/paalgyula/summit/pkg/blizzard/auth/srp"
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/wow"
-	"github.com/paalgyula/summit/server/auth/data/static"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -78,7 +77,7 @@ func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
 
 	// Validate the packet.
 	gameName := strings.TrimRight(pkt.GameName, "\x00")
-	if gameName != static.SupportedGameName {
+	if gameName != "WoW" {
 		res.Status = packets.ChallengeStatusFailed
 		// TODO: temporary removed this line to allow every client to log in
 		// } else if pkt.Version != static.SupportedGameVersion || pkt.Build != static.SupportedGameBuild {
@@ -118,13 +117,13 @@ func (rc *RealmClient) HandleProof(pkt *packets.ClientLoginProof) error {
 		rc.account.Name)
 
 	if M.Cmp(&pkt.M) != 0 {
-		response.Error = 4 // TODO(jeshua): make these constants
+		response.StatusCode = 4 // TODO(jeshua): make these constants
 		rc.Send(packets.AuthLoginProof, response.MarshalPacket())
 		rc.c.Close()
 
 		return nil
 	} else {
-		response.Error = 0
+		response.StatusCode = 0
 		response.Proof.Set(srp.CalculateServerProof(&pkt.A, M, K))
 		rc.log = rc.log.With().
 			Str("account", rc.account.Name).
@@ -203,7 +202,7 @@ func (rc *RealmClient) listen() {
 			return
 		}
 
-		switch pkt.Command {
+		switch packets.AuthCmd(pkt.Command) {
 		case packets.AuthLoginChallenge:
 			var clc packets.ClientLoginChallenge
 			pkt.Unmarshal(&clc)
@@ -223,7 +222,7 @@ func (rc *RealmClient) listen() {
 }
 
 // read reads the packet from the auth socket
-func (rc *RealmClient) read(r io.Reader) (*packets.RData, error) {
+func (rc *RealmClient) read(r io.Reader) (*wow.RData, error) {
 	opCodeData := make([]byte, 1)
 	n, err := r.Read(opCodeData)
 	if err != nil {
@@ -258,7 +257,7 @@ func (rc *RealmClient) read(r io.Reader) (*packets.RData, error) {
 		return nil, err
 	}
 
-	ret := packets.RData{Command: opCode}
+	ret := wow.RData{Command: uint8(opCode)}
 	bb, err := ReadBytes(r, length)
 	if err != nil {
 		return nil, err
