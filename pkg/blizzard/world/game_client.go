@@ -121,7 +121,7 @@ func (gc *GameClient) handlePacket() error {
 		return err
 	}
 
-	data, err := gc.input.ReadBytes(length)
+	data, err := gc.input.ReadNBytes(length)
 	if err != nil {
 		return fmt.Errorf("with opcode: %0X, %w", opCode, err)
 	}
@@ -132,7 +132,7 @@ func (gc *GameClient) handlePacket() error {
 }
 
 func (gc *GameClient) readHeader() (OpCode, int, error) {
-	header, err := gc.input.ReadBytes(6)
+	header, err := gc.input.ReadNBytes(6)
 	if err != nil {
 		return 0, -1, errors.New("cannot read opcode")
 	}

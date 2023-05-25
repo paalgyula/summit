@@ -37,19 +37,19 @@ func NewClientLoginChallenge(accName string) *ClientLoginChallenge {
 
 func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 	r := bb.Reader()
-	p.GameName = r.ReadStringFixed(4)
+	r.ReadStringFixed(&p.GameName, 4)
 	r.ReadL(&p.Version)
 	r.ReadL(&p.Build)
-	p.Platform = r.ReadStringFixed(4)
-	p.OS = r.ReadStringFixed(4)
-	p.Locale = r.ReadStringFixed(4)
+	r.ReadStringFixed(&p.Platform, 4)
+	r.ReadStringFixed(&p.OS, 4)
+	r.ReadStringFixed(&p.Locale, 4)
 	r.ReadL(&p.WorldRegionBias)
 	r.ReadL(&p.IP)
 
 	var len uint8
 	r.ReadB(&len)
 
-	p.AccountName = r.ReadStringFixed(int(len))
+	r.ReadStringFixed(&p.AccountName, int(len))
 
 	return nil
 }

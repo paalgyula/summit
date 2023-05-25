@@ -1,7 +1,6 @@
 package player_test
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"testing"
@@ -39,7 +38,7 @@ func TestCreatePlayer(t *testing.T) {
 	assert.Equal(t, "Bela", accName)
 
 	var request CharacterCreateRequest
-	binary.Read(r, binary.BigEndian, &request)
+	r.Read(&request)
 
 	fmt.Printf("%s %+v\n", accName, request)
 

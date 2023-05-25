@@ -60,7 +60,7 @@ func (gc *GameClient) CreateCharacter(data []byte) {
 	r.ReadString(&accName)
 
 	var request CharacterCreateRequest
-	binary.Read(r, binary.BigEndian, &request)
+	r.Read(&request, binary.BigEndian)
 
 	fmt.Printf("%s %+v\n", accName, request)
 

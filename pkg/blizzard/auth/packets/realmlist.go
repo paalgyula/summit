@@ -1,8 +1,6 @@
 package packets
 
 import (
-	"encoding/binary"
-
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -12,7 +10,8 @@ type ClientRealmlist struct {
 }
 
 func (pkt *ClientRealmlist) UnmarshalPacket(bb wow.PacketData) error {
-	return binary.Read(bb.Reader(), binary.LittleEndian, &pkt)
+	return bb.Reader().Read(pkt)
+	// return binary.Read(bb.Reader(), binary.LittleEndian, &pkt)
 }
 
 type RealmFlag uint8
