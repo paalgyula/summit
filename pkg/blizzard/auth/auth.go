@@ -80,8 +80,9 @@ func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
 	gameName := strings.TrimRight(pkt.GameName, "\x00")
 	if gameName != static.SupportedGameName {
 		res.Status = packets.ChallengeStatusFailed
-	} else if pkt.Version != static.SupportedGameVersion || pkt.Build != static.SupportedGameBuild {
-		res.Status = packets.ChallengeStatusFailVersionInvalid
+		// TODO: temporary removed this line to allow every client to log in
+		// } else if pkt.Version != static.SupportedGameVersion || pkt.Build != static.SupportedGameBuild {
+		// 	res.Status = packets.ChallengeStatusFailVersionInvalid
 	} else {
 		rc.account = db.GetInstance().FindAccount(pkt.AccountName)
 

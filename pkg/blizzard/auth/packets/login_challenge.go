@@ -2,6 +2,7 @@ package packets
 
 import (
 	"math/big"
+	"strings"
 
 	"github.com/paalgyula/summit/lib/util"
 	"github.com/paalgyula/summit/pkg/blizzard/auth/srp"
@@ -19,6 +20,20 @@ type ClientLoginChallenge struct {
 	WorldRegionBias uint32
 	IP              [4]uint8
 	AccountName     string
+}
+
+func NewClientLoginChallenge(accName string) *ClientLoginChallenge {
+	return &ClientLoginChallenge{
+		GameName:        "\x00WoW",
+		Version:         [3]byte{3, 3, 5},
+		Build:           12340,
+		Platform:        "\x0068x",
+		OS:              "\x00niW",
+		Locale:          "SUne",
+		WorldRegionBias: 0,
+		IP:              [4]uint8{89, 51, 25, 12},
+		AccountName:     strings.ToUpper(accName),
+	}
 }
 
 func (p *ClientLoginChallenge) UnmarshalPacket(bb []byte) error {
@@ -42,17 +57,17 @@ func (p *ClientLoginChallenge) UnmarshalPacket(bb []byte) error {
 
 func (p *ClientLoginChallenge) MarshalPacket() []byte {
 	w := wow.NewPacketWriter()
-	w.WriteString(p.GameName)
+	w.WriteStringFixed(p.GameName, 4)
 	w.Write(p.Version[:])
 	w.WriteL(p.Build)
-	w.WriteString(p.Platform)
-	w.WriteString(p.OS)
-	w.WriteString(p.Locale)
+	w.WriteStringFixed(p.Platform, 4)
+	w.WriteStringFixed(p.OS, 4)
+	w.WriteStringFixed(p.Locale, 4)
 	w.WriteL(p.WorldRegionBias)
 	w.WriteL(p.IP)
 
 	w.WriteL(uint8(len(p.AccountName)))
-	w.Write([]byte(p.AccountName))
+	w.WriteStringFixed(p.AccountName, len(p.AccountName))
 
 	return w.Bytes()
 }

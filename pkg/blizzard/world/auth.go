@@ -4,6 +4,7 @@ import (
 	"math/rand"
 
 	"github.com/paalgyula/summit/pkg/blizzard/world/packets"
+	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/paalgyula/summit/server/world/data/static"
@@ -45,7 +46,11 @@ func (gc *GameClient) AuthSessionHandler(data []byte) {
 	r.ReadL(&pkt.Digest)
 	r.ReadL(&pkt.AddonSize)
 
-	acc := gc.ws.db.FindAccount(pkt.AccountName)
+	// TODO: rewrite back from singleton to instance based DB
+	acc := db.GetInstance().FindAccount(pkt.AccountName)
+	if acc != nil {
+		gc.acc = acc
+	}
 
 	// TODO: check the digest
 	var err error
@@ -61,7 +66,7 @@ func (gc *GameClient) AuthSessionHandler(data []byte) {
 	w.WriteL(uint32(0)) // BillingTimeRemaining
 	w.WriteL(uint8(0))  // BillingFlags
 	w.WriteL(uint32(0)) // BillingTimeRested
-	w.WriteL(uint8(1))  // Expansion
+	w.WriteL(uint8(2))  // Expansion
 
 	gc.SendPacket(packets.ServerAuthResponse, w.Bytes())
 

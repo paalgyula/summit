@@ -43,8 +43,16 @@ func (w *PacketWriter) WriteByte(b byte) error {
 }
 
 func (w *PacketWriter) WriteString(v string) {
-	binary.Write(w.buf, binary.LittleEndian, []byte(v))
-	// w.buf.WriteRune(0x00)
+	binary.Write(w.buf, binary.BigEndian, []byte(v))
+	w.buf.WriteRune(0x00)
+}
+
+func (w *PacketWriter) WriteStringFixed(v string, size int) {
+	if size > len(v) {
+		size = len(v)
+	}
+
+	binary.Write(w.buf, binary.LittleEndian, []byte(v)[:size])
 }
 
 func (w *PacketWriter) Bytes() []byte {

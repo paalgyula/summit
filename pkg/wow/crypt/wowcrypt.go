@@ -1,12 +1,14 @@
 package crypt
 
 import (
-	"crypto"
 	"crypto/hmac"
 	"crypto/rc4"
+	"crypto/sha1"
 	"errors"
 	"fmt"
 	"math/big"
+
+	"github.com/paalgyula/summit/pkg/wow"
 )
 
 // CryptRecvLength the length of the cryptable header
@@ -36,9 +38,8 @@ func NewWowcrypt(key *big.Int) (*WowCrypt, error) {
 	wc := new(WowCrypt)
 
 	// Encoder setup
-	h := hmac.New(crypto.SHA1.New, r) // r -> server to client
-	// TODO: maybe need to reverse it
-	_, _ = h.Write(key.Bytes())
+	h := hmac.New(sha1.New, r) // r -> server to client
+	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
 	wc.encKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
@@ -46,9 +47,8 @@ func NewWowcrypt(key *big.Int) (*WowCrypt, error) {
 	}
 
 	// Decoder setup
-	h = hmac.New(crypto.SHA1.New, s) // s -> client to server
-	// TODO: maybe need to reverse it
-	_, _ = h.Write(key.Bytes())
+	h = hmac.New(sha1.New, s) // s -> client to server
+	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
 	wc.decKey = h.Sum(nil)
 
 	if h.Size() != digestLength {

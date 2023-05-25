@@ -8,12 +8,18 @@ import (
 	"time"
 
 	. "github.com/paalgyula/summit/pkg/blizzard/world/packets"
+	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+type SessionManager interface {
+	AddClient(*GameClient)
+	Disconnected(string)
+}
 
 type GameClient struct {
 	ID  string
@@ -28,11 +34,12 @@ type GameClient struct {
 	writeLock sync.Mutex
 
 	crypt *crypt.WowCrypt
+	acc   *db.Account
 
-	ws *WorldServer
+	ws SessionManager
 }
 
-func NewGameClient(n net.Conn, ws *WorldServer) *GameClient {
+func NewGameClient(n net.Conn, ws SessionManager, handlers ...PacketHandler) *GameClient {
 	gc := &GameClient{
 		ID: xid.New().String(),
 		n:  n,
@@ -49,8 +56,10 @@ func NewGameClient(n net.Conn, ws *WorldServer) *GameClient {
 		ws:        ws,
 	}
 
-	go gc.handleConnection()
+	// Register opcode handlers from handlers.go
+	gc.RegisterHandlers(handlers...)
 
+	go gc.handleConnection()
 	ws.AddClient(gc)
 
 	return gc
@@ -94,17 +103,6 @@ func (gc *GameClient) makeHeader(packetLen int, opCode OpCode) ([]byte, error) {
 	w := wow.NewPacketWriter()
 	w.WriteB(uint16(packetLen + 2))
 	w.WriteL(uint16(opCode))
-
-	// lengthData := make([]byte, 2)
-	// opCodeData := make([]byte, 2)
-
-	// binary.BigEndian.PutUint16(lengthData, uint16(packetLen)+2)
-	// binary.LittleEndian.PutUint16(opCodeData, uint16(opCode))
-
-	// header := make([]byte, 0, 4)
-	// header = append(header, lengthData...)
-	// header = append(header, opCodeData...)
-
 	header := w.Bytes()
 
 	if gc.crypt != nil {
@@ -130,19 +128,7 @@ func (gc *GameClient) handlePacket() error {
 
 	gc.log.Trace().Msgf("packet received 0x%04x (%s) size: %d", opCode.Int(), opCode.String(), len(data))
 
-	switch opCode {
-	case ClientPing:
-		gc.PingHandler()
-	case ClientAuthSession:
-		gc.AuthSessionHandler(data)
-	default:
-		gc.log.Error().
-			Str("pkt", opCode.String()).
-			Str("id", fmt.Sprintf("0x%04x", opCode.Int())).
-			Msgf("no handler for the packet")
-	}
-
-	return nil
+	return gc.Handle(opCode, data)
 }
 
 func (gc *GameClient) readHeader() (OpCode, int, error) {
@@ -165,8 +151,8 @@ func (gc *GameClient) readHeader() (OpCode, int, error) {
 
 	opCode := OpCode(opcode)
 
-	fmt.Printf("world decoded opcode: %02x, %s len: %d encrypted: %t\n",
-		opCode, opCode.String(), length, gc.crypt != nil)
+	// fmt.Printf("world: decoded opcode: %02x, %s len: %d encrypted: %t\n",
+	// 	opCode.Int(), opCode.String(), length, gc.crypt != nil)
 
 	return opCode, int(length) - 4, nil
 }

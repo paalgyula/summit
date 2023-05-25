@@ -1,5 +1,7 @@
 package packets
 
+import "github.com/rs/zerolog/log"
+
 const (
 	STATUS_NEVER            = "never"
 	STATUS_LOGGEDIN         = "logged_in"
@@ -7,7 +9,26 @@ const (
 	STATUS_TRANSFER_PENDING = "pending"
 )
 
-type Opcodes []Handler
+type Opcodes []*Handler
+
+func (o Opcodes) Get(idx int) *Handler {
+	if idx > len(o) {
+		return nil
+	}
+
+	return o[idx]
+}
+
+func (o Opcodes) Handle(code OpCode, handler any) {
+	oc := o.Get(code.Int())
+
+	if oc == nil {
+		log.Fatal().Msgf("you should define a handler first for this message: 0x%x", code.Int())
+		return
+	}
+
+	oc.Handler = handler
+}
 
 type Packet interface {
 	OpCode() int
