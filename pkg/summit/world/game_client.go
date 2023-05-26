@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/paalgyula/summit/pkg/blizzard/world/packets"
 	"github.com/paalgyula/summit/pkg/db"
+	. "github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/xid"
@@ -102,7 +102,7 @@ func (gc *GameClient) SendPacket(opcode OpCode, payload []byte) {
 func (gc *GameClient) makeHeader(packetLen int, opCode OpCode) ([]byte, error) {
 	w := wow.NewPacketWriter()
 	w.WriteB(uint16(packetLen + 2))
-	w.WriteL(uint16(opCode))
+	w.Write(uint16(opCode))
 	header := w.Bytes()
 
 	if gc.crypt != nil {

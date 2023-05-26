@@ -1,9 +1,7 @@
 package player
 
 import (
-	"math"
-
-	"github.com/paalgyula/summit/pkg/blizzard/world/guid"
+	"github.com/paalgyula/summit/pkg/summit/world/guid"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -29,6 +27,12 @@ const (
 	GenderFemale = 0x01
 )
 
+type WorldLocation struct {
+	X, Y, Z float32
+	Map     uint32
+	Zone    uint32
+}
+
 type Player struct {
 	ID     uint32
 	Name   string
@@ -42,6 +46,15 @@ type Player struct {
 	HairColor  uint8
 	FacialHair uint8
 	OutfitID   uint8
+
+	Location     WorldLocation
+	BindLocation WorldLocation
+
+	Level uint8
+
+	Inventory Inventory
+
+	GuildID uint32
 }
 
 func (p *Player) GUID() *guid.GUID {
@@ -50,70 +63,70 @@ func (p *Player) GUID() *guid.GUID {
 
 func (p *Player) WriteToLogin(w *wow.PacketWriter) {
 	// 	*data << guid;
-	w.WriteB(p.GUID().RawValue())
-	// *data << fields[1].Get<std::string>();                          // name
+	w.Write(p.GUID().RawValue())
+	// *data << fields[1].Get<std::string>();                   // name
 	w.WriteString(p.Name)
 	// *data << uint8(plrRace);                                 // race
-	w.WriteL(uint8(p.Race))
+	w.Write(p.Race)
 	// *data << uint8(plrClass);                                // class
-	w.WriteL(uint8(p.Class))
+	w.Write(p.Class)
 	// *data << uint8(gender);                                  // gender
-	w.WriteL(uint8(p.Gender))
+	w.Write(p.Gender)
 
 	// *data << uint8(skin);
-	w.WriteL(uint8(p.Skin))
+	w.Write(p.Skin)
 	// *data << uint8(face);
-	w.WriteL(uint8(p.Face))
+	w.Write(p.Face)
 	// *data << uint8(hairStyle);
-	w.WriteL(uint8(p.HairStyle))
+	w.Write(p.HairStyle)
 	// *data << uint8(hairColor);
-	w.WriteL(uint8(p.HairColor))
+	w.Write(p.HairColor)
 	// *data << uint8(facialStyle);
-	w.WriteL(uint8(p.FacialHair))
+	w.Write(p.FacialHair)
 
 	// *data << uint8(fields[10].Get<uint8>());                   // level
-	w.WriteL(uint8(1))
+	w.Write(p.Level)
 
 	// *data << uint32(zone);                                   // zone
-	w.WriteL(uint32(0))
+	w.Write(uint32(0))
 	// *data << uint32(fields[12].Get<uint16>());                 // map
-	w.WriteL(uint32(530))
+	w.Write(uint32(530))
 
 	// *data << fields[13].Get<float>();                          // x
-	bits := math.Float32bits(1.1)
-
-	w.WriteL(bits)
+	w.Write(p.Location.X)
 	// *data << fields[14].Get<float>();                          // y
-	w.WriteL(bits)
+	w.Write(p.Location.Y)
 	// *data << fields[15].Get<float>();                          // z
-	w.WriteL(bits)
+	w.Write(p.Location.Z)
 
 	// *data << uint32(fields[16].Get<uint32>());                 // guild id
-	w.WriteL(uint32(0))
+	w.Write(p.GuildID)
 
 	// Character flags
 	// *data << uint32(charFlags);                              // character flags
-	w.WriteL(uint32(0))
+	w.Write(uint32(0))
 
 	// First login
 	// *data << uint8(atLoginFlags & AT_LOGIN_FIRST ? 1 : 0);
-	w.WriteL(uint8(0))
+	w.Write(uint8(0))
 
 	// PET section
 	// *data << uint32(petDisplayId);
-	w.WriteL(uint32(0))
+	w.Write(uint32(0))
 	// *data << uint32(petLevel);
-	w.WriteL(uint32(0))
+	w.Write(uint32(0))
 	// *data << uint32(petFamily);
-	w.WriteL(uint32(0))
+	w.Write(uint32(0))
 
-	for i := 0; i < InventorySlotBagEnd; i++ {
+	for _, item := range p.Inventory.InventorySlots {
 		// *data << uint32(proto->DisplayInfoID);
-		w.WriteL(uint32(0))
+		w.Write(item.DisplayInfoID)
 		// *data << uint8(proto->InventoryType);
-		w.WriteL(uint8(0))
+		w.Write(item.InventoryType)
 		// *data << uint32(enchant ? enchant->aura_id : 0);
-		w.WriteL(uint32(0))
+
+		// Find out how enchant slots works
+		w.Write(uint32(0))
 	}
 
 	// Yipeee

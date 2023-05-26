@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/paalgyula/summit/pkg/blizzard/auth"
-	authPackets "github.com/paalgyula/summit/pkg/blizzard/auth/packets"
-	"github.com/paalgyula/summit/pkg/blizzard/world"
-	worldPackets "github.com/paalgyula/summit/pkg/blizzard/world/packets"
+	"github.com/paalgyula/summit/pkg/summit/auth"
+	authPackets "github.com/paalgyula/summit/pkg/summit/auth/packets"
+	"github.com/paalgyula/summit/pkg/summit/world"
+	worldPackets "github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog"
@@ -26,6 +26,7 @@ type Bridge struct {
 	worldConn net.Conn
 
 	crypt *crypt.WowCrypt
+	srp   *crypt.SRP6
 
 	log zerolog.Logger
 }
@@ -43,7 +44,7 @@ func (b *Bridge) SetGameClient(gc *world.GameClient) {
 func (b *Bridge) SendPacket(oc worldPackets.OpCode, data []byte) {
 	w := wow.NewPacketWriter()
 	w.WriteB(uint16(len(data) + 2))
-	w.WriteL(uint16(oc.Int()))
+	w.Write(uint16(oc.Int()))
 	header := w.Bytes()
 
 	if b.crypt != nil {
@@ -76,13 +77,28 @@ func (b *Bridge) setup() {
 
 	// Send auth challenge
 	b.writer.Send(int(authPackets.AuthLoginChallenge), clp)
-	header := make([]byte, 4)
+
+	header := make([]byte, 2)
 	_, err = loginConn.Read(header)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("%s", hex.Dump(header))
+		log.Fatal().Err(err).Msgf("Head: %s", hex.Dump(header))
 	}
 
-	fmt.Printf("%s", hex.Dump(header))
+	// data := make([]byte, 152)
+	// _, err = loginConn.Read(data)
+	// if err != nil {
+	// 	log.Fatal().Err(err).Msgf("Data: %s", hex.Dump(data))
+	// }
+
+	// Get srp stuff
+	sar := new(authPackets.ServerLoginChallenge)
+	fmt.Printf("ServerLoginChallenge - Size: %d", sar.ReadPacket(loginConn))
+
+	// Initialize SRP6
+	b.srp = crypt.NewSRP6(int64(sar.G), 3, &sar.N)
+	b.srp.B = &sar.B
+
+	// authPackets.ClientLoginProof
 }
 
 func NewBridge(logonServer, user, pass string) *Bridge {

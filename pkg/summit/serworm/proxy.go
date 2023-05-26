@@ -6,9 +6,9 @@ import (
 	"net"
 	"os"
 
-	"github.com/paalgyula/summit/pkg/blizzard/world"
-	"github.com/paalgyula/summit/pkg/blizzard/world/packets"
 	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/summit/world"
+	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )

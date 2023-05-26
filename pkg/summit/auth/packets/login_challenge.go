@@ -1,10 +1,10 @@
 package packets
 
 import (
+	"io"
 	"math/big"
 	"strings"
 
-	"github.com/paalgyula/summit/pkg/blizzard/auth/srp"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -57,15 +57,15 @@ func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 func (p *ClientLoginChallenge) MarshalPacket() []byte {
 	w := wow.NewPacketWriter()
 	w.WriteStringFixed(p.GameName, 4)
-	w.Write(p.Version[:])
-	w.WriteL(p.Build)
+	w.WriteBytes(p.Version[:])
+	w.Write(p.Build)
 	w.WriteStringFixed(p.Platform, 4)
 	w.WriteStringFixed(p.OS, 4)
 	w.WriteStringFixed(p.Locale, 4)
-	w.WriteL(p.WorldRegionBias)
-	w.WriteL(p.IP)
+	w.Write(p.WorldRegionBias)
+	w.Write(p.IP)
 
-	w.WriteL(uint8(len(p.AccountName)))
+	w.Write(uint8(len(p.AccountName)))
 	w.WriteStringFixed(p.AccountName, len(p.AccountName))
 
 	return w.Bytes()
@@ -125,28 +125,65 @@ type ServerLoginChallenge struct {
 	B       big.Int
 	Salt    big.Int
 	SaltCRC big.Int
+
+	G uint8
+	N big.Int
 }
 
-func (pkt *ServerLoginChallenge) UnmarshalPacket(data wow.PacketData) {
+func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
+	r := wow.NewConnectionReader(data)
 
+	var tmp uint8
+
+	r.Read(tmp) // unk1
+	r.Read(pkt.Status)
+
+	if pkt.Status == ChallengeStatusSuccess {
+		pkt.B.SetBytes(r.ReadReverseBytes(32))
+		r.Read(&tmp) // Size of G
+		r.Read(&pkt.G)
+
+		pkt.N = big.Int{}
+		r.Read(&tmp)
+		pkt.N.SetBytes(r.ReadReverseBytes(int(tmp)))
+
+		pkt.Salt.SetBytes(r.ReadReverseBytes(32))
+		pkt.SaltCRC.SetBytes(r.ReadReverseBytes(16))
+
+		r.Read(&tmp)
+	}
+
+	return r.ReadedCount()
 }
 
 // Bytes writes out the packet to an array of bytes.
 func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
 	w := wow.NewPacketWriter()
 
-	w.WriteByte(0) // unk1
-	w.WriteByte(uint8(pkt.Status))
+	w.WriteOne(0) // unk1
+	w.WriteOne(int(pkt.Status))
 
 	if pkt.Status == ChallengeStatusSuccess {
-		w.Write(PadBigIntBytes(wow.ReverseBytes(pkt.B.Bytes()), 32))
-		w.WriteByte(1)
-		w.WriteByte(srp.G)
-		w.WriteByte(32)
-		w.WriteReverse(srp.N().Bytes())
-		w.Write(PadBigIntBytes(wow.ReverseBytes(pkt.Salt.Bytes()), 32))
-		w.Write(PadBigIntBytes(wow.ReverseBytes(pkt.SaltCRC.Bytes()), 16))
-		w.WriteByte(0) // unk2
+		// Public key of SRP6
+		w.WriteBytes(PadBigIntBytes(
+			wow.ReverseBytes(pkt.B.Bytes()),
+			32),
+		)
+
+		// G is the generator of SRP6
+		w.WriteOne(0x01)
+		w.Write(pkt.G)
+
+		// Send the shared N prime
+		nb := pkt.N.Bytes()
+		w.WriteOne(len(nb))
+		w.WriteReverseBytes(nb)
+
+		// Salt of the password generator
+		w.WriteBytes(PadBigIntBytes(wow.ReverseBytes(pkt.Salt.Bytes()), 32))
+		w.WriteBytes(PadBigIntBytes(wow.ReverseBytes(pkt.SaltCRC.Bytes()), 16))
+
+		w.WriteOne(0) // unk2
 	}
 
 	return w.Bytes()

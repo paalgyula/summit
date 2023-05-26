@@ -511,6 +511,7 @@ const (
 	ClientXpCheat                         OpCode = 0x0221
 	ClientZoneMap                         OpCode = 0x000A
 	ClientZoneupdate                      OpCode = 0x01F4
+	ClientRealmSplit                      OpCode = 0x038c
 	ServerAccountDataTimes                OpCode = 0x0209
 	ServerActionButtons                   OpCode = 0x0129
 	ServerActivatetaxireply               OpCode = 0x01AE
@@ -994,6 +995,7 @@ const (
 	ServerWho                             OpCode = 0x0063
 	ServerZoneMap                         OpCode = 0x000B
 	ServerZoneUnderAttack                 OpCode = 0x0254
+	ServerRealmSplit                      OpCode = 0x038d
 )
 
 // Int returns an int reprentation of the .

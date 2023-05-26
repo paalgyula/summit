@@ -42,7 +42,7 @@ func (pkt *ServerLoginProof) MarshalPacket() []byte {
 	w.WriteByte(uint8(pkt.StatusCode))
 
 	if pkt.StatusCode == 0 {
-		w.Write(PadBigIntBytes(wow.ReverseBytes(pkt.Proof.Bytes()), 32))
+		w.WriteBytes(PadBigIntBytes(wow.ReverseBytes(pkt.Proof.Bytes()), 32))
 		// buffer.Write([]byte("\x00\x00\x00\x00")) // unk1
 	}
 

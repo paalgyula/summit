@@ -4,8 +4,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/paalgyula/summit/pkg/blizzard/auth"
-	"github.com/paalgyula/summit/pkg/blizzard/world"
+	"github.com/paalgyula/summit/pkg/summit/auth"
+	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )

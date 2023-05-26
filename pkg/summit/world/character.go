@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/paalgyula/summit/pkg/blizzard/world/packets"
-	"github.com/paalgyula/summit/pkg/blizzard/world/player"
+	"github.com/paalgyula/summit/pkg/summit/world/packets"
+	"github.com/paalgyula/summit/pkg/summit/world/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -31,7 +31,7 @@ func (gc *GameClient) ListCharacters() {
 	pkt := wow.NewPacketWriter()
 
 	// Character list size, this should be replaced
-	pkt.WriteB(1)
+	pkt.Write(uint8(1))
 
 	for _, p := range players {
 		p.WriteToLogin(pkt)

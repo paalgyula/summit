@@ -11,10 +11,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/paalgyula/summit/pkg/blizzard/auth/packets"
-	"github.com/paalgyula/summit/pkg/blizzard/auth/srp"
 	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/summit/auth/packets"
 	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/paalgyula/summit/pkg/wow/crypt"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -49,7 +49,7 @@ type RealmClient struct {
 
 	account *db.Account
 
-	// Keys for authentication
+	srp              *crypt.SRP6
 	PrivateEphemeral *big.Int
 	PublicEphemeral  *big.Int
 }
@@ -60,9 +60,10 @@ func NewClient(c net.Conn) *RealmClient {
 		log:     log.With().Str("addr", c.RemoteAddr().String()).Logger(),
 		account: nil,
 
-		PrivateEphemeral: big.NewInt(0),
+		srp: crypt.NewSRP6(7, 3, nil),
+
 		PublicEphemeral:  big.NewInt(0),
-	}
+		PrivateEphemeral: big.NewInt(0)}
 
 	go rc.listen()
 
@@ -92,13 +93,14 @@ func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
 	}
 
 	if res.Status == packets.ChallengeStatusSuccess {
-		b, B := srp.GenerateEphemeralPair(rc.account.Verifier())
-		rc.PrivateEphemeral.Set(b)
-		rc.PublicEphemeral.Set(B)
+		B := rc.srp.GenerateServerPubKey(rc.account.Verifier())
 
 		res.B.Set(B)
 		res.Salt.Set(rc.account.Salt())
 		res.SaltCRC.SetInt64(0)
+
+		res.G = uint8(rc.srp.GValue())
+		res.N = *rc.srp.N()
 	}
 
 	// Send out the packet
@@ -108,10 +110,8 @@ func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
 func (rc *RealmClient) HandleProof(pkt *packets.ClientLoginProof) error {
 	response := packets.ServerLoginProof{}
 
-	K, M := srp.CalculateSessionKey(
+	K, M := rc.srp.CalculateServerSessionKey(
 		&pkt.A,
-		rc.PublicEphemeral,
-		rc.PrivateEphemeral,
 		rc.account.Verifier(),
 		rc.account.Salt(),
 		rc.account.Name)
@@ -124,7 +124,8 @@ func (rc *RealmClient) HandleProof(pkt *packets.ClientLoginProof) error {
 		return nil
 	} else {
 		response.StatusCode = 0
-		response.Proof.Set(srp.CalculateServerProof(&pkt.A, M, K))
+		response.Proof.Set(crypt.CalculateServerProof(&pkt.A, M, K))
+
 		rc.log = rc.log.With().
 			Str("account", rc.account.Name).
 			Logger()
@@ -166,9 +167,8 @@ func (rc *RealmClient) Send(opcode packets.AuthCmd, payload []byte) error {
 		Msg("sending packet to client")
 
 	w := wow.NewPacketWriter()
-	w.WriteByte(byte(opcode))
-	// w.WriteByte(byte(size))
-	w.Write(payload)
+	w.Write(uint8(opcode))
+	w.WriteBytes(payload)
 
 	return rc.Write(w.Bytes())
 }

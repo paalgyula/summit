@@ -1,10 +1,13 @@
 package packets_test
 
 import (
+	"fmt"
+	"math/big"
 	"testing"
 
-	"github.com/paalgyula/summit/pkg/blizzard/auth/packets"
+	"github.com/paalgyula/summit/pkg/summit/auth/packets"
 	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,4 +46,21 @@ func TestLoginChallenge(t *testing.T) {
 	})
 
 	// fmt.Printf("%s", hex.Dump(p.MarshalPacket()))
+}
+
+func TestLoginSession(t *testing.T) {
+	c := crypt.NewSRP6(7, 3, big.NewInt(0))
+	B := c.GenerateClientPubkey()
+	salt := c.RandomSalt()
+
+	lc := packets.ServerLoginChallenge{
+		Status:  packets.ChallengeStatusSuccess,
+		B:       *B,
+		Salt:    *salt,
+		SaltCRC: big.Int{},
+		G:       uint8(c.GValue()),
+		N:       *c.N(),
+	}
+
+	fmt.Printf("%+v Size: %d", lc, len(lc.B.Bytes()))
 }

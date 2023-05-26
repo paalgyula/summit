@@ -85,25 +85,25 @@ func (pkt *ServerRealmlist) UnmarshalPacket(data wow.PacketData) {
 func (pkt *ServerRealmlist) MarshalPacket() []byte {
 	w := wow.NewPacketWriter()
 
-	w.WriteL(uint8(0x10))
-	w.WriteL(uint16(0)) // unk
-	w.WriteL(uint32(0)) // unk
+	w.Write(uint8(0x10))
+	w.Write(uint16(0)) // unk
+	w.Write(uint32(0)) // unk
 
-	w.WriteL(uint16(len(pkt.Realms))) // Size placeholder
+	w.Write(uint16(len(pkt.Realms))) // Size placeholder
 
 	for _, realm := range pkt.Realms {
-		w.WriteL(realm.Icon)
-		w.WriteL(realm.Lock)
-		w.WriteL(realm.Flags)
+		w.Write(realm.Icon)
+		w.Write(realm.Lock)
+		w.Write(realm.Flags)
 		w.WriteString(realm.Name)
 		w.WriteString(realm.Address)
-		w.WriteL(realm.Population)
-		w.WriteL(realm.NumCharacters)
-		w.WriteL(realm.Timezone)
-		w.WriteL(uint8(0x2c)) // TODO: who and why need this?
+		w.Write(realm.Population)
+		w.Write(realm.NumCharacters)
+		w.Write(realm.Timezone)
+		w.Write(uint8(0x2c)) // TODO: who and why need this?
 	}
 
-	w.WriteL(uint16(0x0010)) // Terminator
+	w.Write(uint16(0x0010)) // Terminator
 
 	// Make the real buffer, which has the length at the start.
 	bb := w.Bytes()

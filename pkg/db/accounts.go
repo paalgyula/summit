@@ -75,7 +75,7 @@ type Account struct {
 	Name    string `yaml:"name"`
 	V       string `yaml:"verifier"`
 	S       string `yaml:"salt"`
-	Session string `yaml:"session"`
+	Session string `yaml:"-"`
 
 	verifier   *big.Int
 	salt       *big.Int

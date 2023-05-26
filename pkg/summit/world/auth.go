@@ -3,8 +3,8 @@ package world
 import (
 	"math/rand"
 
-	"github.com/paalgyula/summit/pkg/blizzard/world/packets"
 	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/paalgyula/summit/pkg/wow/wotlk"
@@ -15,7 +15,7 @@ func (gc *GameClient) sendAuthChallenge() {
 
 	// 0x1ec
 	w := wow.NewPacketWriter()
-	w.WriteL(uint32(0)) // This is a seed
+	w.Write(uint32(0)) // This is a seed
 
 	gc.SendPacket(packets.ServerAuthChallenge, w.Bytes())
 }
@@ -66,11 +66,11 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	gc.log.Debug().Str("key", acc.SessionKey().Text(16)).Send()
 
 	w := wow.NewPacketWriter()
-	w.WriteL(uint8(wotlk.AUTH_OK))
-	w.WriteL(uint32(0)) // BillingTimeRemaining
-	w.WriteL(uint8(0))  // BillingFlags
-	w.WriteL(uint32(0)) // BillingTimeRested
-	w.WriteL(uint8(2))  // Expansion
+	w.Write(uint8(wotlk.AUTH_OK))
+	w.Write(uint32(0)) // BillingTimeRemaining
+	w.Write(uint8(0))  // BillingFlags
+	w.Write(uint32(0)) // BillingTimeRested
+	w.Write(uint8(2))  // Expansion
 
 	gc.SendPacket(packets.ServerAuthResponse, w.Bytes())
 

@@ -3,11 +3,11 @@ package world
 import (
 	"fmt"
 
-	. "github.com/paalgyula/summit/pkg/blizzard/world/packets"
+	. "github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
-type handlePacket = func([]byte)
+type handlePacket = func(wow.PacketData)
 type handleCommand = func()
 
 // ExternalPacketFunc register packet for external processing.
@@ -23,6 +23,7 @@ func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
 	OpcodeTable.Handle(ClientAuthSession, gc.AuthSessionHandler)
 	OpcodeTable.Handle(ClientCharEnum, gc.ListCharacters)
 	OpcodeTable.Handle(ClientCharCreate, gc.CreateCharacter)
+	OpcodeTable.Handle(ClientRealmSplit, gc.HandleRealmSplit)
 
 	for _, oh := range handlers {
 		OpcodeTable.Handle(oh.Opcode, oh.Handler)
