@@ -11,26 +11,56 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type countingReadder struct {
+	reader    io.Reader
+	BytesRead int
+}
+
+func (cr *countingReadder) Read(b []byte) (int, error) {
+	readed, err := cr.reader.Read(b)
+	cr.BytesRead += readed
+
+	return readed, err
+}
+
 type Reader struct {
-	reader io.Reader
+	reader *countingReadder
 }
 
 func NewPacketReader(bb []byte) *Reader {
 	return &Reader{
-		reader: bytes.NewReader(bb),
+		reader: &countingReadder{
+			reader:    bytes.NewReader(bb),
+			BytesRead: 0,
+		},
 	}
 }
 
 func NewConnectionReader(r io.Reader) *Reader {
 	return &Reader{
-		reader: r,
+		reader: &countingReadder{
+			reader:    r,
+			BytesRead: 0,
+		},
 	}
+}
+
+// ReadedCount returns the number of bytes readed from this reader.
+func (r *Reader) ReadedCount() int {
+	return r.reader.BytesRead
+}
+
+// ResetCounter resets the readed bytes count.
+func (r *Reader) ResetCounter() {
+	r.reader.BytesRead = 0
 }
 
 func (r *Reader) ReadBytes(p []byte) (int, error) {
 	return r.reader.Read(p)
 }
 
+// Reads the object from the buffer. The byte order can be specified,
+// but the default is LittleEndian
 func (r *Reader) Read(p any, byteOrder ...binary.ByteOrder) error {
 	var bo binary.ByteOrder = binary.LittleEndian
 	if len(byteOrder) > 0 {
