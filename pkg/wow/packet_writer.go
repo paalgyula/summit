@@ -17,12 +17,12 @@ func NewPacketWriter() *PacketWriter {
 	}
 }
 
-func (w *PacketWriter) Write(p []byte) (int, error) {
+func (w *PacketWriter) WriteBytes(p []byte) (int, error) {
 	return w.buf.Write(p)
 }
 
-// WriteReverse takes as input a byte array and returns a reversed version of it.
-func (w *PacketWriter) WriteReverse(data []byte) (int, error) {
+// WriteReverseBytes takes as input a byte array and returns a reversed version of it.
+func (w *PacketWriter) WriteReverseBytes(data []byte) (int, error) {
 	for i, j := 0, len(data)-1; i < j; i, j = i+1, j-1 {
 		data[i], data[j] = data[j], data[i]
 	}
@@ -30,20 +30,39 @@ func (w *PacketWriter) WriteReverse(data []byte) (int, error) {
 	return w.buf.Write(data)
 }
 
-func (w *PacketWriter) WriteL(v any) error {
-	return binary.Write(w.buf, binary.LittleEndian, v)
+// Write writes data into the packet. You can specify the byte
+// order, but default its LittleEndian.
+func (w *PacketWriter) Write(v any, byteOrder ...binary.ByteOrder) error {
+	var bo binary.ByteOrder = binary.LittleEndian
+	if len(byteOrder) > 0 {
+		bo = byteOrder[0]
+	}
+
+	return binary.Write(w.buf, bo, v)
 }
 
 func (w *PacketWriter) WriteB(v any) error {
 	return binary.Write(w.buf, binary.BigEndian, v)
 }
 
+// Deprecated: use the simple Write method instead
 func (w *PacketWriter) WriteByte(b byte) error {
 	return w.buf.WriteByte(b)
 }
 
-func (w *PacketWriter) WriteString(v string) {
-	binary.Write(w.buf, binary.BigEndian, []byte(v))
+func (w *PacketWriter) WriteOne(b int) error {
+	return w.buf.WriteByte(uint8(b))
+}
+
+// Write writes the string into the packet terminated by a null character.
+// You can specify the byte order, but default its BigEndian.
+func (w *PacketWriter) WriteString(v string, byteOrder ...binary.ByteOrder) {
+	var bo binary.ByteOrder = binary.LittleEndian
+	if len(byteOrder) > 0 {
+		bo = byteOrder[0]
+	}
+
+	binary.Write(w.buf, bo, []byte(v))
 	w.buf.WriteRune(0x00)
 }
 
