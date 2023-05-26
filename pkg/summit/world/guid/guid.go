@@ -53,6 +53,10 @@ func (g *GUID) Counter() uint32 {
 	return uint32(g.rawValue)
 }
 
+func FromRaw(val uint64) *GUID {
+	return &GUID{rawValue: val}
+}
+
 func NewGUID(hg HighGuid, counter uint32) *GUID {
 	return &GUID{
 		// rawValue: uint64((uint64(hg) << 48) & uint64(counter)),

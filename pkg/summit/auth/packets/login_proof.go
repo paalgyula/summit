@@ -10,7 +10,7 @@ import (
 type ClientLoginProof struct {
 	A             big.Int
 	M             big.Int
-	CRCHash       big.Int
+	CRCHash       []byte // 20byte long
 	NumberOfKeys  uint8
 	SecurityFlags uint8
 }
@@ -23,6 +23,10 @@ func (pkt ClientLoginProof) MarshalPacket() []byte {
 	w := wow.NewPacketWriter(int(AuthLoginProof))
 
 	w.WriteZeroPadded(wow.ReverseBytes(pkt.A.Bytes()), 32)
+	w.WriteZeroPadded(wow.ReverseBytes(pkt.M.Bytes()), 20)
+	// crc := make([]byte, 20)
+	w.WriteZeroPadded(pkt.CRCHash, 20)
+	w.WriteOne(0x00)
 
 	return w.Bytes()
 }
@@ -34,7 +38,7 @@ func (pkt *ClientLoginProof) UnmarshalPacket(bb wow.PacketData) error {
 
 	pkt.A.SetBytes(r.ReadReverseBytes(32))
 	pkt.M.SetBytes(r.ReadReverseBytes(20))
-	pkt.CRCHash.SetBytes(r.ReadReverseBytes(20))
+	pkt.CRCHash, _ = r.ReadNBytes(20)
 
 	r.ReadL(&pkt.NumberOfKeys)
 	return r.ReadL(&pkt.SecurityFlags)

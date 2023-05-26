@@ -157,3 +157,7 @@ func ReverseBytes(data []byte) []byte {
 
 	return data
 }
+
+func (r *Reader) ReadAll() ([]byte, error) {
+	return io.ReadAll(r.reader)
+}

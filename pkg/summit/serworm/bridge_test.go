@@ -8,7 +8,7 @@ import (
 )
 
 func TestConnection(t *testing.T) {
-	br := serworm.NewBridge("logon.warmane.com:3724", "***REMOVED***", "0027462")
+	br := serworm.NewBridge("logon.warmane.com:3724", "***REMOVED***", "***REMOVED***")
 
 	assert.NotNil(t, br)
 }

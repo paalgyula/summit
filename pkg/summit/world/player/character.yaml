@@ -1,0 +1,101 @@
+id: 0
+name: Lectriggy
+race: 4
+class: 11
+gender: 0
+skin: 7
+face: 5
+hairstyle: 2
+haircolor: 5
+facialhair: 3
+outfitid: 0
+location:
+    x: 10311.3
+    "y": 832.463
+    z: 1326.41
+    map: 1
+    zone: 141
+bindlocation:
+    x: 0
+    "y": 0
+    z: 0
+    map: 0
+    zone: 0
+level: 1
+inventory:
+    inventoryslots:
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 139
+          enchantslot: 335544369
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 3
+          enchantslot: 117440551
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 98
+          enchantslot: 285212744
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 0
+          inventorytype: 0
+          enchantslot: 0
+guildid: 1610612736
+charflags: 33554432
+pet:
+    displayid: 16777216
+    petlevel: 0
+    petfamilly: 0

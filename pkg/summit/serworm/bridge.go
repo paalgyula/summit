@@ -3,7 +3,6 @@ package serworm
 import (
 	"encoding/hex"
 	"fmt"
-	"math/big"
 	"net"
 
 	"github.com/paalgyula/summit/pkg/summit/auth"
@@ -94,7 +93,7 @@ func (b *Bridge) setup() {
 
 	// Get srp stuff
 	sar := new(authPackets.ServerLoginChallenge)
-	fmt.Printf("ServerLoginChallenge - Size: %d", sar.ReadPacket(loginConn))
+	fmt.Printf("ServerLoginChallenge - Size: %d\n", sar.ReadPacket(loginConn))
 
 	// Initialize SRP6
 	b.srp = crypt.NewSRP6(int64(sar.G), 3, &sar.N)
@@ -103,17 +102,29 @@ func (b *Bridge) setup() {
 
 	K, M := b.srp.CalculateClientSessionKey(&sar.Salt, &sar.B, b.user, b.pass)
 
-	fmt.Printf("SessionKey: 0x%x", K.Text(16))
+	fmt.Printf("SessionKey: 0x%x\n", K.Text(16))
+	fmt.Printf("M1: 0x%x\n", M.Text(16))
 
 	proof := authPackets.ClientLoginProof{
 		A:             *A,
 		M:             *M,
-		CRCHash:       big.Int{},
+		CRCHash:       sar.SaltCRC,
 		NumberOfKeys:  0,
 		SecurityFlags: 0,
 	}
 
 	b.writer.Send(proof)
+
+	header = make([]byte, 2)
+	_, err = loginConn.Read(header)
+	if err != nil {
+		log.Fatal().Err(err).Msgf("Head: %s", hex.Dump(header))
+	}
+	fmt.Printf("<< %s", hex.Dump(header))
+
+	data := make([]byte, 2)
+	_, err = loginConn.Read(data)
+	fmt.Printf("%s", hex.Dump(data))
 }
 
 func NewBridge(logonServer, user, pass string) *Bridge {

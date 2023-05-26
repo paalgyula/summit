@@ -1,6 +1,8 @@
 package player
 
 import (
+	"encoding/base64"
+
 	"github.com/paalgyula/summit/pkg/summit/world/guid"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -11,20 +13,22 @@ type PlayerClass uint8
 const (
 	ClassWarior PlayerClass = 0x00
 	ClassTauren PlayerClass = 0x06
+	ClassDruid  PlayerClass = 0x0b
 )
 
 type PlayerRace uint8
 
 const (
-	RaceHuman   PlayerRace = 0x00
-	RaceWarlock PlayerRace = 0x11
+	RaceHuman    PlayerRace = 0x00
+	RaceNightElf PlayerRace = 0x04
+	RaceWarlock  PlayerRace = 0x11
 )
 
 type PlayerGender uint8
 
 const (
-	GenderMale   = 0x00
-	GenderFemale = 0x01
+	GenderMale   PlayerGender = 0x00
+	GenderFemale PlayerGender = 0x01
 )
 
 type WorldLocation struct {
@@ -52,9 +56,20 @@ type Player struct {
 
 	Level uint8
 
-	Inventory Inventory
+	Inventory *Inventory
+	GuildID   uint32
+	CharFlags uint32
+	Pet       Pet
+}
 
-	GuildID uint32
+func (p *Player) InitInventory() {
+	p.Inventory = &Inventory{
+		InventorySlots: []*InventoryItem{},
+	}
+
+	for i := 0; i < InventorySlotBagEnd; i++ {
+		p.Inventory.InventorySlots = append(p.Inventory.InventorySlots, &InventoryItem{})
+	}
 }
 
 func (p *Player) GUID() *guid.GUID {
@@ -62,8 +77,15 @@ func (p *Player) GUID() *guid.GUID {
 }
 
 func (p *Player) WriteToLogin(w *wow.PacketWriter) {
+
+	b := `vspnAAAAAAZMZWN0cmlnZ3kABAsABwUCBQMBjQAAAAEAAAAzHSFGoh1QRB/NpUQAAABgAAAAAgAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAizEAABQAAAAAAAAAAAAAAAAAAycAAAcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYkgAABEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`
+	bb, _ := base64.StdEncoding.DecodeString(b)
+
+	w.WriteBytes(bb)
+	return
+
 	// 	*data << guid;
-	w.Write(p.GUID().RawValue())
+	w.Write(uint64(0x60000000067cabe))
 	// *data << fields[1].Get<std::string>();                   // name
 	w.WriteString(p.Name)
 	// *data << uint8(plrRace);                                 // race
@@ -102,12 +124,9 @@ func (p *Player) WriteToLogin(w *wow.PacketWriter) {
 	// *data << uint32(fields[16].Get<uint32>());                 // guild id
 	w.Write(p.GuildID)
 
-	var charFlags uint32 = 0
-	charFlags |= 0x00002000
-
 	// Character flags
 	// *data << uint32(charFlags);                              // character flags
-	w.Write(charFlags)
+	w.Write(p.CharFlags)
 
 	// First login
 	// *data << uint8(atLoginFlags & AT_LOGIN_FIRST ? 1 : 0);
@@ -121,16 +140,20 @@ func (p *Player) WriteToLogin(w *wow.PacketWriter) {
 	// *data << uint32(petFamily);
 	w.Write(uint32(0))
 
-	for _, item := range p.Inventory.InventorySlots {
+	for i := 0; i <= InventorySlotBagEnd; i++ {
 		// *data << uint32(proto->DisplayInfoID);
-		w.Write(item.DisplayInfoID)
+		// w.Write(item.DisplayInfoID)
+		w.Write(uint32(0))
 		// *data << uint8(proto->InventoryType);
-		w.Write(item.InventoryType)
+		// w.Write(item.InventoryType)
+		w.Write(uint8(0))
 		// *data << uint32(enchant ? enchant->aura_id : 0);
 
 		// Find out how enchant slots works
 		w.Write(uint32(0))
 	}
+
+	w.Write(uint32(0x00))
 
 	// Yipeee
 }
