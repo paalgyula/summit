@@ -15,6 +15,18 @@ type ClientLoginProof struct {
 	SecurityFlags uint8
 }
 
+func (ClientLoginProof) OpCode() AuthCmd {
+	return AuthLoginProof
+}
+
+func (pkt ClientLoginProof) MarshalPacket() []byte {
+	w := wow.NewPacketWriter(int(AuthLoginProof))
+
+	w.WriteZeroPadded(wow.ReverseBytes(pkt.A.Bytes()), 32)
+
+	return w.Bytes()
+}
+
 // Read will load a ClientLoginProof packet from a buffer.
 // An error will be returned if at least one of the fields didn't load correctly.
 func (pkt *ClientLoginProof) UnmarshalPacket(bb wow.PacketData) error {
@@ -37,30 +49,14 @@ type ServerLoginProof struct {
 
 // Bytes writes out the packet to an array of bytes.
 func (pkt *ServerLoginProof) MarshalPacket() []byte {
-	w := wow.NewPacketWriter()
+	w := wow.NewPacketWriter(int(AuthLoginProof))
 
-	w.WriteByte(uint8(pkt.StatusCode))
+	w.Write(pkt.StatusCode)
 
 	if pkt.StatusCode == 0 {
-		w.WriteBytes(PadBigIntBytes(wow.ReverseBytes(pkt.Proof.Bytes()), 32))
+		w.WriteZeroPadded(wow.ReverseBytes(pkt.Proof.Bytes()), 32)
 		// buffer.Write([]byte("\x00\x00\x00\x00")) // unk1
 	}
 
 	return w.Bytes()
-}
-
-// PadBigIntBytes takes as input an array of bytes and a size and ensures that the
-// byte array is at least nBytes in length. \x00 bytes will be added to the end
-// until the desired length is reached.
-func PadBigIntBytes(data []byte, nBytes int) []byte {
-	if len(data) > nBytes {
-		return data[:nBytes]
-	}
-
-	currSize := len(data)
-	for i := 0; i < nBytes-currSize; i++ {
-		data = append(data, '\x00')
-	}
-
-	return data
 }

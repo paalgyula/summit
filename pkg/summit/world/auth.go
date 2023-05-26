@@ -14,8 +14,8 @@ func (gc *GameClient) sendAuthChallenge() {
 	gc.seed = uint32(rand.Int31())
 
 	// 0x1ec
-	w := wow.NewPacketWriter()
-	w.Write(uint32(0)) // This is a seed
+	w := wow.NewPacketWriter(packets.ServerAuthChallenge.Int())
+	w.Write(uint32(0x00)) // This is a seed
 
 	gc.SendPacket(packets.ServerAuthChallenge, w.Bytes())
 }
@@ -65,12 +65,13 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 
 	gc.log.Debug().Str("key", acc.SessionKey().Text(16)).Send()
 
-	w := wow.NewPacketWriter()
+	w := wow.NewPacketWriter(packets.ServerAuthResponse.Int())
 	w.Write(uint8(wotlk.AUTH_OK))
-	w.Write(uint32(0)) // BillingTimeRemaining
-	w.Write(uint8(0))  // BillingFlags
-	w.Write(uint32(0)) // BillingTimeRested
-	w.Write(uint8(2))  // Expansion
+	// w.Write(uint32(0)) // BillingTimeRemaining
+	// w.Write(uint8(0))  // BillingFlags
+	// w.Write(uint32(0)) // BillingTimeRested
+	w.Write(&BillingDetails{})
+	w.Write(uint8(2)) // Expansion
 
 	gc.SendPacket(packets.ServerAuthResponse, w.Bytes())
 

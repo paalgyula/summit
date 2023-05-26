@@ -100,7 +100,7 @@ func (gc *GameClient) SendPacket(opcode OpCode, payload []byte) {
 }
 
 func (gc *GameClient) makeHeader(packetLen int, opCode OpCode) ([]byte, error) {
-	w := wow.NewPacketWriter()
+	w := wow.NewPacketWriter(0)
 	w.WriteB(uint16(packetLen + 2))
 	w.Write(uint16(opCode))
 	header := w.Bytes()

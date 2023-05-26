@@ -57,7 +57,7 @@ func TestLoginSession(t *testing.T) {
 		Status:  packets.ChallengeStatusSuccess,
 		B:       *B,
 		Salt:    *salt,
-		SaltCRC: big.Int{},
+		SaltCRC: make([]byte, 16),
 		G:       uint8(c.GValue()),
 		N:       *c.N(),
 	}

@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/paalgyula/summit/pkg/summit/auth/packets"
 )
 
 type AuthPacket interface {
 	MarshalPacket() []byte
+	OpCode() packets.AuthCmd
 }
 
 type PacketWriter struct {
@@ -25,13 +28,13 @@ func NewPacketWriter(out io.Writer, version int) *PacketWriter {
 	}
 }
 
-func (pw *PacketWriter) Send(opcode int, pkt AuthPacket) {
+func (pw *PacketWriter) Send(pkt AuthPacket) {
 	pw.m.Lock()
 	defer pw.m.Unlock()
 
 	bb := pkt.MarshalPacket()
 
-	data := append([]byte{}, uint8(opcode), uint8(pw.version))
+	data := append([]byte{}, byte(pkt.OpCode()), uint8(pw.version))
 	data = binary.LittleEndian.AppendUint16(data, uint16(len(bb)))
 	data = append(data, bb...)
 

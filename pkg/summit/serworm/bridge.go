@@ -3,6 +3,7 @@ package serworm
 import (
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"net"
 
 	"github.com/paalgyula/summit/pkg/summit/auth"
@@ -42,7 +43,8 @@ func (b *Bridge) SetGameClient(gc *world.GameClient) {
 }
 
 func (b *Bridge) SendPacket(oc worldPackets.OpCode, data []byte) {
-	w := wow.NewPacketWriter()
+	w := wow.NewPacketWriter(oc.Int())
+
 	w.WriteB(uint16(len(data) + 2))
 	w.Write(uint16(oc.Int()))
 	header := w.Bytes()
@@ -76,7 +78,7 @@ func (b *Bridge) setup() {
 	clp := authPackets.NewClientLoginChallenge(b.user)
 
 	// Send auth challenge
-	b.writer.Send(int(authPackets.AuthLoginChallenge), clp)
+	b.writer.Send(clp)
 
 	header := make([]byte, 2)
 	_, err = loginConn.Read(header)
@@ -97,8 +99,21 @@ func (b *Bridge) setup() {
 	// Initialize SRP6
 	b.srp = crypt.NewSRP6(int64(sar.G), 3, &sar.N)
 	b.srp.B = &sar.B
+	A := b.srp.GenerateClientPubkey()
 
-	// authPackets.ClientLoginProof
+	K, M := b.srp.CalculateClientSessionKey(&sar.Salt, &sar.B, b.user, b.pass)
+
+	fmt.Printf("SessionKey: 0x%x", K.Text(16))
+
+	proof := authPackets.ClientLoginProof{
+		A:             *A,
+		M:             *M,
+		CRCHash:       big.Int{},
+		NumberOfKeys:  0,
+		SecurityFlags: 0,
+	}
+
+	b.writer.Send(proof)
 }
 
 func NewBridge(logonServer, user, pass string) *Bridge {

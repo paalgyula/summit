@@ -28,7 +28,7 @@ func (gc *GameClient) ListCharacters() {
 		Name: "Bela",
 	})
 
-	pkt := wow.NewPacketWriter()
+	pkt := wow.NewPacketWriter(packets.ServerCharEnum.Int())
 
 	// Character list size, this should be replaced
 	pkt.Write(uint8(1))

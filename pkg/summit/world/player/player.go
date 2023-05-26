@@ -102,9 +102,12 @@ func (p *Player) WriteToLogin(w *wow.PacketWriter) {
 	// *data << uint32(fields[16].Get<uint32>());                 // guild id
 	w.Write(p.GuildID)
 
+	var charFlags uint32 = 0
+	charFlags |= 0x00002000
+
 	// Character flags
 	// *data << uint32(charFlags);                              // character flags
-	w.Write(uint32(0))
+	w.Write(charFlags)
 
 	// First login
 	// *data << uint8(atLoginFlags & AT_LOGIN_FIRST ? 1 : 0);

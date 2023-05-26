@@ -35,6 +35,10 @@ func NewClientLoginChallenge(accName string) *ClientLoginChallenge {
 	}
 }
 
+func (p *ClientLoginChallenge) OpCode() AuthCmd {
+	return AuthLoginChallenge
+}
+
 func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 	r := bb.Reader()
 	r.ReadStringFixed(&p.GameName, 4)
@@ -55,7 +59,8 @@ func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 }
 
 func (p *ClientLoginChallenge) MarshalPacket() []byte {
-	w := wow.NewPacketWriter()
+	w := wow.NewPacketWriter(int(AuthLoginChallenge))
+
 	w.WriteStringFixed(p.GameName, 4)
 	w.WriteBytes(p.Version[:])
 	w.Write(p.Build)
@@ -121,10 +126,11 @@ const (
 // ServerLoginChallenge is the server's response to a client's challenge. It contains
 // some SRP information used for handshaking.
 type ServerLoginChallenge struct {
-	Status  ChallengeStatus
-	B       big.Int
-	Salt    big.Int
-	SaltCRC big.Int
+	Status ChallengeStatus
+	B      big.Int
+	Salt   big.Int
+	// 16 bytes long
+	SaltCRC []byte
 
 	G uint8
 	N big.Int
@@ -148,7 +154,7 @@ func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 		pkt.N.SetBytes(r.ReadReverseBytes(int(tmp)))
 
 		pkt.Salt.SetBytes(r.ReadReverseBytes(32))
-		pkt.SaltCRC.SetBytes(r.ReadReverseBytes(16))
+		pkt.SaltCRC, _ = r.ReadNBytes(16)
 
 		r.Read(&tmp)
 	}
@@ -158,17 +164,14 @@ func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 
 // Bytes writes out the packet to an array of bytes.
 func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
-	w := wow.NewPacketWriter()
+	w := wow.NewPacketWriter(int(AuthLoginChallenge))
 
 	w.WriteOne(0) // unk1
 	w.WriteOne(int(pkt.Status))
 
 	if pkt.Status == ChallengeStatusSuccess {
 		// Public key of SRP6
-		w.WriteBytes(PadBigIntBytes(
-			wow.ReverseBytes(pkt.B.Bytes()),
-			32),
-		)
+		w.WriteZeroPadded(wow.ReverseBytes(pkt.B.Bytes()), 32)
 
 		// G is the generator of SRP6
 		w.WriteOne(0x01)
@@ -180,8 +183,8 @@ func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
 		w.WriteReverseBytes(nb)
 
 		// Salt of the password generator
-		w.WriteBytes(PadBigIntBytes(wow.ReverseBytes(pkt.Salt.Bytes()), 32))
-		w.WriteBytes(PadBigIntBytes(wow.ReverseBytes(pkt.SaltCRC.Bytes()), 16))
+		w.WriteZeroPadded(wow.ReverseBytes(pkt.Salt.Bytes()), 32)
+		w.WriteBytes(pkt.SaltCRC)
 
 		w.WriteOne(0) // unk2
 	}

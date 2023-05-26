@@ -6,19 +6,31 @@ import (
 )
 
 type PacketWriter struct {
-	buf *bytes.Buffer
+	buf    *bytes.Buffer
+	opcode int
 }
 
-func NewPacketWriter() *PacketWriter {
+func NewPacketWriter(opCode int) *PacketWriter {
 	var buf bytes.Buffer
 
 	return &PacketWriter{
-		buf: &buf,
+		opcode: opCode,
+		buf:    &buf,
 	}
+}
+
+func (w *PacketWriter) OpCode() int {
+	return w.opcode
 }
 
 func (w *PacketWriter) WriteBytes(p []byte) (int, error) {
 	return w.buf.Write(p)
+}
+
+func (w *PacketWriter) WriteZeroPadded(p []byte, size int) (int, error) {
+	p = PadBigIntBytes(p, size)
+
+	return w.WriteBytes(p)
 }
 
 // WriteReverseBytes takes as input a byte array and returns a reversed version of it.
@@ -80,4 +92,20 @@ func (w *PacketWriter) Bytes() []byte {
 
 func (w *PacketWriter) Len() int {
 	return w.buf.Len()
+}
+
+// PadBigIntBytes takes as input an array of bytes and a size and ensures that the
+// byte array is at least nBytes in length. \x00 bytes will be added to the end
+// until the desired length is reached.
+func PadBigIntBytes(data []byte, nBytes int) []byte {
+	if len(data) > nBytes {
+		return data[:nBytes]
+	}
+
+	currSize := len(data)
+	for i := 0; i < nBytes-currSize; i++ {
+		data = append(data, '\x00')
+	}
+
+	return data
 }

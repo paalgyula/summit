@@ -60,7 +60,7 @@ func NewClient(c net.Conn) *RealmClient {
 		log:     log.With().Str("addr", c.RemoteAddr().String()).Logger(),
 		account: nil,
 
-		srp: crypt.NewSRP6(7, 3, nil),
+		srp: crypt.NewSRP6(7, 3, big.NewInt(0)),
 
 		PublicEphemeral:  big.NewInt(0),
 		PrivateEphemeral: big.NewInt(0)}
@@ -97,7 +97,7 @@ func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
 
 		res.B.Set(B)
 		res.Salt.Set(rc.account.Salt())
-		res.SaltCRC.SetInt64(0)
+		res.SaltCRC = make([]byte, 16)
 
 		res.G = uint8(rc.srp.GValue())
 		res.N = *rc.srp.N()
@@ -166,7 +166,7 @@ func (rc *RealmClient) Send(opcode packets.AuthCmd, payload []byte) error {
 		Hex("data", payload).
 		Msg("sending packet to client")
 
-	w := wow.NewPacketWriter()
+	w := wow.NewPacketWriter(0)
 	w.Write(uint8(opcode))
 	w.WriteBytes(payload)
 
