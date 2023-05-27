@@ -33,7 +33,7 @@ func NewClient(addr ...string) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) readData() {
+func (c *Client) readData() error {
 	var dp DataPacket
 	err := gob.NewDecoder(c.client).Decode(&dp)
 	if err != nil {
@@ -46,8 +46,11 @@ func (c *Client) readData() {
 			c.packetHandler(dp.Source, dp.Opcode, dp.Data)
 		}
 	default:
-		fmt.Printf("data received: %+v\n", dp)
+		fmt.Printf("data command not handled: %+v\n", dp)
 	}
+
+	fmt.Printf("data: %+v\n", dp)
+	return nil
 }
 
 func (c *Client) SendToAll(opcode int, data []byte) {

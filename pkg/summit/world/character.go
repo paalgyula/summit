@@ -3,8 +3,8 @@ package world
 import (
 	"encoding/binary"
 
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/summit/world/packets"
-	"github.com/paalgyula/summit/pkg/summit/world/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 

@@ -36,17 +36,14 @@ inventory:
         - displayinfoid: 0
           inventorytype: 0
           enchantslot: 0
-        - displayinfoid: 0
-          inventorytype: 139
-          enchantslot: 335544369
+        - displayinfoid: 12683
+          inventorytype: 20
+          enchantslot: 0
         - displayinfoid: 0
           inventorytype: 0
           enchantslot: 0
-        - displayinfoid: 0
-          inventorytype: 3
-          enchantslot: 117440551
-        - displayinfoid: 0
-          inventorytype: 0
+        - displayinfoid: 9987
+          inventorytype: 7
           enchantslot: 0
         - displayinfoid: 0
           inventorytype: 0
@@ -70,8 +67,11 @@ inventory:
           inventorytype: 0
           enchantslot: 0
         - displayinfoid: 0
-          inventorytype: 98
-          enchantslot: 285212744
+          inventorytype: 0
+          enchantslot: 0
+        - displayinfoid: 18530
+          inventorytype: 17
+          enchantslot: 0
         - displayinfoid: 0
           inventorytype: 0
           enchantslot: 0
@@ -95,7 +95,9 @@ inventory:
           enchantslot: 0
 guildid: 1610612736
 charflags: 33554432
+recustomization: 0
+firstlogin: 1
 pet:
-    displayid: 16777216
+    displayid: 0
     petlevel: 0
     petfamilly: 0

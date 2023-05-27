@@ -1,4 +1,4 @@
-package guid
+package object
 
 import (
 	"testing"

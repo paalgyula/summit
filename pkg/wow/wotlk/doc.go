@@ -1,2 +1,2 @@
-//go:generate handlergen -v=wotlk
+// /go:generate handlergen -v=wotlk
 package wotlk

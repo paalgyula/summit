@@ -169,7 +169,7 @@ func (gc *GameClient) handlePacket() error {
 	gc.log.Trace().Msgf("packet received 0x%04x (%s) size: %d", opCode.Int(), opCode.String(), len(data))
 
 	if gc.bs != nil {
-		gc.bs.SendPacket(gc.ID, opCode.Int(), data)
+		gc.bs.SendPacketToBabies(gc.ID, opCode.Int(), data)
 	}
 
 	return gc.Handle(opCode, data)

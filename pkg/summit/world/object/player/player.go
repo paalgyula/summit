@@ -1,7 +1,7 @@
 package player
 
 import (
-	"github.com/paalgyula/summit/pkg/summit/world/guid"
+	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -93,8 +93,8 @@ func (p *Player) InitInventory() {
 	}
 }
 
-func (p *Player) GUID() *guid.GUID {
-	return guid.NewPlayerGUID(p.ID)
+func (p *Player) GUID() object.GUID {
+	return object.NewPlayerGUID(p.ID)
 }
 
 func (p *Player) Init() {
@@ -102,7 +102,7 @@ func (p *Player) Init() {
 }
 
 func (p *Player) WriteToLogin(w *wow.Packet) {
-	w.Write(p.GUID().RawValue())
+	w.Write(p.GUID())
 	w.WriteString(p.Name)
 	w.Write(p.Race)
 	w.Write(p.Class)

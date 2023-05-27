@@ -14,25 +14,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type socketClient struct {
-	conn net.Conn
-	s    *Server
-	id   string
-}
-
-func (sc *socketClient) Listen() {
-	var data DataPacket
-	dec := gob.NewDecoder(sc.conn)
-	for {
-		err := dec.Decode(&data)
-		if err != nil {
-			log.Err(err).Msg("babysocket listener error")
-		}
-
-		fmt.Printf("data from baby client: %+v", data)
-	}
-}
-
 type Server struct {
 	m sync.Mutex
 
@@ -66,23 +47,31 @@ func NewServer(ctx context.Context, socketPath string, cp ClientProvider) (*Serv
 	return &s, nil
 }
 
+func (s *Server) removeClient(id string) {
+	s.m.Lock()
+	defer s.m.Unlock()
+
+	delete(s.clients, id)
+	s.log.Trace().Msgf("client disconnected: %s")
+}
+
 func (s *Server) addClient(sc *socketClient) {
 	s.m.Lock()
 	defer s.m.Unlock()
 
 	s.clients[sc.id] = sc
 	s.log.Trace().Msgf("client added: %s", sc.id)
+
+	go sc.Listen()
 }
 
 func (s *Server) SendToAll(opcode int, data []byte) {
-	// for _, c := range s.cp.Clients() {
-	// 	w := wow.NewPacketWriter(opcode)
-	// 	w.WriteOne(opcode)
-	// 	w.Write
-	// }
+	for _, c := range s.cp.Clients() {
+		c.SendPayload(opcode, data)
+	}
 }
 
-func (s *Server) SendPacket(source string, opcode int, data []byte) {
+func (s *Server) SendPacketToBabies(source string, opcode int, data []byte) {
 	dp := &DataPacket{
 		Command: CommandPacket,
 		Source:  source,
@@ -110,12 +99,8 @@ func (s *Server) Listen() {
 				conn: c,
 				s:    s,
 			}
-			s.addClient(&sc)
-			go sc.Listen()
 
-			// for i, sc2 := range s.clients {
-			// 	sc2.remove
-			// }
+			s.addClient(&sc)
 		}
 	}()
 }

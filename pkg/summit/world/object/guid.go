@@ -1,6 +1,9 @@
-package guid
+package object
 
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 type HighGuid uint32
 
@@ -20,9 +23,7 @@ const (
 	Group         HighGuid = 0x1F50
 )
 
-type GUID struct {
-	rawValue uint64
-}
+type GUID uint64
 
 func (g *GUID) HasEntry() bool {
 	switch g.High() {
@@ -35,41 +36,54 @@ func (g *GUID) HasEntry() bool {
 	return false
 }
 
-func (g *GUID) RawValue() uint64 {
-	return g.rawValue
+func (g GUID) High() HighGuid {
+	return HighGuid((g >> 48) & 0x0000FFFF)
 }
 
-func (g *GUID) High() HighGuid {
-	return HighGuid((g.rawValue >> 48) & 0x0000FFFF)
-}
-
-func (g *GUID) Entry() uint32 {
+func (g GUID) Entry() uint32 {
 	if g.HasEntry() {
-		return uint32((g.rawValue >> 24) & uint64(0x0000000000FFFFFF))
+		return uint32(uint64(g) >> 24 & uint64(0x0000000000FFFFFF))
 	}
 
 	return 0
 }
 
-func (g *GUID) Counter() uint32 {
-	return uint32(g.rawValue)
+func (g GUID) Counter() uint32 {
+	return uint32(g)
 }
 
 func (g GUID) PrintRAW() {
-	fmt.Printf("%64b\nValue: %32d Hex: 0x%x\n", g.RawValue(), g.RawValue(), g.RawValue())
+	fmt.Printf("%64b\nValue: %32d Hex: 0x%x\n", g, g, g)
 }
 
-func FromRaw(val uint64) *GUID {
-	return &GUID{rawValue: val}
+func FromRaw(val uint64) GUID {
+	return GUID(val)
 }
 
-func NewGUID(hg HighGuid, counter uint32) *GUID {
-	return &GUID{
+func NewGUID(hg HighGuid, counter uint32) GUID {
+	return GUID(
 		// rawValue: uint64((uint64(hg) << 48) & uint64(counter)),
-		rawValue: uint64(counter) | (uint64(hg) << 48),
-	}
+		uint64(counter) | (uint64(hg) << 48),
+	)
 }
 
-func NewPlayerGUID(counter uint32) *GUID {
+// Pack returns a minimal version of the GUID as an array of bytes.
+func (g GUID) Pack() []byte {
+	guidBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(guidBytes, uint64(g))
+
+	mask := uint8(0)
+	packedGUID := make([]byte, 0)
+	for i, b := range guidBytes {
+		if b != 0 {
+			mask |= (1 << uint(i))
+			packedGUID = append(packedGUID, b)
+		}
+	}
+
+	return append([]byte{mask}, packedGUID...)
+}
+
+func NewPlayerGUID(counter uint32) GUID {
 	return NewGUID(Player, counter)
 }

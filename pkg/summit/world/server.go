@@ -34,7 +34,7 @@ type WorldServer struct {
 func StartServer(ctx context.Context, listenAddress string) (err error) {
 	db := db.GetInstance()
 
-	ws := WorldServer{
+	ws := &WorldServer{
 		db:  db,
 		log: log.With().Str("server", "world").Caller().Logger(),
 		ctx: ctx,
@@ -62,7 +62,7 @@ func StartServer(ctx context.Context, listenAddress string) (err error) {
 	return nil
 }
 
-func (ws WorldServer) Clients() map[string]wow.PayloadSender {
+func (ws *WorldServer) Clients() map[string]wow.PayloadSender {
 	ret := map[string]wow.PayloadSender{}
 
 	ws.clients.Range(func(key, value any) bool {
@@ -97,7 +97,8 @@ func (ws *WorldServer) AddClient(gc *GameClient) {
 		return true
 	})
 
-	ws.log.Debug().Msgf("client added to set with id: %s", gc.ID)
+	ws.log.Debug().Int("clients", count).
+		Msgf("client added to set with id: %s", gc.ID)
 }
 
 func (ws *WorldServer) Disconnected(id string) {
