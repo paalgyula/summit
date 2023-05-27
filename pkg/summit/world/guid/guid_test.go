@@ -1,18 +1,21 @@
-package guid_test
+package guid
 
 import (
-	"fmt"
 	"testing"
 
-	"github.com/paalgyula/summit/pkg/summit/world/guid"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestGuid(t *testing.T) {
-	g := guid.NewGUID(guid.Corpse, 15)
+	g := NewGUID(Corpse, 0x9739)
+	g.PrintRAW()
 
-	assert.Equal(t, guid.Corpse, g.High())
-	fmt.Printf("%64b\nValue: %d Hex: 0x%x\n", g.RawValue(), g.RawValue(), g.RawValue())
+	assert.Equal(t, Corpse, g.High())
 
-	assert.Equal(t, uint32(15), g.Counter())
+	assert.Equal(t, uint32(0x9739), g.Counter())
+
+	// 0x60000000067cabec
+	g = NewPlayerGUID(0x67cabec)
+	// g.rawValue = 0x60000000067cabec
+	g.PrintRAW()
 }

@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"name": "Summit Emulator",
+			"path": "."
+		},
+		// {
+		// 	"name": "Summit Baby",
+		// 	"path": "../summit-baby"
+		// }
+	],
+	"extensions": {},
+	"settings": {
+		"workbench.colorCustomizations": {
+			"statusBar.background" : "#1A1A1A",
+			"statusBar.noFolderBackground" : "#212121",
+			"statusBar.debuggingBackground": "#103600"
+		}
+	}
+}

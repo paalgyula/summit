@@ -161,3 +161,13 @@ func ReverseBytes(data []byte) []byte {
 func (r *Reader) ReadAll() ([]byte, error) {
 	return io.ReadAll(r.reader)
 }
+
+func (r *Reader) DumpRemaining() ([]byte, error) {
+	r.ResetCounter()
+	bb, err := r.ReadAll()
+	fmt.Println(r.ReadedCount())
+
+	fmt.Printf("%s", hex.Dump(bb))
+
+	return bb, err
+}

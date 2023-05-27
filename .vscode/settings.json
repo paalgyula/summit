@@ -8,5 +8,4 @@
         },
         "editor.suggest.snippetsPreventQuickSuggestions": false
     },
-    "cmake.configureOnOpen": false
 }

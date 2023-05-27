@@ -1,5 +1,7 @@
 package guid
 
+import "fmt"
+
 type HighGuid uint32
 
 const (
@@ -51,6 +53,10 @@ func (g *GUID) Entry() uint32 {
 
 func (g *GUID) Counter() uint32 {
 	return uint32(g.rawValue)
+}
+
+func (g GUID) PrintRAW() {
+	fmt.Printf("%64b\nValue: %32d Hex: 0x%x\n", g.RawValue(), g.RawValue(), g.RawValue())
 }
 
 func FromRaw(val uint64) *GUID {

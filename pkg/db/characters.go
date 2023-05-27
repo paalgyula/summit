@@ -1,4 +1,4 @@
 package db
 
-type Character struct {
+type Characters struct {
 }

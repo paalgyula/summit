@@ -995,7 +995,7 @@ const (
 	ServerWho                             OpCode = 0x0063
 	ServerZoneMap                         OpCode = 0x000B
 	ServerZoneUnderAttack                 OpCode = 0x0254
-	ServerRealmSplit                      OpCode = 0x038d
+	ServerRealmSplit                      OpCode = 0x038B
 )
 
 // Int returns an int reprentation of the .

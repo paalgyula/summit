@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	. "github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
@@ -37,9 +39,12 @@ type GameClient struct {
 	acc   *db.Account
 
 	ws SessionManager
+
+	// External packet handler connection
+	bs *babysocket.Server
 }
 
-func NewGameClient(n net.Conn, ws SessionManager, handlers ...PacketHandler) *GameClient {
+func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, handlers ...PacketHandler) *GameClient {
 	gc := &GameClient{
 		ID: xid.New().String(),
 		n:  n,
@@ -54,6 +59,7 @@ func NewGameClient(n net.Conn, ws SessionManager, handlers ...PacketHandler) *Ga
 
 		writeLock: sync.Mutex{},
 		ws:        ws,
+		bs:        bs,
 	}
 
 	// Register opcode handlers from handlers.go
@@ -65,7 +71,21 @@ func NewGameClient(n net.Conn, ws SessionManager, handlers ...PacketHandler) *Ga
 	return gc
 }
 
+func (gc *GameClient) recover() {
+	a := recover()
+
+	gc.log.Error().Msgf("panic occured, dropping client")
+	fmt.Printf("Unhandled Error: %s\n%s",
+		a,
+		string(debug.Stack()),
+	)
+
+	// Close connection
+	gc.n.Close()
+}
+
 func (gc *GameClient) handleConnection() {
+	defer gc.recover() // Panic handler
 	defer gc.ws.Disconnected(gc.ID)
 
 	time.Sleep(time.Millisecond * 500)
@@ -127,6 +147,10 @@ func (gc *GameClient) handlePacket() error {
 	}
 
 	gc.log.Trace().Msgf("packet received 0x%04x (%s) size: %d", opCode.Int(), opCode.String(), len(data))
+
+	if gc.bs != nil {
+		gc.bs.SendPacket(gc.ID, opCode.Int(), data)
+	}
 
 	return gc.Handle(opCode, data)
 }

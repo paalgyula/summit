@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -25,10 +26,17 @@ type WorldServer struct {
 	db  *db.Database
 	l   net.Listener
 	log zerolog.Logger
+
+	bs *babysocket.Server
 }
 
 func StartServer(ctx context.Context, listenAddress string) (err error) {
 	db := db.GetInstance()
+
+	bs, err := babysocket.NewServer(ctx, "babysocket")
+	if err != nil {
+		return err
+	}
 
 	ws := WorldServer{
 		db:  db,
@@ -36,6 +44,7 @@ func StartServer(ctx context.Context, listenAddress string) (err error) {
 		ctx: ctx,
 
 		clients: sync.Map{},
+		bs:      bs,
 	}
 
 	ws.l, err = net.Listen("tcp4", listenAddress)
@@ -60,7 +69,7 @@ func (ws *WorldServer) listenConnections() {
 			continue
 		}
 
-		NewGameClient(conn, ws)
+		NewGameClient(conn, ws, ws.bs)
 	}
 }
 
@@ -97,6 +106,7 @@ func (ws *WorldServer) Run() {
 		case <-ticker.C:
 			// log.Info().Msg("Garbage collector timer: unimplemented")
 			// ws.Stats()
+			ws.db.SaveAll()
 		case <-ws.ctx.Done():
 			return
 		}

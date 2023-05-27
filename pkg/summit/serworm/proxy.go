@@ -60,7 +60,7 @@ func (ws *ProxyServer) listen() {
 		}
 	}
 
-	gc := world.NewGameClient(conn, ws, handlers...)
+	gc := world.NewGameClient(conn, ws, nil, handlers...)
 	bridge.SetGameClient(gc)
 
 }

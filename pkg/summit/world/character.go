@@ -2,7 +2,6 @@ package world
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/summit/world/player"
@@ -10,28 +9,17 @@ import (
 )
 
 func (gc *GameClient) ListCharacters() {
-
 	var players []*player.Player
+	gc.acc.Characters(&players)
 
-	players = append(players, &player.Player{
-		ID:     151,
-		Class:  11,
-		Race:   6,
-		Gender: 0,
-
-		Face:       4,
-		HairStyle:  2,
-		HairColor:  0,
-		FacialHair: 3,
-		OutfitID:   0,
-
-		Name: "Bela",
-	})
+	for _, p := range players {
+		p.Init()
+	}
 
 	pkt := wow.NewPacketWriter(packets.ServerCharEnum.Int())
 
 	// Character list size, this should be replaced
-	pkt.Write(uint8(1))
+	pkt.WriteOne(len(players))
 
 	for _, p := range players {
 		p.WriteToLogin(pkt)
@@ -54,15 +42,52 @@ type CharacterCreateRequest struct {
 
 type CharacterCreateResult uint8
 
-func (gc *GameClient) CreateCharacter(data []byte) {
+func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 	r := wow.NewPacketReader(data)
-	var accName string
-	r.ReadString(&accName)
+	var characerName string
+	r.ReadString(&characerName)
 
-	var request CharacterCreateRequest
-	r.Read(&request, binary.BigEndian)
+	var req CharacterCreateRequest
+	r.Read(&req, binary.BigEndian)
 
-	fmt.Printf("%s %+v\n", accName, request)
+	// fmt.Printf("%s %+v\n", characerName, req)
+
+	loc := player.WorldLocation{
+		X:    10311.3,
+		Y:    832.463,
+		Z:    1326.41,
+		Map:  1,
+		Zone: 141,
+	}
+
+	p := player.Player{
+		Name:            characerName,
+		Race:            player.PlayerRace(req.Race),
+		Class:           player.PlayerClass(req.Class),
+		Gender:          player.PlayerGender(req.Gender),
+		Skin:            req.Skin,
+		Face:            req.Face,
+		HairStyle:       req.HairStyle,
+		HairColor:       req.HairColor,
+		FacialHair:      req.FacialHair,
+		OutfitID:        req.OutfitId,
+		Location:        loc,
+		BindLocation:    loc,
+		Level:           1,
+		GuildID:         0x200000,
+		CharFlags:       0x00,
+		Recustomization: 0,
+		FirstLogin:      1,
+		Pet:             player.Pet{},
+	}
+
+	p.InitInventory()
+
+	var players player.Players
+	gc.acc.Characters(&players)
+	players.Add(&p)
+
+	gc.acc.UpdateCharacters(players)
 
 	res := []byte{0x00} // OK :)
 

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
@@ -80,6 +81,21 @@ type Account struct {
 	verifier   *big.Int
 	salt       *big.Int
 	sessionKey *big.Int
+
+	Data map[string]any `yaml:"data"`
+}
+
+func (a *Account) Characters(destination any) error {
+	if s, ok := a.Data["characters"].(string); ok {
+		return json.Unmarshal([]byte(s), destination)
+	}
+
+	return json.Unmarshal([]byte{}, destination)
+}
+
+func (a *Account) UpdateCharacters(data any) {
+	bb, _ := json.Marshal(data)
+	a.Data["characters"] = string(bb)
 }
 
 func (a *Account) SetKey(k *big.Int) {
