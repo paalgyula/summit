@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -22,5 +21,5 @@ func TestHeaderReading(t *testing.T) {
 	p.ReadB(&len)
 	p.ReadL(&opcode)
 
-	fmt.Printf("%d, %04x %s", len, opcode, packets.OpCode(opcode))
+	fmt.Printf("%d, %04x %s", len, opcode, wow.OpCode(opcode))
 }

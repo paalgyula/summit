@@ -11,32 +11,32 @@ type handlePacket = func(wow.PacketData)
 type handleCommand = func()
 
 // ExternalPacketFunc register packet for external processing.
-type ExternalPacketFunc = func(*GameClient, OpCode, []byte)
+type ExternalPacketFunc = func(*GameClient, wow.OpCode, []byte)
 
 type PacketHandler struct {
-	Opcode  OpCode
+	Opcode  wow.OpCode
 	Handler any
 }
 
 func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
-	OpcodeTable.Handle(ClientPing, gc.PingHandler)
-	OpcodeTable.Handle(ClientAuthSession, gc.AuthSessionHandler)
-	OpcodeTable.Handle(ClientCharEnum, gc.ListCharacters)
-	OpcodeTable.Handle(ClientCharCreate, gc.CreateCharacter)
-	OpcodeTable.Handle(ClientRealmSplit, gc.HandleRealmSplit)
+	OpcodeTable.Handle(wow.ClientPing, gc.PingHandler)
+	OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
+	OpcodeTable.Handle(wow.ClientCharEnum, gc.ListCharacters)
+	OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
+	OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
 
 	for _, oh := range handlers {
 		OpcodeTable.Handle(oh.Opcode, oh.Handler)
 	}
 }
 
-func (gc *GameClient) Handle(oc OpCode, data []byte) error {
-	wow.GetPacketDumper().Write(oc.Int(), data)
+func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
+	wow.GetPacketDumper().Write(oc, data)
 
-	handle := OpcodeTable.Get(oc.Int())
+	handle := OpcodeTable.Get(oc)
 	if handle == nil {
 		// return errors.New("no handler record found")
-		gc.log.Warn().Msgf("no handler record found: 0x%04x", oc.Int())
+		gc.log.Warn().Msgf("no handler record found: 0x%04x", int(oc))
 		return nil
 	}
 
@@ -52,8 +52,8 @@ func (gc *GameClient) Handle(oc OpCode, data []byte) error {
 	default:
 		gc.log.Error().Msgf("handler function is not defined: %s", t)
 		gc.log.Error().
-			Str("pkt", oc.String()).
-			Str("id", fmt.Sprintf("0x%04x", oc.Int())).
+			Type("pkt", oc).
+			Str("id", fmt.Sprintf("0x%04x", oc)).
 			Str("name", fmt.Sprintf("%+v", handle)).
 			Msgf("no handler for the packet")
 	}

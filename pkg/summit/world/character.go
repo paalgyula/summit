@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -16,7 +15,7 @@ func (gc *GameClient) ListCharacters() {
 		p.Init()
 	}
 
-	pkt := wow.NewPacket(packets.ServerCharEnum.Int())
+	pkt := wow.NewPacket(wow.ServerCharEnum)
 
 	// Character list size, this should be replaced
 	pkt.WriteOne(len(players))
@@ -25,7 +24,7 @@ func (gc *GameClient) ListCharacters() {
 		p.WriteToLogin(pkt)
 	}
 
-	gc.SendPayload(packets.ServerCharEnum.Int(), pkt.Bytes())
+	gc.Send(pkt)
 }
 
 type CharacterCreateRequest struct {
@@ -91,5 +90,5 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	res := []byte{0x00} // OK :)
 
-	gc.SendPayload(packets.ServerCharCreate.Int(), res)
+	gc.SendPayload(int(wow.ServerCharCreate), res)
 }

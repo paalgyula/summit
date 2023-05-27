@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
 )
 
@@ -33,7 +33,7 @@ func (sc *socketClient) Listen() {
 		switch data.Command {
 		case CommandPacket:
 			if data.Target == "*" {
-				fmt.Printf("broadcasting opcode packet: %s\n", packets.OpCode(data.Opcode).String())
+				fmt.Printf("broadcasting opcode packet: %T\n", wow.OpCode(data.Opcode))
 				sc.s.SendToAll(data.Opcode, data.Data)
 			}
 		}

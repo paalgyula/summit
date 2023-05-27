@@ -10,7 +10,7 @@ import (
 
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
-	. "github.com/paalgyula/summit/pkg/summit/world/packets"
+
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/xid"
@@ -115,12 +115,12 @@ func (gc *GameClient) SendPayload(opcode int, payload []byte) {
 	packet := append(header, payload...)
 	_, err = gc.n.Write(packet)
 
-	oc := OpCode(opcode)
+	oc := opcode
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%s), payload size: %d packet size: %d", oc.Int(), oc.String(), size, len(packet))
+		Msgf(">> sending packet 0x%04x (%T), payload size: %d packet size: %d", oc, oc, size, len(packet))
 }
 
-func (gc *GameClient) Send(packet wow.Packet) {
+func (gc *GameClient) Send(packet *wow.Packet) {
 	size := packet.Len()
 	header, err := gc.makeHeader(size, packet.OpCode())
 	if err != nil {
@@ -134,9 +134,9 @@ func (gc *GameClient) Send(packet wow.Packet) {
 	payload := append(header, packet.Bytes()...)
 	_, err = gc.n.Write(payload)
 
-	oc := OpCode(packet.OpCode())
+	oc := packet.OpCode()
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%s), payload size: %d packet size: %d", oc.Int(), oc.String(), size, packet.Len())
+		Msgf(">> sending packet 0x%04x (%T), payload size: %d packet size: %d", int(oc), oc, size, packet.Len())
 }
 
 func (gc *GameClient) makeHeader(packetLen int, opCode int) ([]byte, error) {
@@ -166,16 +166,16 @@ func (gc *GameClient) handlePacket() error {
 		return fmt.Errorf("with opcode: %0X, %w", opCode, err)
 	}
 
-	gc.log.Trace().Msgf("packet received 0x%04x (%s) size: %d", opCode.Int(), opCode.String(), len(data))
+	gc.log.Trace().Msgf("packet received 0x%04x (%T) size: %d", opCode, opCode, len(data))
 
 	if gc.bs != nil {
-		gc.bs.SendPacketToBabies(gc.ID, opCode.Int(), data)
+		gc.bs.SendPacketToBabies(gc.ID, int(opCode), data)
 	}
 
 	return gc.Handle(opCode, data)
 }
 
-func (gc *GameClient) readHeader() (OpCode, int, error) {
+func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 	header, err := gc.input.ReadNBytes(6)
 	if err != nil {
 		return 0, -1, errors.New("cannot read opcode")
@@ -193,12 +193,10 @@ func (gc *GameClient) readHeader() (OpCode, int, error) {
 	r.ReadB(&length)
 	r.ReadL(&opcode)
 
-	opCode := OpCode(opcode)
-
 	// fmt.Printf("world: decoded opcode: %02x, %s len: %d encrypted: %t\n",
 	// 	opCode.Int(), opCode.String(), length, gc.crypt != nil)
 
-	return opCode, int(length) - 4, nil
+	return wow.OpCode(opcode), int(length) - 4, nil
 }
 
 func (gc *GameClient) Close() error {

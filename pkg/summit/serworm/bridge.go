@@ -8,7 +8,6 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	authPackets "github.com/paalgyula/summit/pkg/summit/auth/packets"
 	"github.com/paalgyula/summit/pkg/summit/world"
-	worldPackets "github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog"
@@ -31,8 +30,8 @@ type Bridge struct {
 	log zerolog.Logger
 }
 
-func (b *Bridge) HandleExternalPacket(client *world.GameClient, oc worldPackets.OpCode, data []byte) {
-	wow.GetPacketDumper().Write(oc.Int(), data)
+func (b *Bridge) HandleExternalPacket(client *world.GameClient, oc wow.OpCode, data []byte) {
+	wow.GetPacketDumper().Write(oc, data)
 
 	b.SendPacket(oc, data)
 }
@@ -41,11 +40,11 @@ func (b *Bridge) SetGameClient(gc *world.GameClient) {
 	b.client = gc
 }
 
-func (b *Bridge) SendPacket(oc worldPackets.OpCode, data []byte) {
-	w := wow.NewPacket(oc.Int())
+func (b *Bridge) SendPacket(oc wow.OpCode, data []byte) {
+	w := wow.NewPacket(oc)
 
 	w.WriteB(uint16(len(data) + 2))
-	w.Write(uint16(oc.Int()))
+	w.Write(uint16(oc))
 	header := w.Bytes()
 
 	if b.crypt != nil {

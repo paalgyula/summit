@@ -34,7 +34,7 @@ type PacketDumper struct {
 	w io.Writer
 }
 
-func (p *PacketDumper) Write(code int, data []byte) {
+func (p *PacketDumper) Write(code OpCode, data []byte) {
 	p.m.Lock()
 	defer p.m.Unlock()
 

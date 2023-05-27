@@ -7,10 +7,10 @@ import (
 
 type Packet struct {
 	buf    *bytes.Buffer
-	opcode int
+	opcode OpCode
 }
 
-func NewPacket(opCode int) *Packet {
+func NewPacket(opCode OpCode) *Packet {
 	var buf bytes.Buffer
 
 	return &Packet{
@@ -20,7 +20,7 @@ func NewPacket(opCode int) *Packet {
 }
 
 func (w *Packet) OpCode() int {
-	return w.opcode
+	return int(w.opcode)
 }
 
 func (w *Packet) WriteBytes(p []byte) (int, error) {

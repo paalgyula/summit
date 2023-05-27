@@ -8,7 +8,7 @@ import (
 
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/world"
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -55,7 +55,7 @@ func (ws *ProxyServer) listen() {
 	handlers := make([]world.PacketHandler, 0xffff)
 	for i := 0; i < 0xffff; i++ {
 		handlers[i] = world.PacketHandler{
-			Opcode:  packets.OpCode(i),
+			Opcode:  wow.OpCode(i),
 			Handler: bridge.HandleExternalPacket,
 		}
 	}

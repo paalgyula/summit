@@ -59,7 +59,7 @@ func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 }
 
 func (p *ClientLoginChallenge) MarshalPacket() []byte {
-	w := wow.NewPacket(int(AuthLoginChallenge))
+	w := wow.NewPacket(wow.OpCode(AuthLoginChallenge))
 
 	w.WriteStringFixed(p.GameName, 4)
 	w.WriteBytes(p.Version[:])
@@ -164,7 +164,7 @@ func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 
 // Bytes writes out the packet to an array of bytes.
 func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
-	w := wow.NewPacket(int(AuthLoginChallenge))
+	w := wow.NewPacket(wow.OpCode(AuthLoginChallenge))
 
 	w.WriteOne(0) // unk1
 	w.WriteOne(int(pkt.Status))

@@ -7,7 +7,6 @@ import (
 	"syscall"
 
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -90,7 +89,7 @@ func enterWorld(c *babysocket.Client) {
 	p.WriteOne(1)
 	c.SendToAll(p.OpCode(), p.Bytes())
 
-	p = wow.NewPacket(packets.ServerTriggerCinematic.Int())
+	p = wow.NewPacket(wow.ServerTriggerCinematic)
 	p.Write(uint32(11))
 	c.SendToAll(p.OpCode(), p.Bytes())
 
@@ -98,6 +97,12 @@ func enterWorld(c *babysocket.Client) {
 	s := "Macika"
 	p.Write(uint32(len(s)))
 	p.WriteString(s)
+	c.SendToAll(p.OpCode(), p.Bytes())
+
+	p = wow.NewPacket(wow.ServerTutorialFlags)
+	for i := 0; i < 8; i++ {
+		p.Write(uint32(0xFFFFFFFF))
+	}
 	c.SendToAll(p.OpCode(), p.Bytes())
 
 	p = wow.NewPacket(0x455) // SMSG_LEARNED_DANCE_MOVES

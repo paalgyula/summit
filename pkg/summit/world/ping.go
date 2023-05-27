@@ -1,7 +1,7 @@
 package world
 
-import "github.com/paalgyula/summit/pkg/summit/world/packets"
+import "github.com/paalgyula/summit/pkg/wow"
 
 func (gc *GameClient) PingHandler() {
-	gc.SendPayload(packets.ServerPong.Int(), make([]byte, 2))
+	gc.SendPayload(int(wow.ServerPong), make([]byte, 2))
 }

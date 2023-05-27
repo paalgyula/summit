@@ -1,6 +1,9 @@
 package packets
 
-import "github.com/rs/zerolog/log"
+import (
+	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/rs/zerolog/log"
+)
 
 const (
 	STATUS_NEVER            = "never"
@@ -11,19 +14,19 @@ const (
 
 type Opcodes []*Handler
 
-func (o Opcodes) Get(idx int) *Handler {
-	if idx > len(o) {
+func (o Opcodes) Get(code wow.OpCode) *Handler {
+	if int(code) > len(o) {
 		return nil
 	}
 
-	return o[idx]
+	return o[code]
 }
 
-func (o Opcodes) Handle(code OpCode, handler any) {
-	oc := o.Get(code.Int())
+func (o Opcodes) Handle(code wow.OpCode, handler any) {
+	oc := o.Get(code)
 
 	if oc == nil {
-		log.Fatal().Msgf("you should define a handler first for this message: 0x%x", code.Int())
+		log.Fatal().Msgf("you should define a handler first for this message: 0x%x", int(code))
 		return
 	}
 

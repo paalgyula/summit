@@ -2,7 +2,6 @@ package world
 
 import (
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -37,8 +36,12 @@ type ObjectManager struct {
 }
 
 func (*ObjectManager) CreateUpdatePacketFor(*player.Player) {
-	p := wow.NewPacket(int(packets.ServerUpdateObject))
-	p.Write(uint32(1)) // Creating self
+	p := wow.NewPacket(wow.ServerUpdateObject)
+
+	var updateFlag ObjectUpdateFlags = UpdateFlagNone
+	updateFlag |= UpdateFlagSelf
+
+	p.Write(updateFlag) // Creating self
 
 	p.Write(uint32(0)) // Has transport
 }
