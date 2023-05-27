@@ -83,7 +83,7 @@ func (pkt *ServerRealmlist) UnmarshalPacket(data wow.PacketData) {
 
 // MarshalPacket converts the ServerRealmlist packet to an array of bytes.
 func (pkt *ServerRealmlist) MarshalPacket() []byte {
-	w := wow.NewPacketWriter(int(RealmList))
+	w := wow.NewPacket(int(RealmList))
 
 	w.Write(uint8(0x10))
 	w.Write(uint16(0)) // unk

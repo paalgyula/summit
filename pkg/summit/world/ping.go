@@ -3,5 +3,5 @@ package world
 import "github.com/paalgyula/summit/pkg/summit/world/packets"
 
 func (gc *GameClient) PingHandler() {
-	gc.SendPacket(packets.ServerPong, make([]byte, 2))
+	gc.SendPayload(packets.ServerPong.Int(), make([]byte, 2))
 }

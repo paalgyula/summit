@@ -9,7 +9,7 @@ func (gc *GameClient) HandleRealmSplit(data wow.PacketData) {
 	var unknown uint32
 	data.Reader().Read(&unknown)
 
-	w := wow.NewPacketWriter(packets.ServerRealmSplit.Int())
+	w := wow.NewPacket(packets.ServerRealmSplit.Int())
 	w.Write(unknown)
 	w.Write(uint32(0))
 	// split states:
@@ -18,5 +18,5 @@ func (gc *GameClient) HandleRealmSplit(data wow.PacketData) {
 	// 0x2 realm split pending
 	w.WriteString("01/01/01")
 
-	gc.SendPacket(packets.ServerRealmSplit, w.Bytes())
+	gc.SendPayload(packets.ServerRealmSplit.Int(), w.Bytes())
 }

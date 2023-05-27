@@ -78,7 +78,7 @@ func TestParseCharEnum(t *testing.T) {
 
 	p.InitInventory()
 
-	w := wow.NewPacketWriter(0)
+	w := wow.NewPacket(0)
 	p.WriteToLogin(w)
 
 	fmt.Printf("%s", hex.Dump(w.Bytes()))

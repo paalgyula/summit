@@ -42,7 +42,7 @@ func (b *Bridge) SetGameClient(gc *world.GameClient) {
 }
 
 func (b *Bridge) SendPacket(oc worldPackets.OpCode, data []byte) {
-	w := wow.NewPacketWriter(oc.Int())
+	w := wow.NewPacket(oc.Int())
 
 	w.WriteB(uint16(len(data) + 2))
 	w.Write(uint16(oc.Int()))

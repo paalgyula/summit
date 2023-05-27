@@ -16,17 +16,35 @@ import (
 
 type socketClient struct {
 	conn net.Conn
+	s    *Server
 	id   string
 }
 
-type Server struct {
-	m       sync.Mutex
-	clients []*socketClient
-	server  net.Listener
-	log     zerolog.Logger
+func (sc *socketClient) Listen() {
+	var data DataPacket
+	dec := gob.NewDecoder(sc.conn)
+	for {
+		err := dec.Decode(&data)
+		if err != nil {
+			log.Err(err).Msg("babysocket listener error")
+		}
+
+		fmt.Printf("data from baby client: %+v", data)
+	}
 }
 
-func NewServer(ctx context.Context, socketPath string) (*Server, error) {
+type Server struct {
+	m sync.Mutex
+
+	clients map[string]*socketClient
+
+	server net.Listener
+	log    zerolog.Logger
+
+	cp ClientProvider
+}
+
+func NewServer(ctx context.Context, socketPath string, cp ClientProvider) (*Server, error) {
 	logger := log.With().Str("service", "babysocket").Logger()
 
 	_ = os.Remove(socketPath)
@@ -38,8 +56,9 @@ func NewServer(ctx context.Context, socketPath string) (*Server, error) {
 
 	s := Server{
 		server:  conn,
-		clients: make([]*socketClient, 0),
+		clients: make(map[string]*socketClient, 0),
 		log:     logger,
+		cp:      cp,
 	}
 
 	s.Listen()
@@ -51,8 +70,16 @@ func (s *Server) addClient(sc *socketClient) {
 	s.m.Lock()
 	defer s.m.Unlock()
 
-	s.clients = append(s.clients, sc)
+	s.clients[sc.id] = sc
 	s.log.Trace().Msgf("client added: %s", sc.id)
+}
+
+func (s *Server) SendToAll(opcode int, data []byte) {
+	// for _, c := range s.cp.Clients() {
+	// 	w := wow.NewPacketWriter(opcode)
+	// 	w.WriteOne(opcode)
+	// 	w.Write
+	// }
 }
 
 func (s *Server) SendPacket(source string, opcode int, data []byte) {
@@ -81,8 +108,14 @@ func (s *Server) Listen() {
 			sc := socketClient{
 				id:   xid.New().String(),
 				conn: c,
+				s:    s,
 			}
 			s.addClient(&sc)
+			go sc.Listen()
+
+			// for i, sc2 := range s.clients {
+			// 	sc2.remove
+			// }
 		}
 	}()
 }

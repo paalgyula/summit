@@ -11,6 +11,7 @@ import (
 
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -33,18 +34,12 @@ type WorldServer struct {
 func StartServer(ctx context.Context, listenAddress string) (err error) {
 	db := db.GetInstance()
 
-	bs, err := babysocket.NewServer(ctx, "babysocket")
-	if err != nil {
-		return err
-	}
-
 	ws := WorldServer{
 		db:  db,
 		log: log.With().Str("server", "world").Caller().Logger(),
 		ctx: ctx,
 
 		clients: sync.Map{},
-		bs:      bs,
 	}
 
 	ws.l, err = net.Listen("tcp4", listenAddress)
@@ -52,12 +47,32 @@ func StartServer(ctx context.Context, listenAddress string) (err error) {
 		return fmt.Errorf("world.StartServer: %w", err)
 	}
 
+	bs, err := babysocket.NewServer(ctx, "babysocket", ws)
+	if err != nil {
+		return err
+	}
+
+	ws.bs = bs
+
 	ws.log.Info().Msgf("world server is listening on: %s", listenAddress)
 
 	go ws.listenConnections()
 	go ws.Run()
 
 	return nil
+}
+
+func (ws WorldServer) Clients() map[string]wow.PayloadSender {
+	ret := map[string]wow.PayloadSender{}
+
+	ws.clients.Range(func(key, value any) bool {
+		v := value.(*GameClient)
+
+		ret[key.(string)] = v
+		return true
+	})
+
+	return ret
 }
 
 func (ws *WorldServer) listenConnections() {

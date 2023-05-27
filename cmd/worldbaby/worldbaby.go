@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
+	"github.com/paalgyula/summit/pkg/summit/world/packets"
 )
 
 func main() {
@@ -27,6 +28,8 @@ func main() {
 		fmt.Println(sig)
 		done <- true
 	}()
+
+	c.SendToAll(packets.ServerPong.Int(), make([]byte, 4))
 
 	fmt.Println("awaiting interrupt signal (CTRL+C)")
 	<-done

@@ -166,7 +166,7 @@ func (rc *RealmClient) Send(opcode packets.AuthCmd, payload []byte) error {
 		Hex("data", payload).
 		Msg("sending packet to client")
 
-	w := wow.NewPacketWriter(0)
+	w := wow.NewPacket(0)
 	w.Write(uint8(opcode))
 	w.WriteBytes(payload)
 

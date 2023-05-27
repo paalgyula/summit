@@ -12,6 +12,7 @@ const (
 type DataPacket struct {
 	Command CommandCode
 	Source  string
+	Target  string
 	Size    int
 
 	Opcode int

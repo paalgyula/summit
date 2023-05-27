@@ -101,7 +101,7 @@ func (gc *GameClient) handleConnection() {
 	}
 }
 
-func (gc *GameClient) SendPacket(opcode OpCode, payload []byte) {
+func (gc *GameClient) SendPayload(opcode int, payload []byte) {
 	size := len(payload)
 	header, err := gc.makeHeader(size, opcode)
 	if err != nil {
@@ -115,12 +115,32 @@ func (gc *GameClient) SendPacket(opcode OpCode, payload []byte) {
 	packet := append(header, payload...)
 	_, err = gc.n.Write(packet)
 
+	oc := OpCode(opcode)
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%s), payload size: %d packet size: %d", opcode.Int(), opcode.String(), size, len(packet))
+		Msgf(">> sending packet 0x%04x (%s), payload size: %d packet size: %d", oc.Int(), oc.String(), size, len(packet))
 }
 
-func (gc *GameClient) makeHeader(packetLen int, opCode OpCode) ([]byte, error) {
-	w := wow.NewPacketWriter(0)
+func (gc *GameClient) Send(packet wow.Packet) {
+	size := packet.Len()
+	header, err := gc.makeHeader(size, packet.OpCode())
+	if err != nil {
+		gc.log.Error().Err(err).Msg("cannot make packet header, dropping client")
+		gc.Close()
+	}
+
+	gc.writeLock.Lock()
+	defer gc.writeLock.Unlock()
+
+	payload := append(header, packet.Bytes()...)
+	_, err = gc.n.Write(payload)
+
+	oc := OpCode(packet.OpCode())
+	gc.log.Trace().Err(err).
+		Msgf(">> sending packet 0x%04x (%s), payload size: %d packet size: %d", oc.Int(), oc.String(), size, packet.Len())
+}
+
+func (gc *GameClient) makeHeader(packetLen int, opCode int) ([]byte, error) {
+	w := wow.NewPacket(0)
 	w.WriteB(uint16(packetLen + 2))
 	w.Write(uint16(opCode))
 	header := w.Bytes()

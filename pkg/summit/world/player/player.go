@@ -101,7 +101,7 @@ func (p *Player) Init() {
 	p.InitInventory()
 }
 
-func (p *Player) WriteToLogin(w *wow.PacketWriter) {
+func (p *Player) WriteToLogin(w *wow.Packet) {
 	w.Write(p.GUID().RawValue())
 	w.WriteString(p.Name)
 	w.Write(p.Race)

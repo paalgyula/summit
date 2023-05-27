@@ -20,7 +20,7 @@ func (ClientLoginProof) OpCode() AuthCmd {
 }
 
 func (pkt ClientLoginProof) MarshalPacket() []byte {
-	w := wow.NewPacketWriter(int(AuthLoginProof))
+	w := wow.NewPacket(int(AuthLoginProof))
 
 	w.WriteZeroPadded(wow.ReverseBytes(pkt.A.Bytes()), 32)
 	w.WriteZeroPadded(wow.ReverseBytes(pkt.M.Bytes()), 20)
@@ -53,7 +53,7 @@ type ServerLoginProof struct {
 
 // Bytes writes out the packet to an array of bytes.
 func (pkt *ServerLoginProof) MarshalPacket() []byte {
-	w := wow.NewPacketWriter(int(AuthLoginProof))
+	w := wow.NewPacket(int(AuthLoginProof))
 
 	w.Write(pkt.StatusCode)
 

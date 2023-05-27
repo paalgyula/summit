@@ -4,11 +4,14 @@ import (
 	"encoding/gob"
 	"fmt"
 	"net"
+	"sync"
 )
 
 type Client struct {
 	client        net.Conn
 	packetHandler OnPacketFunc
+
+	writeLock sync.Mutex
 }
 
 type OnDataFunc func()
@@ -45,6 +48,24 @@ func (c *Client) readData() {
 	default:
 		fmt.Printf("data received: %+v\n", dp)
 	}
+}
+
+func (c *Client) SendToAll(opcode int, data []byte) {
+	c.send(DataPacket{
+		Target:  "*", // special target
+		Command: CommandPacket,
+		Size:    len(data),
+		Opcode:  opcode,
+		Data:    data,
+	})
+}
+
+func (c *Client) send(dp DataPacket) error {
+	// Prevent simultaneous write
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
+	return gob.NewEncoder(c.client).Encode(dp)
 }
 
 func (c *Client) Start() {

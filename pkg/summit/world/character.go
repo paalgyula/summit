@@ -16,7 +16,7 @@ func (gc *GameClient) ListCharacters() {
 		p.Init()
 	}
 
-	pkt := wow.NewPacketWriter(packets.ServerCharEnum.Int())
+	pkt := wow.NewPacket(packets.ServerCharEnum.Int())
 
 	// Character list size, this should be replaced
 	pkt.WriteOne(len(players))
@@ -25,7 +25,7 @@ func (gc *GameClient) ListCharacters() {
 		p.WriteToLogin(pkt)
 	}
 
-	gc.SendPacket(packets.ServerCharEnum, pkt.Bytes())
+	gc.SendPayload(packets.ServerCharEnum.Int(), pkt.Bytes())
 }
 
 type CharacterCreateRequest struct {
@@ -91,5 +91,5 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	res := []byte{0x00} // OK :)
 
-	gc.SendPacket(packets.ServerCharCreate, res)
+	gc.SendPayload(packets.ServerCharCreate.Int(), res)
 }
