@@ -30,6 +30,12 @@ type Bridge struct {
 	log zerolog.Logger
 }
 
+// HandleExternalPacket handles an external packet received from the client by writing
+// it to the packet dumper and sending the packet to the bridge.
+//
+// client: the game client sending the packet.
+// oc: the op opcode of the packet.
+// data: the data block of the packet.
 func (b *Bridge) HandleExternalPacket(client *world.GameClient, oc wow.OpCode, data []byte) {
 	wow.GetPacketDumper().Write(oc, data)
 
@@ -65,7 +71,6 @@ func (b *Bridge) setup() {
 	}
 
 	b.log = b.log.With().Str("host", host).Logger()
-
 	loginConn, err := net.Dial("tcp4", b.server)
 	if err != nil {
 		panic(err)
@@ -78,11 +83,13 @@ func (b *Bridge) setup() {
 	// Send auth challenge
 	b.writer.Send(clp)
 
-	header := make([]byte, 2)
+	fmt.Println("Waiting for response")
+	header := make([]byte, 3)
 	_, err = loginConn.Read(header)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("Head: %s", hex.Dump(header))
+		log.Fatal().Msgf("err: %s - Head: %s", err.Error(), hex.Dump(header))
 	}
+	fmt.Println("head packet readed")
 
 	// data := make([]byte, 152)
 	// _, err = loginConn.Read(data)
@@ -117,11 +124,12 @@ func (b *Bridge) setup() {
 	header = make([]byte, 2)
 	_, err = loginConn.Read(header)
 	if err != nil {
-		log.Fatal().Err(err).Msgf("Head: %s", hex.Dump(header))
+		log.Fatal().Err(err).Msgf("err: %s - head: %s", err.Error(), hex.Dump(header))
 	}
 	fmt.Printf("<< %s", hex.Dump(header))
 
 	data := make([]byte, 2)
+
 	_, err = loginConn.Read(data)
 	fmt.Printf("%s", hex.Dump(data))
 }

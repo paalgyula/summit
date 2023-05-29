@@ -55,19 +55,21 @@ func (db *Database) SaveAll() {
 	_ = yaml.NewEncoder(f).Encode(db)
 }
 
-func initDatabase() {
+func InitYamlDatabase() {
 	instance = &Database{}
 	err := instance.Load(SummitConfig)
 
 	if err != nil {
-		panic(err)
+		log.Warn().Err(err).Msgf("database file: %s not found", SummitConfig)
+
+		instance.Accounts = make([]*Account, 0)
 	}
 
 	log.Info().Msgf("Loaded database with %d accounts", len(instance.Accounts))
 }
 
 func GetInstance() *Database {
-	once.Do(initDatabase)
+	once.Do(InitYamlDatabase)
 
 	return instance
 }

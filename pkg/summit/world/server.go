@@ -79,7 +79,7 @@ func (ws *WorldServer) listenConnections() {
 	for {
 		conn, err := ws.l.Accept()
 		if err != nil {
-			log.Error().Err(err).Msg("cannot accept connection")
+			log.Error().Err(err).Msg("listener error")
 
 			continue
 		}

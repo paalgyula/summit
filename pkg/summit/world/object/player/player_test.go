@@ -8,7 +8,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/stretchr/testify/assert"
@@ -102,9 +101,9 @@ func TestAssertBytes(t *testing.T) {
 	var rawGuid uint64
 
 	r.Read(&rawGuid, binary.LittleEndian)
-	g := object.FromRaw(rawGuid)
+	g := wow.GUID(rawGuid)
 	assert.Equal(t, 6, g.Counter())
-	assert.Equal(t, object.Player, g.High())
+	assert.Equal(t, wow.PlayerGuid, g.High())
 
 	var p player.Player
 

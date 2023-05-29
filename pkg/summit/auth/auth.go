@@ -20,38 +20,57 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func StartServer(listenAddress string) error {
+type AuthServer struct {
+	l net.Listener
+}
 
-	l, err := net.Listen("tcp4", listenAddress)
-	if err != nil {
-		return fmt.Errorf("auth.StartServer: %w", err)
-	}
-	defer l.Close()
-
-	log.Info().Msgf("auth server is listening on: %s", listenAddress)
-
+func (as *AuthServer) Run() {
 	for {
-		c, err := l.Accept()
+		c, err := as.l.Accept()
 		if err != nil {
-			log.Error().Err(err).Msgf("cannot accept connection")
+			if strings.Contains(err.Error(), "closed network connection") {
+				// Do not log, we are closed the client
+				return
+			}
+
+			log.Error().Err(err).Msgf("listener error")
+
+			return
 		}
 
 		NewClient(c)
 	}
 }
 
+func (as *AuthServer) Close() error {
+	return as.l.Close()
+}
+
+func NewServer(listenAddress string) (*AuthServer, error) {
+	l, err := net.Listen("tcp4", listenAddress)
+	if err != nil {
+		return nil, fmt.Errorf("auth.StartServer: %w", err)
+	}
+
+	log.Info().Msgf("auth server is listening on: %s", listenAddress)
+	as := &AuthServer{
+		l: l,
+	}
+
+	go as.Run()
+
+	return as, nil
+}
+
 type RealmClient struct {
 	c net.Conn
 
 	outLock sync.Mutex
-
-	log zerolog.Logger
+	log     zerolog.Logger
 
 	account *db.Account
 
-	srp              *crypt.SRP6
-	PrivateEphemeral *big.Int
-	PublicEphemeral  *big.Int
+	srp *crypt.SRP6
 }
 
 func NewClient(c net.Conn) *RealmClient {
@@ -61,9 +80,7 @@ func NewClient(c net.Conn) *RealmClient {
 		account: nil,
 
 		srp: crypt.NewSRP6(7, 3, big.NewInt(0)),
-
-		PublicEphemeral:  big.NewInt(0),
-		PrivateEphemeral: big.NewInt(0)}
+	}
 
 	go rc.listen()
 
@@ -77,7 +94,7 @@ func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
 	res.Status = packets.ChallengeStatusSuccess
 
 	// Validate the packet.
-	gameName := strings.TrimRight(pkt.GameName, "\x00")
+	gameName := strings.TrimLeft(pkt.GameName, "\x00")
 	if gameName != "WoW" {
 		res.Status = packets.ChallengeStatusFailed
 		// TODO: temporary removed this line to allow every client to log in
@@ -161,7 +178,7 @@ func (rc *RealmClient) Send(opcode packets.AuthCmd, payload []byte) error {
 	size := len(payload)
 
 	rc.log.Debug().
-		Str("opcode", fmt.Sprintf("0x%04x", opcode)).
+		Str("opcode", fmt.Sprintf("0x%04x", int(opcode))).
 		Int("size", size).
 		Hex("data", payload).
 		Msg("sending packet to client")

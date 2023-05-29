@@ -44,7 +44,13 @@ type WorldLocation struct {
 	Zone    uint32
 }
 
+func (l WorldLocation) Location() (float32, float32, float32, uint32) {
+	return l.X, l.Y, l.Z, l.Map
+}
+
 type Player struct {
+	object.Object
+
 	ID     uint32
 	Name   string
 	Race   PlayerRace
@@ -78,6 +84,10 @@ type Player struct {
 	Pet Pet
 }
 
+func (p *Player) GetGuid() uint64 {
+	return p.Object.GetGuid()
+}
+
 // Initializes an empty inventory
 func (p *Player) InitInventory() {
 	if p.Inventory != nil {
@@ -93,8 +103,8 @@ func (p *Player) InitInventory() {
 	}
 }
 
-func (p *Player) GUID() object.GUID {
-	return object.NewPlayerGUID(p.ID)
+func (p *Player) GUID() wow.GUID {
+	return wow.NewPlayerGUID(p.ID)
 }
 
 func (p *Player) Init() {

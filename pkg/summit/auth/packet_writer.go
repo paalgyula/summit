@@ -38,7 +38,8 @@ func (pw *PacketWriter) Send(pkt AuthPacket) {
 	data = binary.LittleEndian.AppendUint16(data, uint16(len(bb)))
 	data = append(data, bb...)
 
-	fmt.Printf(">> %s", hex.Dump(data))
+	fmt.Println("Sending: ", pkt.OpCode())
+	fmt.Printf("%s", hex.Dump(data))
 
 	pw.stream.Write(data)
 }

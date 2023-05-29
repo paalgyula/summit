@@ -141,8 +141,8 @@ func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 
 	var tmp uint8
 
-	r.Read(tmp) // unk1
-	r.Read(pkt.Status)
+	r.Read(&tmp) // unk1
+	r.Read(&pkt.Status)
 
 	if pkt.Status == ChallengeStatusSuccess {
 		pkt.B.SetBytes(r.ReadReverseBytes(32))
