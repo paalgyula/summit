@@ -66,6 +66,10 @@ func (w *Packet) WriteOne(b int) error {
 	return w.buf.WriteByte(uint8(b))
 }
 
+func (w *Packet) WriteUint32(b int) error {
+	return w.Write(uint32(b))
+}
+
 // Write writes the string into the packet terminated by a null character.
 // You can specify the byte order, but default its BigEndian.
 func (w *Packet) WriteString(v string, byteOrder ...binary.ByteOrder) {

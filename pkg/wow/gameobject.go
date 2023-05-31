@@ -1,0 +1,41 @@
+package wow
+
+type GameObjectType int
+
+const (
+	GameObjectTypeDoor GameObjectType = iota
+	GameObjectTypeButton
+	GameObjectTypeQuestGiver
+	GameObjectTypeChest
+	GameObjectTypeBinder
+	GameObjectTypeGeneric
+	GameObjectTypeTrap
+	GameObjectTypeChair
+	GameObjectTypeSpellFocus
+	GameObjectTypeText
+	GameObjectTypeGoober
+	GameObjectTypeTransport
+	GameObjectTypeAreaDamage
+	GameObjectTypeCamera
+	GameObjectTypeMapObject
+	GameObjectTypeMoTransport
+	GameObjectTypeDuelArbiter
+	GameObjectTypeFishingNode
+	GameObjectTypeSummoningRitual
+	GameObjectTypeMailbox
+	GameObjectTypeAuctionHouse
+	GameObjectTypeGuardPost
+	GameObjectTypeSpellcaster
+	GameObjectTypeMeetingStone
+	GameObjectTypeFlagStand
+	GameObjectTypeFishingHole
+	GameObjectTypeFlagDrop
+	GameObjectTypeMiniGame
+	GameObjectTypeLotteryKiosk
+	GameObjectTypeCapturePoint
+	GameObjectTypeAuraGenerator
+	GameObjectTypeDungeonDifficulty
+	GameObjectTypeBarberChair
+	GameObjectTypeDestructibleBuilding
+	GameObjectTypeGuildBank
+)
