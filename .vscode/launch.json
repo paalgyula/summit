@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Launch Serworm Proxy",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/cmd/serworm/serworm.go",
+            "cwd": "${workspaceFolder}",
+        },
+        {
             "name": "Launch Auth Server",
             "type": "go",
             "request": "launch",

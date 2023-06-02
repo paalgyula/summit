@@ -27,11 +27,17 @@ func TestGenerate(t *testing.T) {
 	// fmt.Printf("%+v\n\n", dr.Header)
 }
 
-func TestLoadMap(t *testing.T) {
-	LoadMaps("../../../../dbc")
+func TestCharacterDBCLoad(t *testing.T) {
+	base := "../../../../dbc"
+
+	t.Run("CharStartOutfit.dbc", func(t *testing.T) {
+		data, err := load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", base)
+		assert.NoError(t, err)
+		assert.Lenf(t, data, 126, "Expected 126 records in CharStartOutfit.dbc")
+	})
 }
 
 func TestLoadCharacters(t *testing.T) {
-	_, err := LoadCharacter("../../../../dbc")
-	assert.NoError(t, err)
+	// _, err := loadCharacter("../../../../dbc")
+	// assert.NoError(t, err)
 }

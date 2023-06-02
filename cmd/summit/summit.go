@@ -18,6 +18,7 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
 	log.Info().Msg("Starting summit wow server")
+	db.InitYamlDatabase()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

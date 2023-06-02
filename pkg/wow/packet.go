@@ -113,3 +113,13 @@ func PadBigIntBytes(data []byte, nBytes int) []byte {
 
 	return data
 }
+
+type RealmPacket interface {
+	UnmarshalPacket(PacketData) error
+}
+
+type PacketData []byte
+
+func (pd PacketData) Reader() *Reader {
+	return NewPacketReader(pd)
+}

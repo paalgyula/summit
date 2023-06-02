@@ -12,12 +12,17 @@ import (
 	"sync"
 
 	"github.com/paalgyula/summit/pkg/db"
-	"github.com/paalgyula/summit/pkg/summit/auth/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 
+	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+)
+
+var (
+	ErrShortRead = errors.New("short read when reading opcode data")
+	ErrWriteSize = errors.New("the written and sent bytes are not equal")
 )
 
 type AuthServer struct {
@@ -38,7 +43,7 @@ func (as *AuthServer) Run() {
 			return
 		}
 
-		NewClient(c)
+		NewAuthConnection(c)
 	}
 }
 
@@ -62,22 +67,26 @@ func NewServer(listenAddress string) (*AuthServer, error) {
 	return as, nil
 }
 
-type RealmClient struct {
+type AuthConnection struct {
 	c net.Conn
 
-	outLock sync.Mutex
-	log     zerolog.Logger
+	outLock  sync.Mutex
+	readLock sync.Mutex
+
+	log zerolog.Logger
+	id  string
 
 	account *db.Account
 
 	srp *crypt.SRP6
 }
 
-func NewClient(c net.Conn) *RealmClient {
-	rc := &RealmClient{
+func NewAuthConnection(c net.Conn) *AuthConnection {
+	rc := &AuthConnection{
 		c:       c,
 		log:     log.With().Str("addr", c.RemoteAddr().String()).Logger(),
 		account: nil,
+		id:      xid.New().String(),
 
 		srp: crypt.NewSRP6(7, 3, big.NewInt(0)),
 	}
@@ -87,29 +96,29 @@ func NewClient(c net.Conn) *RealmClient {
 	return rc
 }
 
-func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
-	res := new(packets.ServerLoginChallenge)
+func (rc *AuthConnection) HandleLogin(pkt *ClientLoginChallenge) error {
+	res := new(ServerLoginChallenge)
 
 	// TODO: is this safe?
-	res.Status = packets.ChallengeStatusSuccess
+	res.Status = ChallengeStatusSuccess
 
 	// Validate the packet.
-	gameName := strings.TrimLeft(pkt.GameName, "\x00")
+	gameName := strings.TrimRight(pkt.GameName, "\x00")
 	if gameName != "WoW" {
-		res.Status = packets.ChallengeStatusFailed
+		res.Status = ChallengeStatusFailed
 		// TODO: temporary removed this line to allow every client to log in
 		// } else if pkt.Version != static.SupportedGameVersion || pkt.Build != static.SupportedGameBuild {
-		// 	res.Status = packets.ChallengeStatusFailVersionInvalid
+		// 	res.Status = ChallengeStatusFailVersionInvalid
 	} else {
 		rc.account = db.GetInstance().FindAccount(pkt.AccountName)
 
 		if rc.account == nil {
-			res.Status = packets.ChallengeStatusFailUnknownAccount
+			res.Status = ChallengeStatusFailUnknownAccount
 			rc.c.Close()
 		}
 	}
 
-	if res.Status == packets.ChallengeStatusSuccess {
+	if res.Status == ChallengeStatusSuccess {
 		B := rc.srp.GenerateServerPubKey(rc.account.Verifier())
 
 		res.B.Set(B)
@@ -121,11 +130,11 @@ func (rc *RealmClient) HandleLogin(pkt *packets.ClientLoginChallenge) error {
 	}
 
 	// Send out the packet
-	return rc.Send(packets.AuthLoginChallenge, res.MarshalPacket())
+	return rc.Send(AuthLoginChallenge, res.MarshalPacket())
 }
 
-func (rc *RealmClient) HandleProof(pkt *packets.ClientLoginProof) error {
-	response := packets.ServerLoginProof{}
+func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
+	response := ServerLoginProof{}
 
 	K, M := rc.srp.CalculateServerSessionKey(
 		&pkt.A,
@@ -134,8 +143,8 @@ func (rc *RealmClient) HandleProof(pkt *packets.ClientLoginProof) error {
 		rc.account.Name)
 
 	if M.Cmp(&pkt.M) != 0 {
-		response.StatusCode = 4 // TODO(jeshua): make these constants
-		rc.Send(packets.AuthLoginProof, response.MarshalPacket())
+		response.StatusCode = 4
+		rc.Send(AuthLoginProof, response.MarshalPacket())
 		rc.c.Close()
 
 		return nil
@@ -153,28 +162,29 @@ func (rc *RealmClient) HandleProof(pkt *packets.ClientLoginProof) error {
 		db.GetInstance().SaveAll()
 	}
 
-	return rc.Send(packets.AuthLoginProof, response.MarshalPacket())
+	return rc.Send(AuthLoginProof, response.MarshalPacket())
 }
 
-func (rc *RealmClient) HandleRealmList() error {
+func (rc *AuthConnection) HandleRealmList() error {
 	rc.log.Debug().Msg("handling realmlist request")
 
-	srl := packets.ServerRealmlist{}
-	srl.Realms = []packets.Realm{{
+	// TODO: #3 use some protocol to do registration with realm/manage realms and-or offline status
+	srl := ServerRealmlistPacket{}
+	srl.Realms = []Realm{{
 		Icon:          6,
 		Lock:          0,
-		Flags:         packets.RealmFlagRecommended,
+		Flags:         RealmFlagNone,
 		Name:          "The Highest Summit",
 		Address:       "127.0.0.1:5002",
-		Population:    .4,
-		NumCharacters: 0,
-		Timezone:      2,
+		Population:    3,
+		NumCharacters: 1,
+		Timezone:      8,
 	}}
 
-	return rc.Send(packets.RealmList, srl.MarshalPacket())
+	return rc.Send(RealmList, srl.MarshalPacket())
 }
 
-func (rc *RealmClient) Send(opcode packets.AuthCmd, payload []byte) error {
+func (rc *AuthConnection) Send(opcode RealmCommand, payload []byte) error {
 	size := len(payload)
 
 	rc.log.Debug().
@@ -190,7 +200,7 @@ func (rc *RealmClient) Send(opcode packets.AuthCmd, payload []byte) error {
 	return rc.Write(w.Bytes())
 }
 
-func (rc *RealmClient) Write(bb []byte) error {
+func (rc *AuthConnection) Write(bb []byte) error {
 	rc.outLock.Lock()
 	defer rc.outLock.Unlock()
 
@@ -200,37 +210,46 @@ func (rc *RealmClient) Write(bb []byte) error {
 	}
 
 	if w != len(bb) {
-		return errors.New("the written and sent bytes are not equal")
+		return ErrWriteSize
 	}
 
 	return nil
 }
 
-func (rc *RealmClient) listen() {
+func (rc *AuthConnection) listen() {
 	defer rc.c.Close()
 	rc.log.Info().Msgf("accepting messages from a new login connection")
 
 	for {
 		// Read packets infinitely :)
 		pkt, err := rc.read(rc.c)
-		if err != nil {
+		if err != nil || pkt == nil {
 			log.Error().Err(err).Msg("error while reading from client")
 
 			return
 		}
 
-		switch packets.AuthCmd(pkt.Command) {
-		case packets.AuthLoginChallenge:
-			var clc packets.ClientLoginChallenge
+		switch RealmCommand(pkt.Command) {
+		case AuthLoginChallenge:
+			var clc ClientLoginChallenge
 			pkt.Unmarshal(&clc)
+
+			fmt.Printf(">> WoW -> Auth ClientLoginChallenge\n%s", hex.Dump(clc.MarshalPacket()))
+
 			rc.HandleLogin(&clc)
-		case packets.AuthLoginProof:
-			var clp packets.ClientLoginProof
+		case AuthLoginProof:
+			var clp ClientLoginProof
 			pkt.Unmarshal(&clp)
+
+			fmt.Printf(">> WoW -> Auth ClientLoginProof\n%s", hex.Dump(clp.MarshalPacket()))
+
 			rc.HandleProof(&clp)
-		case packets.RealmList:
-			var rlp packets.ClientRealmlist
+		case RealmList:
+			var rlp ClientRealmlistPacket
 			pkt.Unmarshal(&rlp)
+
+			fmt.Printf(">> WoW -> Auth ClientRealmlistPacket\n%s", hex.Dump(rlp.MarshalPacket()))
+
 			rc.HandleRealmList()
 		default:
 			rc.log.Fatal().Msgf("unhandled command: %T(0x%02x)", pkt.Command, pkt.Command)
@@ -239,32 +258,32 @@ func (rc *RealmClient) listen() {
 }
 
 // read reads the packet from the auth socket
-func (rc *RealmClient) read(r io.Reader) (*wow.RData, error) {
+func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 	opCodeData := make([]byte, 1)
 	n, err := r.Read(opCodeData)
 	if err != nil {
-		return nil, fmt.Errorf("erorr while reading opcode: %v", err)
+		return nil, fmt.Errorf("erorr while reading command: %w", err)
 	}
 
 	if n != 1 {
-		return nil, errors.New("short read when reading opcode data")
+		return nil, ErrShortRead
 	}
 
 	// In the auth server, the length is based on the packet type.
-	opCode := packets.AuthCmd(opCodeData[0])
+	opCode := RealmCommand(opCodeData[0])
 	length := 0
 
 	switch opCode {
-	case packets.AuthLoginChallenge:
+	case AuthLoginChallenge:
 		lenData, err := ReadBytes(r, 3)
 		if err != nil {
 			return nil, fmt.Errorf("error while reading header length: %v", err)
 		}
 
 		length = int(binary.LittleEndian.Uint16(lenData[1:]))
-	case packets.AuthLoginProof:
+	case AuthLoginProof:
 		length = 74
-	case packets.RealmList:
+	case RealmList:
 		length = 4
 	default:
 		rc.log.Error().
@@ -274,13 +293,15 @@ func (rc *RealmClient) read(r io.Reader) (*wow.RData, error) {
 		return nil, err
 	}
 
-	ret := wow.RData{Command: uint8(opCode)}
 	bb, err := ReadBytes(r, length)
 	if err != nil {
 		return nil, err
 	}
 
-	ret.Data = bb
+	ret := RData{
+		Command: uint8(opCode),
+		Data:    bb,
+	}
 
 	return &ret, nil
 }

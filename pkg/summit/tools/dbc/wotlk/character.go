@@ -1,5 +1,7 @@
 package wotlk
 
+import "github.com/paalgyula/summit/pkg/wow"
+
 type CharStartOutfitEntry struct {
 	ID            uint32   `dbc:"offset=0"`
 	RaceID        uint8    `dbc:"offset=1"`
@@ -11,22 +13,31 @@ type CharStartOutfitEntry struct {
 	InventoryType []uint32 `dbc:"offset=52,len=12"`
 }
 
-type ChrRacesRec struct {
-	RaceID              uint32
-	Flags               uint32
-	FactionID           uint32
-	MaleDisplayId       uint32
-	FemaleDisplayId     uint32
-	ClientPrefix        uint32
-	MountScale          float32
-	BaseLanguage        uint32
-	CreatureType        uint32
-	LoginEffectSpellID  uint32
-	CombatStunSpellID   uint32
-	ResSicknessSpellID  uint32
-	SplashSoundID       uint32
-	StartingTaxiNodes   uint32
-	ClientFileString    uint32
-	CinematicSequenceID uint32
-	NameLang            uint32
+type InventorySlot struct {
+	ItemID        uint32
+	DisplayItemID uint32
+	InventoryType wow.InventoryType
+}
+
+func (e *CharStartOutfitEntry) GetSlot(id int) *InventorySlot {
+	if id < 0 || id >= len(e.ItemID) {
+		return nil
+	}
+
+	return &InventorySlot{
+		ItemID:        e.ItemID[id],
+		DisplayItemID: e.DisplayItemID[id],
+		InventoryType: wow.InventoryType(e.InventoryType[id]),
+	}
+}
+
+type ChrRacesEntry struct {
+	RaceID            uint32          `dbc:"offset=1"`
+	Flags             uint32          `dbc:"offset=2"`
+	FactionID         uint32          `dbc:"offset=3"`
+	MaleDisplayId     uint32          `dbc:"offset=5"`
+	FemaleDisplayId   uint32          `dbc:"offset=6"`
+	BaseLanguage      uint32          `dbc:"offset=8"`
+	Name              LocalizedString `dbc:"offset=15"`
+	RequiredExpansion uint32          `dbc:"offset=69"`
 }

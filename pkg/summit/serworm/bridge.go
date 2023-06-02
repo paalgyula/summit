@@ -1,12 +1,8 @@
 package serworm
 
 import (
-	"encoding/hex"
-	"fmt"
 	"net"
 
-	"github.com/paalgyula/summit/pkg/summit/auth"
-	authPackets "github.com/paalgyula/summit/pkg/summit/auth/packets"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
@@ -21,7 +17,7 @@ type Bridge struct {
 
 	client *world.GameClient
 
-	writer    *auth.PacketWriter
+	socket    *RealmClient
 	worldConn net.Conn
 
 	crypt *crypt.WowCrypt
@@ -76,62 +72,8 @@ func (b *Bridge) setup() {
 		panic(err)
 	}
 
-	b.writer = auth.NewPacketWriter(loginConn, 0x08)
-
-	clp := authPackets.NewClientLoginChallenge(b.user)
-
-	// Send auth challenge
-	b.writer.Send(clp)
-
-	fmt.Println("Waiting for response")
-	header := make([]byte, 3)
-	_, err = loginConn.Read(header)
-	if err != nil {
-		log.Fatal().Msgf("err: %s - Head: %s", err.Error(), hex.Dump(header))
-	}
-	fmt.Println("head packet readed")
-
-	// data := make([]byte, 152)
-	// _, err = loginConn.Read(data)
-	// if err != nil {
-	// 	log.Fatal().Err(err).Msgf("Data: %s", hex.Dump(data))
-	// }
-
-	// Get srp stuff
-	sar := new(authPackets.ServerLoginChallenge)
-	fmt.Printf("ServerLoginChallenge - Size: %d\n", sar.ReadPacket(loginConn))
-
-	// Initialize SRP6
-	b.srp = crypt.NewSRP6(int64(sar.G), 3, &sar.N)
-	b.srp.B = &sar.B
-	A := b.srp.GenerateClientPubkey()
-
-	K, M := b.srp.CalculateClientSessionKey(&sar.Salt, &sar.B, b.user, b.pass)
-
-	fmt.Printf("SessionKey: 0x%x\n", K.Text(16))
-	fmt.Printf("M1: 0x%x\n", M.Text(16))
-
-	proof := authPackets.ClientLoginProof{
-		A:             *A,
-		M:             *M,
-		CRCHash:       sar.SaltCRC,
-		NumberOfKeys:  0,
-		SecurityFlags: 0,
-	}
-
-	b.writer.Send(proof)
-
-	header = make([]byte, 2)
-	_, err = loginConn.Read(header)
-	if err != nil {
-		log.Fatal().Err(err).Msgf("err: %s - head: %s", err.Error(), hex.Dump(header))
-	}
-	fmt.Printf("<< %s", hex.Dump(header))
-
-	data := make([]byte, 2)
-
-	_, err = loginConn.Read(data)
-	fmt.Printf("%s", hex.Dump(data))
+	client := NewRealmClient(loginConn, 0x08)
+	client.Authenticate(b.user, b.pass)
 }
 
 func NewBridge(logonServer, user, pass string) *Bridge {
