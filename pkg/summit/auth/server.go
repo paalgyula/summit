@@ -27,6 +27,8 @@ var (
 
 type AuthServer struct {
 	l net.Listener
+	// The realm provider
+	rp RealmProvider
 }
 
 func (as *AuthServer) Run() {
@@ -51,7 +53,7 @@ func (as *AuthServer) Close() error {
 	return as.l.Close()
 }
 
-func NewServer(listenAddress string) (*AuthServer, error) {
+func NewServer(listenAddress string, rp RealmProvider) (*AuthServer, error) {
 	l, err := net.Listen("tcp4", listenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("auth.StartServer: %w", err)
@@ -59,7 +61,8 @@ func NewServer(listenAddress string) (*AuthServer, error) {
 
 	log.Info().Msgf("auth server is listening on: %s", listenAddress)
 	as := &AuthServer{
-		l: l,
+		l:  l,
+		rp: rp,
 	}
 
 	go as.Run()

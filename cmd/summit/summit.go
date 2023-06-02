@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/paalgyula/summit/docs"
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world"
@@ -17,7 +18,9 @@ import (
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
-	log.Info().Msg("Starting summit wow server")
+	log.Info().
+		Str("build", docs.BuildInfo()).
+		Msg("Starting summit wow server")
 	db.InitYamlDatabase()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -27,7 +30,20 @@ func main() {
 		panic(err)
 	}
 
-	server, err := auth.NewServer("0.0.0.0:5000")
+	server, err := auth.NewServer("0.0.0.0:5000", &auth.StaticRealmProvider{
+		RealmList: []*auth.Realm{
+			{
+				Icon:          6,
+				Lock:          0,
+				Flags:         auth.RealmFlagRecommended,
+				Name:          "The Highest Summit",
+				Address:       "127.0.0.1:5002",
+				Population:    3,
+				NumCharacters: 1,
+				Timezone:      8,
+			},
+		},
+	})
 	if err != nil {
 		panic(err)
 	}

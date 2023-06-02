@@ -19,7 +19,7 @@ func TestConnection(t *testing.T) {
 			V:    "3e3f49a5a14a43b870f8de5534e318c63394738c364a71f205a8ba277bb56ff6",
 		})
 
-	as, err := auth.NewServer("localhost:5000")
+	as, err := auth.NewServer("localhost:5000", &auth.StaticRealmProvider{})
 	assert.NoError(t, err)
 	defer as.Close()
 

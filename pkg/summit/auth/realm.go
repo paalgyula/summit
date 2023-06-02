@@ -1,5 +1,18 @@
 package auth
 
+type RealmProvider interface {
+	// Returns a list of realms for the given account.
+	Realms(accountID string) ([]*Realm, error)
+}
+
+type StaticRealmProvider struct {
+	RealmList []*Realm
+}
+
+func (srp *StaticRealmProvider) Realms(accountID string) ([]*Realm, error) {
+	return srp.RealmList, nil
+}
+
 type RealmFlags uint8
 
 const (
