@@ -11,4 +11,5 @@
 // if you want to play with you can do it manually.
 //
 //go:generate datagen opcodes -p wow -o opcodes.gen.go
+//go:generate stringer -type=OpCode -output=opcodes_string.go
 package wow
