@@ -1,8 +1,6 @@
 package world
 
 import (
-	"math/rand"
-
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
@@ -10,23 +8,44 @@ import (
 )
 
 func (gc *GameClient) sendAuthChallenge() {
-	gc.seed = uint32(rand.Int31())
+	// gc.seed = uint32(rand.Int31())
+	gc.seed = 0
 
 	// 0x1ec
 	w := wow.NewPacket(wow.ServerAuthChallenge)
-	w.Write(uint32(0x00)) // This is a seed
+	w.Write(gc.seed) // This is a seed
 
 	gc.Send(w)
 }
 
 type ClientAuthSessionPacket struct {
-	BuildNumber      uint32
+	ClientBuild      uint32
 	ServerID         uint32
 	AccountName      string
 	ClientSeed       uint32
-	Digest           [20]byte
+	Digest           []byte // 20bytes long
 	AddonSize        uint16
 	AddonsCompressed []byte
+}
+
+func (cas *ClientAuthSessionPacket) Bytes() []byte {
+	w := wow.NewPacket(wow.ClientAuthSession)
+	w.Write(cas.ClientBuild)
+	w.Write(cas.ServerID)
+	w.WriteString(cas.AccountName)
+	w.Write(cas.ClientSeed)
+
+	// Duno whats this (paalgyula)
+	w.Write(uint32(0x00))
+	w.Write(uint32(0x00))
+	w.Write(uint32(0x00))
+	w.Write(uint64(0x00))
+
+	w.WriteReverseBytes(cas.Digest[:20])
+	w.Write(cas.AddonSize)
+	w.Write(cas.AddonsCompressed)
+
+	return w.Bytes()
 }
 
 type BillingDetails struct {
@@ -39,12 +58,24 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	r := wow.NewPacketReader(data)
 	pkt := new(ClientAuthSessionPacket)
 
-	r.ReadL(&pkt.BuildNumber)
-	r.ReadL(&pkt.ServerID)
-
+	r.Read(&pkt.ClientBuild)
+	r.Read(&pkt.ServerID)
 	r.ReadString(&pkt.AccountName)
+	r.Read(&pkt.ClientSeed)
 
-	r.ReadL(&pkt.ClientSeed)
+	// recvPacket.read_skip<uint32>();
+	// recvPacket.read_skip<uint32>();
+	// recvPacket.read_skip<uint32>();
+	// recvPacket.read_skip<uint64>();
+
+	// Skip fragment Whats that?
+	var tmp uint32
+	var tmp2 uint64
+	r.Read(&tmp)
+	r.Read(&tmp)
+	r.Read(&tmp)
+	r.Read(&tmp2)
+
 	r.ReadL(&pkt.Digest)
 	r.ReadL(&pkt.AddonSize)
 

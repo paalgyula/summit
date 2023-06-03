@@ -2,6 +2,7 @@ package serworm
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -35,13 +37,17 @@ type RealmClient struct {
 	log zerolog.Logger
 
 	user, pass string
+
+	// Channel for receiving realm
+	realmChannel chan []*auth.Realm
 }
 
 func NewRealmClient(conn net.Conn, version int) *RealmClient {
 	rs := &RealmClient{
-		conn:    conn,
-		version: version,
-		log:     log.With().Str("module", "realmclient").Logger(),
+		conn:         conn,
+		version:      version,
+		log:          log.With().Str("module", "realmclient").Logger(),
+		realmChannel: make(chan []*auth.Realm),
 	}
 
 	go rs.HandlePackets()
@@ -49,11 +55,22 @@ func NewRealmClient(conn net.Conn, version int) *RealmClient {
 	return rs
 }
 
-func (pw *RealmClient) Authenticate(user, pass string) {
+// Authenticate authenticates a user with a password and returns a slice of realms or an error.
+func (pw *RealmClient) Authenticate(user, pass string) ([]*auth.Realm, error) {
 	pw.user = strings.ToUpper(user)
 	pw.pass = pass
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	pw.SendChallenge(user)
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case realms := <-pw.realmChannel:
+		return realms, nil
+	}
 }
 
 func (pw *RealmClient) Send(pkt RealmPacket) {
@@ -149,6 +166,8 @@ func (pw *RealmClient) HandleRealmlist() {
 	pkt.ReadPacket(reader)
 
 	log.Debug().Msgf("realmlist response received: %+v", pkt)
+
+	pw.realmChannel <- pkt.Realms
 }
 
 func (pw *RealmClient) HandlePackets() {

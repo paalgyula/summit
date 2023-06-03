@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -11,10 +12,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var serverAddress, username, password string
+var listenAddress, serverAddress, username, password string
 
 func init() {
-	flag.StringVar(&serverAddress, "server", "localhost:5000", "address of the logon server in host:port format")
+	flag.StringVar(&listenAddress, "listen", "localhost:5000", "address where to listen")
+	// Sorry, and thank you for your support guys!
+	flag.StringVar(&serverAddress, "server", "logon.warmane.com:3724", "address of the logon server in host:port format")
 	flag.StringVar(&username, "user", "test", "username")
 	flag.StringVar(&password, "pass", "test", "password")
 }
@@ -22,10 +25,16 @@ func init() {
 func main() {
 	flag.Parse()
 
-	br := serworm.NewBridge(serverAddress, username, password)
+	ctx := context.Background()
+	err := serworm.StartProxy(ctx, listenAddress, serworm.LoginServerConfig{
+		ServerAddress: serverAddress,
+		User:          username,
+		Pass:          password,
+	})
 
-	// TODO: create a game client and a binary packet dumper
-	br.SetGameClient(nil)
+	if err != nil {
+		panic(err)
+	}
 
 	done := make(chan bool, 1)
 	sigCh := make(chan os.Signal, 1)

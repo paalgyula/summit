@@ -45,7 +45,7 @@ func (as *AuthServer) Run() {
 			return
 		}
 
-		NewAuthConnection(c)
+		NewAuthConnection(c, as.rp)
 	}
 }
 
@@ -79,12 +79,14 @@ type AuthConnection struct {
 	log zerolog.Logger
 	id  string
 
+	rp RealmProvider
+
 	account *db.Account
 
 	srp *crypt.SRP6
 }
 
-func NewAuthConnection(c net.Conn) *AuthConnection {
+func NewAuthConnection(c net.Conn, rp RealmProvider) *AuthConnection {
 	rc := &AuthConnection{
 		c:       c,
 		log:     log.With().Str("addr", c.RemoteAddr().String()).Logger(),
@@ -92,6 +94,7 @@ func NewAuthConnection(c net.Conn) *AuthConnection {
 		id:      xid.New().String(),
 
 		srp: crypt.NewSRP6(7, 3, big.NewInt(0)),
+		rp:  rp,
 	}
 
 	go rc.listen()
@@ -173,16 +176,13 @@ func (rc *AuthConnection) HandleRealmList() error {
 
 	// TODO: #3 use some protocol to do registration with realm/manage realms and-or offline status
 	srl := ServerRealmlistPacket{}
-	srl.Realms = []Realm{{
-		Icon:          6,
-		Lock:          0,
-		Flags:         RealmFlagNone,
-		Name:          "The Highest Summit",
-		Address:       "127.0.0.1:5002",
-		Population:    3,
-		NumCharacters: 1,
-		Timezone:      8,
-	}}
+
+	realms, err := rc.rp.Realms(rc.account.Name)
+	if err != nil {
+		return fmt.Errorf("authConnection.HandleRealmList: %w", err)
+	}
+
+	srl.Realms = realms
 
 	return rc.Send(RealmList, srl.MarshalPacket())
 }

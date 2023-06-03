@@ -23,7 +23,7 @@ func TestConnection(t *testing.T) {
 	assert.NoError(t, err)
 	defer as.Close()
 
-	br := serworm.NewBridge("localhost:5000", "TEST", "test")
+	br := serworm.NewBridge(5001, "localhost:5000", "Test Realm", nil)
 
 	assert.NotNil(t, br)
 }

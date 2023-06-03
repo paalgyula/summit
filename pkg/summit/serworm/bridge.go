@@ -2,8 +2,10 @@ package serworm
 
 import (
 	"net"
+	"strconv"
 
 	"github.com/paalgyula/summit/pkg/summit/world"
+	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog"
@@ -35,57 +37,74 @@ type Bridge struct {
 func (b *Bridge) HandleExternalPacket(client *world.GameClient, oc wow.OpCode, data []byte) {
 	wow.GetPacketDumper().Write(oc, data)
 
-	b.SendPacket(oc, data)
+	b.Send2Bridge(oc, data)
 }
 
-func (b *Bridge) SetGameClient(gc *world.GameClient) {
-	b.client = gc
-}
-
-func (b *Bridge) SendPacket(oc wow.OpCode, data []byte) {
-	w := wow.NewPacket(oc)
-
-	w.WriteB(uint16(len(data) + 2))
-	w.Write(uint16(oc))
-	header := w.Bytes()
-
-	if b.crypt != nil {
-		header = b.crypt.Encrypt(w.Bytes())
-	} else {
-		b.log.Error().Msg("no encryption?!")
-	}
-
-	data = append(header, data...)
+func (b *Bridge) Send2Bridge(oc wow.OpCode, data []byte) {
+	wow.GetPacketDumper().Write(oc, data)
 
 	// TODO: send to server
 }
 
-func (b *Bridge) setup() {
-	host, _, err := net.SplitHostPort(b.server)
-	if err != nil {
-		panic(err)
-	}
+func (b *Bridge) Send2Client(oc wow.OpCode, data []byte) {
+	w := wow.NewPacket(oc)
 
-	b.log = b.log.With().Str("host", host).Logger()
-	loginConn, err := net.Dial("tcp4", b.server)
-	if err != nil {
-		panic(err)
-	}
+	// w.WriteB(uint16(len(data) + 2))
+	// w.Write(uint16(oc))
+	// header := w.Bytes()
 
-	client := NewRealmClient(loginConn, 0x08)
-	client.Authenticate(b.user, b.pass)
+	// if b.crypt != nil {
+	// 	header = b.crypt.Encrypt(w.Bytes())
+	// } else {
+	// 	b.log.Error().Msg("no encryption?!")
+	// }
+
+	// data = append(header, data...)
+
+	wow.NewPacket(oc)
+	w.WriteBytes(data)
+
+	b.client.Send(w)
 }
 
-func NewBridge(logonServer, user, pass string) *Bridge {
-	b := &Bridge{
-		server: logonServer,
-		user:   user,
-		pass:   pass,
+func (b *Bridge) Start(listener net.Listener, ws world.SessionManager) {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			b.log.Error().Err(err).Msg("cannot accept connection")
 
-		log: log.With().Str("service", "proxy").Logger(),
+			continue
+		}
+
+		handlers := make([]world.PacketHandler, wow.NumMsgTypes)
+		for i := 0; i < int(wow.NumMsgTypes); i++ {
+			handlers[i] = world.PacketHandler{
+				Opcode:  wow.OpCode(i),
+				Handler: b.HandleExternalPacket,
+			}
+		}
+
+		b.client = world.NewGameClient(conn, ws, nil, handlers...)
+		packets.OpcodeTable.Handle(wow.ClientAuthSession, b.client.AuthSessionHandler)
+	}
+}
+
+func NewBridge(listenPort int, serverAddr, serverName string, ws world.SessionManager) *Bridge {
+	b := &Bridge{
+		log: log.With().
+			Str("name", serverName).
+			Str("service", "bridge").Logger(),
 	}
 
-	b.setup()
+	listenAddr := "127.0.0.1:" + strconv.Itoa(listenPort)
+	b.log.Info().Msgf("starting bridge on address: %s", listenAddr)
+
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		b.log.Fatal().Err(err).Msg("cannot listen")
+	}
+
+	go b.Start(listener, ws)
 
 	return b
 }

@@ -27,7 +27,7 @@ func (pkt *ClientRealmlistPacket) UnmarshalPacket(bb wow.PacketData) error {
 
 // ServerRealmlistPacket is made up of a list of realms.
 type ServerRealmlistPacket struct {
-	Realms []Realm
+	Realms []*Realm
 }
 
 func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.Reader) {
@@ -45,7 +45,7 @@ func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.Reader) {
 	r.Read(&unused)
 	r.Read(&realmCount)
 
-	pkt.Realms = make([]Realm, int(realmCount))
+	pkt.Realms = make([]*Realm, int(realmCount))
 
 	for i := 0; i < int(realmCount); i++ {
 		var realm Realm
@@ -60,7 +60,7 @@ func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.Reader) {
 		r.Read(&realm.Timezone)
 		r.Read(&realm.Unknown)
 
-		pkt.Realms[i] = realm
+		pkt.Realms[i] = &realm
 	}
 }
 

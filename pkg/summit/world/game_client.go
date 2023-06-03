@@ -89,7 +89,7 @@ func (gc *GameClient) handleConnection() {
 	defer gc.ws.Disconnected(gc.ID)
 
 	time.Sleep(time.Millisecond * 500)
-	gc.log.Error().Msg("sending auth challenge")
+	gc.log.Trace().Msg("sending auth challenge")
 	gc.sendAuthChallenge()
 
 	for {
@@ -115,9 +115,9 @@ func (gc *GameClient) SendPayload(opcode int, payload []byte) {
 	packet := append(header, payload...)
 	_, err = gc.n.Write(packet)
 
-	oc := opcode
+	oc := wow.OpCode(opcode)
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%T), payload size: %d packet size: %d", oc, oc, size, len(packet))
+		Msgf(">> sending packet 0x%04x (%v), payload size: %d packet size: %d", int(oc), oc.String(), size, len(packet))
 }
 
 func (gc *GameClient) Send(packet *wow.Packet) {
@@ -134,9 +134,9 @@ func (gc *GameClient) Send(packet *wow.Packet) {
 	payload := append(header, packet.Bytes()...)
 	_, err = gc.n.Write(payload)
 
-	oc := packet.OpCode()
+	oc := wow.OpCode(packet.OpCode())
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%T), payload size: %d packet size: %d", int(oc), oc, size, packet.Len())
+		Msgf(">> sending packet 0x%04x (%s), payload size: %d packet size: %d", int(oc), oc.String(), size, packet.Len())
 }
 
 func (gc *GameClient) makeHeader(packetLen int, opCode int) ([]byte, error) {
@@ -166,7 +166,7 @@ func (gc *GameClient) handlePacket() error {
 		return fmt.Errorf("with opcode: %0X, %w", opCode, err)
 	}
 
-	gc.log.Trace().Msgf("packet received 0x%04x (%T) size: %d", opCode, opCode, len(data))
+	gc.log.Trace().Msgf("<< packet received 0x%04x (%s) size: %d", int(opCode), opCode.String(), len(data))
 
 	if gc.bs != nil {
 		gc.bs.SendPacketToBabies(gc.ID, int(opCode), data)
