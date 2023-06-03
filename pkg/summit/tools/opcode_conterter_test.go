@@ -18,16 +18,16 @@ func TestOpcodeFetcher(t *testing.T) {
 
 	_, err = io.Copy(f, content)
 	assert.NoError(t, err)
-}
 
-func TestOpcodeParser(t *testing.T) {
-	fileName := "Opcodes.h"
-	f, _ := os.Open(fileName)
-	opcodes, err := ParseOpcodes(f)
+	t.Run("TestOpcodeParser", func(t *testing.T) {
+		fileName := "Opcodes.h"
+		f, _ := os.Open(fileName)
+		opcodes, err := ParseOpcodes(f)
 
-	assert.NoError(t, err)
-	assert.NotNil(t, opcodes)
+		assert.NoError(t, err)
+		assert.NotNil(t, opcodes)
 
-	err = WriteOpcodeSource("wow", opcodes, os.Stdout)
-	assert.NoError(t, err)
+		err = WriteOpcodeSource("wow", opcodes, os.Stdout)
+		assert.NoError(t, err)
+	})
 }
