@@ -8,14 +8,18 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
 )
 
-func LoadMaps(dbcDirectoryPath string) ([]wotlk.MapEntry, error) {
-	filename := "Map.dbc"
-	f, err := os.Open(path.Join(filename))
+func LoadAll(dbcDirectoryPath string) {
+	_, _ = load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcDirectoryPath)
+	_, _ = load[wotlk.MapEntry]("Map.dbc", dbcDirectoryPath)
+}
+
+func load[C any](fileName string, baseDir ...string) ([]C, error) {
+	f, err := os.Open(path.Join(append(baseDir, fileName)...))
 	if err != nil {
 		panic(err)
 	}
 
-	r, err := NewReader[wotlk.MapEntry](f)
+	r, err := NewReader[C](f)
 	if err != nil {
 		return nil, err
 	}
@@ -23,28 +27,6 @@ func LoadMaps(dbcDirectoryPath string) ([]wotlk.MapEntry, error) {
 		return nil, err
 	}
 
-	fmt.Println(r.Records[0].MapName.Value())
-
-	// fmt.Println(string(r.Strings()))
-	return r.Records, nil
-}
-
-func LoadCharacter(dbcDirectoryPath string) ([]wotlk.CharStartOutfitEntry, error) {
-	filename := "CharStartOutfit.dbc"
-	f, err := os.Open(path.Join(dbcDirectoryPath, filename))
-	if err != nil {
-		return nil, fmt.Errorf("cannot load CharStartOutfit.dbc: %w", err)
-	}
-
-	r, err := NewReader[wotlk.CharStartOutfitEntry](f)
-	if err != nil {
-		return nil, err
-	}
-	if err := r.ReadAll(); err != nil {
-		return nil, err
-	}
-
-	fmt.Println("Loaded", len(r.Records), "records")
-
+	fmt.Printf("DBC loader: Loaded %d records from %s\n", r.Header.RecordCount, fileName)
 	return r.Records, nil
 }

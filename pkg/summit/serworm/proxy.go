@@ -7,8 +7,8 @@ import (
 	"os"
 
 	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world"
-	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -16,53 +16,82 @@ import (
 type ProxyServer struct {
 	client *world.GameClient
 
+	config LoginServerConfig
+
 	ctx context.Context
 	db  *db.Database
-	l   net.Listener
 	log zerolog.Logger
+
+	bridge     *Bridge
+	authServer *auth.AuthServer
+
+	realms []*auth.Realm
 }
 
-func StartProxy(ctx context.Context, listenAddress string) (err error) {
+type LoginServerConfig struct {
+	ServerAddress string
+	User          string
+	Pass          string
+}
+
+func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig) (err error) {
 	db := db.GetInstance()
 
-	ws := ProxyServer{
-		db:  db,
-		log: log.With().Str("server", "proxy").Caller().Logger(),
-		ctx: ctx,
+	ws := &ProxyServer{
+		db:     db,
+		log:    log.With().Str("server", "proxy").Caller().Logger(),
+		ctx:    ctx,
+		config: config,
 	}
 
-	ws.l, err = net.Listen("tcp4", listenAddress)
+	as, err := auth.NewServer(listenAddress, ws)
 	if err != nil {
-		return fmt.Errorf("world.StartProxy: %w", err)
+		return err
 	}
 
-	ws.log.Info().Msgf("proxy server is listening on: %s TODO: regiser in realm server", listenAddress)
+	ws.authServer = as
 
-	go ws.listen()
+	ws.log.Info().Msgf("proxy server is listening on: %s", listenAddress)
+
 	go ws.Run()
 
 	return nil
 }
 
-func (ws *ProxyServer) listen() {
-	conn, err := ws.l.Accept()
-	if err != nil {
-		log.Error().Err(err).Msg("cannot accept connection")
-	}
+func (ws *ProxyServer) Realms(string) ([]*auth.Realm, error) {
+	ws.InitFakeClient()
 
-	bridge := NewBridge("logon.warmane.com:3724", "gmgoofy", "0027472")
+	return ws.realms, nil
+}
 
-	handlers := make([]world.PacketHandler, 0xffff)
-	for i := 0; i < 0xffff; i++ {
-		handlers[i] = world.PacketHandler{
-			Opcode:  wow.OpCode(i),
-			Handler: bridge.HandleExternalPacket,
+func (ws *ProxyServer) InitFakeClient() {
+	if ws.realms == nil {
+		loginConn, err := net.Dial("tcp4", ws.config.ServerAddress)
+		if err != nil {
+			panic(err)
 		}
+
+		client := NewRealmClient(loginConn, 0x08)
+		realms, err := client.Authenticate(ws.config.User, ws.config.Pass)
+		if err != nil {
+			ws.log.Fatal().Msg("cannot authenticate client")
+		}
+
+		ws.log.Debug().Msgf("starting %d bridge realms", len(realms))
+		ws.startServers(realms)
 	}
+}
 
-	gc := world.NewGameClient(conn, ws, nil, handlers...)
-	bridge.SetGameClient(gc)
+func (ws *ProxyServer) startServers(realms []*auth.Realm) {
+	ws.realms = make([]*auth.Realm, len(realms))
 
+	portBase := 5983
+	for i, realm := range realms {
+		_ = NewBridge(portBase+i, realm.Address, realm.Name, ws)
+		realm.Address = fmt.Sprintf("127.0.0.1:%d", portBase+i)
+
+		ws.realms[i] = realm
+	}
 }
 
 func (ws *ProxyServer) AddClient(gc *world.GameClient) {
@@ -76,7 +105,6 @@ func (ws *ProxyServer) Disconnected(id string) {
 }
 
 func (ws *ProxyServer) Run() {
-	defer ws.l.Close()
 	defer log.Warn().Msg("proxy server stopped")
 
 	for {

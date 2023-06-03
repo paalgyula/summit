@@ -10,8 +10,7 @@ import (
 )
 
 func TestGenerate(t *testing.T) {
-	// LoadCharacterRaces()
-	// LoadClassInfo()
+	t.Skip("used for local development only")
 
 	f, err := os.Open("../../../../dbc/ChrClasses.dbc")
 	assert.NoError(t, err)
@@ -24,14 +23,15 @@ func TestGenerate(t *testing.T) {
 
 	fmt.Println(dr.Records[1].Name.Value())
 
+	t.Run("CharacterLoad", func(t *testing.T) {
+		base := "../../../../dbc"
+
+		t.Run("CharStartOutfit.dbc", func(t *testing.T) {
+			data, err := load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", base)
+			assert.NoError(t, err)
+			assert.Lenf(t, data, 126, "Expected 126 records in CharStartOutfit.dbc")
+		})
+	})
+
 	// fmt.Printf("%+v\n\n", dr.Header)
-}
-
-func TestLoadMap(t *testing.T) {
-	LoadMaps("../../../../dbc")
-}
-
-func TestLoadCharacters(t *testing.T) {
-	_, err := LoadCharacter("../../../../dbc")
-	assert.NoError(t, err)
 }

@@ -41,7 +41,7 @@ func (p *PacketDumper) Write(code OpCode, data []byte) {
 	bw := bufio.NewWriter(p.w)
 
 	b64data := base64.StdEncoding.EncodeToString(data)
-	bw.WriteString(fmt.Sprintf("# code: 0x%04x len: %05d\n%s\n", code, len(data), b64data))
+	bw.WriteString(fmt.Sprintf("# code: 0x%04x len: %05d\n%s\n", int(code), len(data), b64data))
 
 	bw.Flush()
 }

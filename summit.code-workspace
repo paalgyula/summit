@@ -9,7 +9,9 @@
 		// 	"path": "../summit-baby"
 		// }
 	],
-	"extensions": {},
+	"extensions": {
+		"recommendations": ["ms-vscode.hexeditor"]
+	},
 	"settings": {
 		"workbench.colorCustomizations": {
 			"statusBar.background" : "#1A1A1A",

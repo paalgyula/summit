@@ -1,10 +1,12 @@
 package player
 
+import "github.com/paalgyula/summit/pkg/wow"
+
 const InventorySlotBagEnd = 23
 
 type InventoryItem struct {
 	DisplayInfoID uint32
-	InventoryType uint8
+	InventoryType wow.InventoryType
 	EnchantSlot   uint32
 }
 

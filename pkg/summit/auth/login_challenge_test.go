@@ -1,12 +1,11 @@
-package packets_test
+package auth_test
 
 import (
 	"fmt"
 	"math/big"
 	"testing"
 
-	"github.com/paalgyula/summit/pkg/summit/auth/packets"
-	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/stretchr/testify/assert"
 )
@@ -15,11 +14,11 @@ import (
 const testLoginPacket = "WoW\x00\x02\x04\x03\x9e!68x\x00niW\x00SUne<\x00\x00\x00\x7f\x00\x00\x01\x04TEST"
 
 func TestLoginChallenge(t *testing.T) {
-	data := wow.RData{
+	data := auth.RData{
 		Data: []byte(testLoginPacket),
 	}
 
-	var lp packets.ClientLoginChallenge
+	var lp auth.ClientLoginChallenge
 	data.Unmarshal(&lp)
 
 	assert.Equal(t, lp.GameName, "WoW\x00")
@@ -53,8 +52,8 @@ func TestLoginSession(t *testing.T) {
 	B := c.GenerateClientPubkey()
 	salt := c.RandomSalt()
 
-	lc := packets.ServerLoginChallenge{
-		Status:  packets.ChallengeStatusSuccess,
+	lc := auth.ServerLoginChallenge{
+		Status:  auth.ChallengeStatusSuccess,
 		B:       *B,
 		Salt:    *salt,
 		SaltCRC: make([]byte, 16),

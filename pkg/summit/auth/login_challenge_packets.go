@@ -1,6 +1,7 @@
-package packets
+package auth
 
 import (
+	"fmt"
 	"io"
 	"math/big"
 	"strings"
@@ -23,11 +24,11 @@ type ClientLoginChallenge struct {
 
 func NewClientLoginChallenge(accName string) *ClientLoginChallenge {
 	return &ClientLoginChallenge{
-		GameName:        "\x00WoW",
+		GameName:        "WoW\x00",
 		Version:         [3]byte{3, 3, 5},
 		Build:           12340,
-		Platform:        "\x0068x",
-		OS:              "\x00niW",
+		Platform:        "68x\x00",
+		OS:              "niW\x00",
 		Locale:          "SUne",
 		WorldRegionBias: 0,
 		IP:              [4]uint8{89, 51, 25, 12},
@@ -35,7 +36,7 @@ func NewClientLoginChallenge(accName string) *ClientLoginChallenge {
 	}
 }
 
-func (p *ClientLoginChallenge) OpCode() AuthCmd {
+func (p *ClientLoginChallenge) OpCode() RealmCommand {
 	return AuthLoginChallenge
 }
 
@@ -141,7 +142,7 @@ func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 
 	var tmp uint8
 
-	r.Read(&tmp) // unk1
+	r.Read(&tmp) // protocol versioon
 	r.Read(&pkt.Status)
 
 	if pkt.Status == ChallengeStatusSuccess {
@@ -173,6 +174,8 @@ func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
 		// Public key of SRP6
 		w.WriteZeroPadded(wow.ReverseBytes(pkt.B.Bytes()), 32)
 
+		fmt.Println("B: ", pkt.B.Text(16))
+
 		// G is the generator of SRP6
 		w.WriteOne(0x01)
 		w.Write(pkt.G)
@@ -184,6 +187,8 @@ func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
 
 		// Salt of the password generator
 		w.WriteZeroPadded(wow.ReverseBytes(pkt.Salt.Bytes()), 32)
+		fmt.Println("Salt: ", pkt.Salt.Text(16))
+
 		w.WriteBytes(pkt.SaltCRC)
 
 		w.WriteOne(0) // unk2

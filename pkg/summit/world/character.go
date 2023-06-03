@@ -51,6 +51,7 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	// fmt.Printf("%s %+v\n", characerName, req)
 
+	// TODO: #2 when the DBC reader is ready this should be re-written
 	loc := player.WorldLocation{
 		X:    10311.3,
 		Y:    832.463,
@@ -61,9 +62,9 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	p := player.Player{
 		Name:            characerName,
-		Race:            player.PlayerRace(req.Race),
-		Class:           player.PlayerClass(req.Class),
-		Gender:          player.PlayerGender(req.Gender),
+		Race:            wow.PlayerRace(req.Race),
+		Class:           wow.PlayerClass(req.Class),
+		Gender:          wow.PlayerGender(req.Gender),
 		Skin:            req.Skin,
 		Face:            req.Face,
 		HairStyle:       req.HairStyle,

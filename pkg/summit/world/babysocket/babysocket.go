@@ -52,7 +52,7 @@ func (s *Server) removeClient(id string) {
 	defer s.m.Unlock()
 
 	delete(s.clients, id)
-	s.log.Trace().Msgf("client disconnected: %s")
+	s.log.Trace().Msgf("client disconnected: %s", id)
 }
 
 func (s *Server) addClient(sc *socketClient) {

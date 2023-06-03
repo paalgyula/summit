@@ -129,3 +129,36 @@ func NewPlayerGUID(counter uint32) GUID {
 func NewItemGUID(counter uint32) GUID {
 	return NewGUID(ItemGuid, counter)
 }
+
+func (g GUID) TypeID() TypeID {
+	switch g.High() {
+	case ItemGuid:
+		return TypeIDItem
+	//case HIGHGUID_CONTAINER:    return TYPEID_CONTAINER; HIGHGUID_CONTAINER==HIGHGUID_ITEM currently
+	case UnitGuid, PetGuid:
+		return TypeIDUnit
+	case PlayerGuid:
+		return TypeIDPlayer
+	case GameObjectGuid, MoTransportGuid:
+		return TypeIDGameObject
+	case DynamicObjectGuid:
+		return TypeIDDynamicoObject
+	case CorpseGuid:
+		return TypeIDCorpse
+	default: // unknown
+		return TypeIDObject
+	}
+}
+
+type TypeID uint8
+
+const (
+	TypeIDObject TypeID = iota
+	TypeIDItem
+	TypeIDContainer
+	TypeIDUnit
+	TypeIDPlayer
+	TypeIDGameObject
+	TypeIDDynamicoObject
+	TypeIDCorpse
+)
