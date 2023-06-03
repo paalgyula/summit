@@ -13,7 +13,7 @@
 
 ## Modules:
 
-- Authentication/Realmlist server [summit-auth]
+- Authentication/Realmlist server [[**summit-auth**](docs/authserver.md)]
 - World Server [summit-world]
 - WoW Database converter [datagen]
 - Proxy (actually a worm) [[**serworm**](docs/serworm.md)]

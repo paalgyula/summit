@@ -21,4 +21,9 @@ There are different options:
 - Container - (kubernetes deployment/docs later 
   - [ ] #9
   - [ ] #10
+- From code:
+    <script src="https://gist.github.com/paalgyula/2cecca24d88c5bad94f2ccd4161a20ff.js"></script>
 
+## Configuration
+
+@paalgyula - todo
