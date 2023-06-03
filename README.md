@@ -1,9 +1,15 @@
 # 🏔 Summit
-### World of Warcraft 3.3.5a server emulator - Written in purely GO
+### World of Warcraft _3.3.5a_ server emulator - Written in purely GO
 
 "The climbers reached the **summit** of the mountain *after a long and challenging journey*."
 
----
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/paalgyula/summit)
+![go workflow](https://github.com/paalgyula/summit/actions/workflows/go.yml/badge.svg)
+![GitHub top language](https://img.shields.io/github/languages/top/paalgyula/summit)
+![Lines of code](https://img.shields.io/tokei/lines/github/paalgyula/summit?style=flat)
+![GitHub](https://img.shields.io/github/license/paalgyula/summit)
+![GitHub last commit](https://img.shields.io/github/last-commit/paalgyula/summit)
+
 
 ## Modules:
 
