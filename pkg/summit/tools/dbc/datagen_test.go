@@ -10,8 +10,7 @@ import (
 )
 
 func TestGenerate(t *testing.T) {
-	// LoadCharacterRaces()
-	// LoadClassInfo()
+	t.Skip("used for local development only")
 
 	f, err := os.Open("../../../../dbc/ChrClasses.dbc")
 	assert.NoError(t, err)
@@ -24,20 +23,15 @@ func TestGenerate(t *testing.T) {
 
 	fmt.Println(dr.Records[1].Name.Value())
 
-	// fmt.Printf("%+v\n\n", dr.Header)
-}
+	t.Run("CharacterLoad", func(t *testing.T) {
+		base := "../../../../dbc"
 
-func TestCharacterDBCLoad(t *testing.T) {
-	base := "../../../../dbc"
-
-	t.Run("CharStartOutfit.dbc", func(t *testing.T) {
-		data, err := load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", base)
-		assert.NoError(t, err)
-		assert.Lenf(t, data, 126, "Expected 126 records in CharStartOutfit.dbc")
+		t.Run("CharStartOutfit.dbc", func(t *testing.T) {
+			data, err := load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", base)
+			assert.NoError(t, err)
+			assert.Lenf(t, data, 126, "Expected 126 records in CharStartOutfit.dbc")
+		})
 	})
-}
 
-func TestLoadCharacters(t *testing.T) {
-	// _, err := loadCharacter("../../../../dbc")
-	// assert.NoError(t, err)
+	// fmt.Printf("%+v\n\n", dr.Header)
 }
