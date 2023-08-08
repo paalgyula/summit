@@ -10,6 +10,7 @@ import (
 	"github.com/paalgyula/summit/docs"
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/auth"
+	"github.com/paalgyula/summit/pkg/summit/console"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -21,12 +22,13 @@ func main() {
 	log.Info().
 		Str("build", docs.BuildInfo()).
 		Msg("Starting summit wow server")
-	db.InitYamlDatabase()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := world.StartServer(ctx, "0.0.0.0:5002"); err != nil {
+	ws, err := world.StartServer(ctx, "0.0.0.0:5002")
+
+	if err != nil {
 		panic(err)
 	}
 
@@ -48,6 +50,8 @@ func main() {
 		panic(err)
 	}
 	defer server.Close()
+
+	go console.ListenforCommands(ws)
 
 	done := make(chan bool, 1)
 	sigCh := make(chan os.Signal, 1)

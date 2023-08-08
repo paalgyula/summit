@@ -2,23 +2,12 @@ package db
 
 import (
 	"encoding/json"
-	"fmt"
 	"math/big"
-	"os"
-	"sync"
+	"strings"
 
+	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog/log"
-	"gopkg.in/yaml.v3"
 )
-
-const SummitConfig = "summit.yaml"
-
-var once sync.Once
-var instance *Database
-
-type Database struct {
-	Accounts []*Account `yaml:"accounts"`
-}
 
 func (db *Database) FindAccount(name string) *Account {
 	for _, a := range db.Accounts {
@@ -34,44 +23,23 @@ func (db *Database) FindAccount(name string) *Account {
 	return nil
 }
 
-func (db *Database) Load(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("database.Load: %w", err)
-	}
+func (db *Database) CreateAccount(name, pass string) (*Account, error) {
+	// need to build verifier from name, pass, salt
+	srp := crypt.NewSRP6(0, 0, big.NewInt(0))
 
-	err = yaml.NewDecoder(f).Decode(db)
-	if err != nil {
-		return fmt.Errorf("database.Load: %w", err)
-	}
+	acc := &Account{Name: strings.ToUpper(name), salt: srp.RandomSalt()}
 
-	return nil
-}
+	acc.verifier = srp.GenerateVerifier(acc.Name, strings.ToUpper(pass), acc.salt)
 
-func (db *Database) SaveAll() {
-	log.Info().Msg("Saving world state to the datbase")
+	// store as hex
+	acc.S = acc.salt.Text(16)
+	acc.V = acc.verifier.Text(16)
 
-	f, _ := os.Create(SummitConfig)
-	_ = yaml.NewEncoder(f).Encode(db)
-}
+	// todo - check if account already exists, return error if it does
 
-func InitYamlDatabase() {
-	instance = &Database{}
-	err := instance.Load(SummitConfig)
+	db.Accounts = append(db.Accounts, acc)
 
-	if err != nil {
-		log.Warn().Err(err).Msgf("database file: %s not found", SummitConfig)
-
-		instance.Accounts = make([]*Account, 0)
-	}
-
-	log.Info().Msgf("Loaded database with %d accounts", len(instance.Accounts))
-}
-
-func GetInstance() *Database {
-	once.Do(InitYamlDatabase)
-
-	return instance
+	return acc, nil
 }
 
 type Account struct {

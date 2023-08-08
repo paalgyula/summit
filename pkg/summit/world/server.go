@@ -31,10 +31,10 @@ type WorldServer struct {
 	bs *babysocket.Server
 }
 
-func StartServer(ctx context.Context, listenAddress string) (err error) {
+func StartServer(ctx context.Context, listenAddress string) (ws *WorldServer, err error) {
 	db := db.GetInstance()
 
-	ws := &WorldServer{
+	ws = &WorldServer{
 		db:  db,
 		log: log.With().Str("server", "world").Caller().Logger(),
 		ctx: ctx,
@@ -44,12 +44,12 @@ func StartServer(ctx context.Context, listenAddress string) (err error) {
 
 	ws.l, err = net.Listen("tcp4", listenAddress)
 	if err != nil {
-		return fmt.Errorf("world.StartServer: %w", err)
+		return nil, fmt.Errorf("world.StartServer: %w", err)
 	}
 
 	bs, err := babysocket.NewServer(ctx, "babysocket", ws)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	ws.bs = bs
@@ -59,7 +59,7 @@ func StartServer(ctx context.Context, listenAddress string) (err error) {
 	go ws.listenConnections()
 	go ws.Run()
 
-	return nil
+	return ws, err
 }
 
 func (ws *WorldServer) Clients() map[string]wow.PayloadSender {
