@@ -30,6 +30,8 @@ type SRP6 struct {
 	B, b *big.Int
 }
 
+// VALE_QUESTION: What is the purpose here of the parameters g & k? They aren't used. Even N seems redundant in how you've used it to-date..
+
 // NewSRP6 g=7 k=3 N=bignumber
 func NewSRP6(g, k int64, N *big.Int) *SRP6 {
 	srp6 := &SRP6{

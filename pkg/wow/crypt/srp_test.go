@@ -124,11 +124,12 @@ func TestFullPasswordlessFlow(t *testing.T) {
 
 	sK, sM := sServer.CalculateServerSessionKey(A, sVerifier, sSalt, I)
 	cK, cM := sClient.CalculateClientSessionKey(sSalt, B, I, password)
-	_ = cM
+	// _ = cM
 	fmt.Printf("sK: 0x%x\ncK: 0x%x\nsM: 0x%x\ncM: 0x%x\n\n", sK, cK, sM, cM)
 
 	assert.Equal(t, sK.Text(16), cK.Text(16))
 	assert.Equal(t, sM.Text(16), cM.Text(16))
+	assert.Equal(t, sM.Cmp(cM), 0)
 }
 
 func TestNLength(t *testing.T) {

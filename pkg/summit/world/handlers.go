@@ -37,7 +37,8 @@ func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
 
 	for _, oh := range handlers {
 		if len(OpcodeTable) <= int(oh.Opcode) {
-			fmt.Println("opcode table too short")
+			fmt.Printf("Opcode Table missing Opcode: %v\n", oh.Opcode.String())
+			// fmt.Println("opcode table too short")
 			continue
 		}
 		OpcodeTable.Handle(oh.Opcode, oh.Handler)

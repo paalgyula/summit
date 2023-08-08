@@ -149,8 +149,11 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 		rc.account.Name)
 
 	if M.Cmp(&pkt.M) != 0 {
+		// VALE_QUESTION: should these status codes be enumerated somewhere?
 		response.StatusCode = 4
 		rc.Send(AuthLoginProof, response.MarshalPacket())
+		// VALE_QUESTION: might be colliding with the deferred close,
+		// generating the error "use of a closed network connection"
 		rc.c.Close()
 
 		return nil
@@ -265,7 +268,7 @@ func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 	opCodeData := make([]byte, 1)
 	n, err := r.Read(opCodeData)
 	if err != nil {
-		return nil, fmt.Errorf("erorr while reading command: %w", err)
+		return nil, fmt.Errorf("error while reading command: %w", err)
 	}
 
 	if n != 1 {
