@@ -76,8 +76,12 @@ func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, custom_
 func (gc *GameClient) recover() {
 	a := recover()
 
+	if a == nil { // Connection Closed Deliberately & Safely
+		return
+	}
+
 	gc.log.Error().Msgf("panic occured, dropping client")
-	fmt.Printf("Unhandled Error: %s\n%s",
+	fmt.Printf("Unhandled Error: %v\n%s",
 		a,
 		string(debug.Stack()),
 	)
@@ -97,6 +101,11 @@ func (gc *GameClient) handleConnection() {
 	for {
 		err := gc.handlePacket()
 		if err != nil {
+			if err == wow.ErrEmptyEOF {
+				gc.log.Debug().Msg("User Disconnected. Dropping client.")
+				gc.Close()
+				return
+			}
 			gc.log.Error().Err(err).Msg("cannot handle packet(s)")
 			return
 		}
@@ -180,6 +189,9 @@ func (gc *GameClient) handlePacket() error {
 func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 	header, err := gc.input.ReadNBytes(6)
 	if err != nil {
+		if err == wow.ErrEmptyEOF {
+			return 0, -1, err
+		}
 		return 0, -1, errors.New("cannot read opcode")
 	}
 

@@ -21,8 +21,9 @@ import (
 )
 
 var (
-	ErrShortRead = errors.New("short read when reading opcode data")
-	ErrWriteSize = errors.New("the written and sent bytes are not equal")
+	ErrShortRead        = errors.New("short read when reading opcode data")
+	ErrWriteSize        = errors.New("the written and sent bytes are not equal")
+	ErrClientDisconnect = errors.New("Client Disconnected")
 )
 
 type AuthServer struct {
@@ -89,7 +90,7 @@ type AuthConnection struct {
 func NewAuthConnection(c net.Conn, rp RealmProvider) *AuthConnection {
 	rc := &AuthConnection{
 		c:       c,
-		log:     log.With().Str("addr", c.RemoteAddr().String()).Logger(),
+		log:     log.With().Str("server", "auth").Str("addr", c.RemoteAddr().String()).Caller().Logger(),
 		account: nil,
 		id:      xid.New().String(),
 
@@ -230,7 +231,13 @@ func (rc *AuthConnection) listen() {
 		// Read packets infinitely :)
 		pkt, err := rc.read(rc.c)
 		if err != nil || pkt == nil {
-			log.Error().Err(err).Msg("error while reading from client")
+
+			if err != nil && err == ErrClientDisconnect {
+				rc.log.Debug().Msgf("User disconnected. Ending Connection.")
+				return
+			}
+
+			rc.log.Error().Err(err).Msg("error while reading from client")
 
 			return
 		}
@@ -266,9 +273,14 @@ func (rc *AuthConnection) listen() {
 // read reads the packet from the auth socket
 func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 	opCodeData := make([]byte, 1)
+	// n, err := io.ReadFull(r, opCodeData)
 	n, err := r.Read(opCodeData)
-	// TODO - client disconnect seems to send EOF, causing an error here
 	if err != nil {
+		if n == 0 && err == io.EOF {
+			// assume this is a client disconnect
+			return nil, ErrClientDisconnect
+		}
+
 		return nil, fmt.Errorf("error while reading command: %w", err)
 	}
 

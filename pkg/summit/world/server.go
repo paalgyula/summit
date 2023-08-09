@@ -103,7 +103,7 @@ func (ws *WorldServer) AddClient(gc *GameClient) {
 
 func (ws *WorldServer) Disconnected(id string) {
 	ws.clients.Delete(id)
-	ws.log.Debug().Msgf("client disconnected: %s", id)
+	ws.log.Debug().Msgf("Client disconnected: %s", id)
 }
 
 func (ws *WorldServer) Stats() {

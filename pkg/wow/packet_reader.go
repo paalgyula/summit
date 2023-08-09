@@ -12,6 +12,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var (
+	ErrEmptyEOF = errors.New("Empty & EOF")
+)
+
 type countingReader struct {
 	reader    io.Reader
 	BytesRead int
@@ -127,11 +131,14 @@ func (r *Reader) ReadNBytes(n int) ([]byte, error) {
 
 	n2, err := r.ReadBytes(buf)
 	if err != nil {
+		if err == io.EOF && n2 == 0 {
+			return buf, ErrEmptyEOF
+		}
 		return buf, fmt.Errorf("wow.ReadBytes: %w", err)
 	}
 
 	if n2 != n {
-		log.Warn().Err(err).Msgf("readed %d instead of required: %d", n2, n)
+		log.Warn().Err(err).Msgf("read %d instead of required: %d", n2, n)
 		fmt.Printf("%s", hex.Dump(buf[:n2]))
 
 		return buf, errors.New("cant read that much bytes")
