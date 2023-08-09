@@ -25,11 +25,14 @@ func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
 	OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
 	OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
 
-	if len(handlers) < int(wow.NumMsgTypes) {
-		additional := int(wow.NumMsgTypes) - len(handlers)
+	handle_count := len(handlers)
+
+	if handle_count < int(wow.NumMsgTypes) {
+		additional := int(wow.NumMsgTypes) - handle_count
+		gc.log.Debug().Msgf("Adding %d empty WoW OpCode handlers", additional)
 		for i := 0; i < additional; i++ {
 			handlers = append(handlers, PacketHandler{
-				Opcode:  wow.OpCode(len(handlers) + i + 1),
+				Opcode:  wow.OpCode(handle_count + i + 1),
 				Handler: "none",
 			})
 		}
@@ -37,7 +40,7 @@ func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
 
 	for _, oh := range handlers {
 		if len(OpcodeTable) <= int(oh.Opcode) {
-			fmt.Printf("Opcode Table missing Opcode: %v\n", oh.Opcode.String())
+			gc.log.Error().Msgf("Opcode Table missing Opcode: %v\n", oh.Opcode.String())
 			// fmt.Println("opcode table too short")
 			continue
 		}
