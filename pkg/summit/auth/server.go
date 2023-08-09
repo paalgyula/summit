@@ -267,6 +267,7 @@ func (rc *AuthConnection) listen() {
 func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 	opCodeData := make([]byte, 1)
 	n, err := r.Read(opCodeData)
+	// TODO - client disconnect seems to send EOF, causing an error here
 	if err != nil {
 		return nil, fmt.Errorf("error while reading command: %w", err)
 	}
