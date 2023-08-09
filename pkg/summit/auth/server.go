@@ -121,7 +121,6 @@ func (rc *AuthConnection) HandleLogin(pkt *ClientLoginChallenge) error {
 
 		if rc.account == nil {
 			res.Status = ChallengeStatusFailUnknownAccount
-			rc.c.Close()
 		}
 	}
 
@@ -150,16 +149,12 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 		rc.account.Name)
 
 	if M.Cmp(&pkt.M) != 0 {
-		// VALE_QUESTION: should these status codes be enumerated somewhere?
-		response.StatusCode = 4
+		response.StatusCode = ChallengeStatusFailUnknownAccount
 		rc.Send(AuthLoginProof, response.MarshalPacket())
-		// VALE_QUESTION: might be colliding with the deferred close,
-		// generating the error "use of a closed network connection"
-		rc.c.Close()
 
 		return nil
 	} else {
-		response.StatusCode = 0
+		response.StatusCode = ChallengeStatusSuccess
 		response.Proof.Set(crypt.CalculateServerProof(&pkt.A, M, K))
 
 		rc.log = rc.log.With().
@@ -195,7 +190,7 @@ func (rc *AuthConnection) Send(opcode RealmCommand, payload []byte) error {
 	size := len(payload)
 
 	rc.log.Debug().
-		Str("opcode", fmt.Sprintf("0x%04x", int(opcode))).
+		Str("opcode", opcode.String()).
 		Int("size", size).
 		Hex("data", payload).
 		Msg("sending packet to client")

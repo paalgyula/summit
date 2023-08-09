@@ -77,7 +77,7 @@ func (p *ClientLoginChallenge) MarshalPacket() []byte {
 	return w.Bytes()
 }
 
-type ChallengeStatus uint8
+type ChallengeStatus = uint8
 
 const (
 	ChallengeStatusSuccess ChallengeStatus = iota
@@ -85,7 +85,7 @@ const (
 	ChallengeStatusFailed
 	// This <game> account has been closed and is no longer available for use. Please
 	// go to <site>/banned.html for further information.
-	ChallengeStatusFailBanned = iota + 1
+	ChallengeStatusFailBanned ChallengeStatus = iota + 1
 	// The information you have entered is not valid. Please check the spelling
 	// of the account name and password. If you need help in retrieving a lost or
 	// stolen password, see <site> for more information
@@ -137,9 +137,9 @@ const (
 	// Your account has been locked but can be unlocked.
 	ChallengeStatusFailUnlockableLock
 	// You must log in with a Battle.net account username and password. TO create an account please [Click Here] or go to [link] to begin the conversion.
-	ChallengeStatusFailConversionRequired = 0x20
+	ChallengeStatusFailConversionRequired ChallengeStatus = 0x20
 	// You have been disconnected from the server.
-	ChallengeStatusFailDisconnected = 0xFF
+	ChallengeStatusFailDisconnected ChallengeStatus = 0xFF
 )
 
 // ServerLoginChallenge is the server's response to a client's challenge. It contains
