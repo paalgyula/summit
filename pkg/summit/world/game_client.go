@@ -40,11 +40,13 @@ type GameClient struct {
 
 	ws SessionManager
 
+	pht PacketHandleTable
+
 	// External packet handler connection
 	bs *babysocket.Server
 }
 
-func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, handlers ...PacketHandler) *GameClient {
+func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, custom_handlers ...PacketHandler) *GameClient {
 	gc := &GameClient{
 		ID: xid.New().String(),
 		n:  n,
@@ -62,8 +64,8 @@ func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, handler
 		bs:        bs,
 	}
 
-	// Register opcode handlers from handlers.go
-	gc.RegisterHandlers(handlers...)
+	// Register default opcode handlers and any of our custom handlers (such as the serworm's).
+	gc.RegisterHandlers(custom_handlers...)
 
 	go gc.handleConnection()
 	ws.AddClient(gc)

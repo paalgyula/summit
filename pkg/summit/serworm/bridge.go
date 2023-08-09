@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/paalgyula/summit/pkg/summit/world"
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog"
@@ -85,7 +84,8 @@ func (b *Bridge) Start(listener net.Listener, ws world.SessionManager) {
 		}
 
 		b.client = world.NewGameClient(conn, ws, nil, handlers...)
-		packets.OpcodeTable.Handle(wow.ClientAuthSession, b.client.AuthSessionHandler)
+		b.client.RegisterHandler(world.PacketHandler{Opcode: wow.ClientAuthSession, Handler: b.client.AuthSessionHandler})
+		// packets.OpcodeTable.Handle(wow.ClientAuthSession, b.client.AuthSessionHandler)
 	}
 }
 

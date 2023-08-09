@@ -3,7 +3,9 @@ package world
 import (
 	"fmt"
 
-	. "github.com/paalgyula/summit/pkg/summit/world/packets"
+	"github.com/rs/zerolog/log"
+
+	// . "github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -17,42 +19,60 @@ type PacketHandler struct {
 	Opcode  wow.OpCode
 	Handler any
 }
+type PacketHandleTable [wow.NumMsgTypes]*PacketHandler
 
-func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
-	OpcodeTable.Handle(wow.ClientPing, gc.PingHandler)
-	OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
-	OpcodeTable.Handle(wow.ClientCharEnum, gc.ListCharacters)
-	OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
-	OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
-
-	handle_count := len(handlers)
-
-	if handle_count < int(wow.NumMsgTypes) {
-		additional := int(wow.NumMsgTypes) - handle_count
-		gc.log.Debug().Msgf("Adding %d empty WoW OpCode handlers", additional)
-		for i := 0; i < additional; i++ {
-			handlers = append(handlers, PacketHandler{
-				Opcode:  wow.OpCode(handle_count + i + 1),
-				Handler: "none",
-			})
-		}
+func (pPht *PacketHandleTable) Get(code wow.OpCode) (*PacketHandler, error) {
+	if code >= wow.NumMsgTypes {
+		return nil, fmt.Errorf("Out of bounds code: %s", code.String())
 	}
 
-	for _, oh := range handlers {
-		if len(OpcodeTable) <= int(oh.Opcode) {
-			gc.log.Error().Msgf("Opcode Table missing Opcode: %v\n", oh.Opcode.String())
-			// fmt.Println("opcode table too short")
-			continue
-		}
-		OpcodeTable.Handle(oh.Opcode, oh.Handler)
+	return pPht[code], nil
+}
+
+func (pPht *PacketHandleTable) Set(code wow.OpCode, handler any) {
+
+	packet_handler, err := pPht.Get(code)
+
+	if err != nil {
+		log.Fatal().Msgf("Attempting to set out of bounds code: %s", code.String())
+		return
 	}
+
+	if packet_handler == nil {
+		packet_handler = &PacketHandler{Opcode: code, Handler: nil}
+		pPht[code] = packet_handler
+	}
+
+	packet_handler.Handler = handler
+}
+
+func (gc *GameClient) RegisterHandlers(custom_handlers ...PacketHandler) {
+
+	// Default Handlers
+
+	gc.pht.Set(wow.ClientPing, gc.PingHandler)
+	gc.pht.Set(wow.ClientAuthSession, gc.AuthSessionHandler)
+	gc.pht.Set(wow.ClientCharEnum, gc.ListCharacters)
+	gc.pht.Set(wow.ClientCharCreate, gc.CreateCharacter)
+	gc.pht.Set(wow.ClientRealmSplit, gc.HandleRealmSplit)
+
+	// Then Custom Overrides
+
+	for _, ch := range custom_handlers {
+		gc.pht.Set(ch.Opcode, ch.Handler)
+	}
+
+}
+
+func (gc *GameClient) RegisterHandler(custom_handler PacketHandler) {
+	gc.pht.Set(custom_handler.Opcode, custom_handler.Handler)
 }
 
 func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
 	wow.GetPacketDumper().Write(oc, data)
 
-	handle := OpcodeTable.Get(oc)
-	if handle == nil {
+	handle, err := gc.pht.Get(oc)
+	if handle == nil || err != nil {
 		// return errors.New("no handler record found")
 		gc.log.Warn().Msgf("no handler record found: 0x%04x", int(oc))
 		return nil
@@ -60,7 +80,11 @@ func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
 
 	switch t := handle.Handler.(type) {
 	case string:
-		gc.log.Warn().Msgf("handler defined as string: %s", t)
+		gc.log.Warn().
+			Type("pkt", oc).
+			Str("id", oc.String()).
+			Str("name", fmt.Sprintf("%+v", handle)).
+			Msgf("handler defined as string: %s", t)
 	case handlePacket:
 		t(data)
 	case handleCommand:

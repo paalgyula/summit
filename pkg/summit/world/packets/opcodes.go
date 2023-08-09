@@ -1,45 +1,47 @@
 package packets
 
-import (
-	"github.com/paalgyula/summit/pkg/wow"
-	"github.com/rs/zerolog/log"
-)
+// GRAVESTONE: Seems no longer needed, replaced by wow/opcodes.gen.go & world/handlers.go
 
-const (
-	STATUS_NEVER            = "never"
-	STATUS_LOGGEDIN         = "logged_in"
-	STATUS_AUTHED           = "authed"
-	STATUS_TRANSFER_PENDING = "pending"
-)
+// import (
+// 	"github.com/paalgyula/summit/pkg/wow"
+// 	"github.com/rs/zerolog/log"
+// )
 
-type Opcodes []*Handler
+// const (
+// 	STATUS_NEVER            = "never"
+// 	STATUS_LOGGEDIN         = "logged_in"
+// 	STATUS_AUTHED           = "authed"
+// 	STATUS_TRANSFER_PENDING = "pending"
+// )
 
-func (o Opcodes) Get(code wow.OpCode) *Handler {
-	if int(code) > len(o) {
-		return nil
-	}
+// type Opcodes []*Handler
 
-	return o[code]
-}
+// func (o Opcodes) Get(code wow.OpCode) *Handler {
+// 	if int(code) > len(o) {
+// 		return nil
+// 	}
 
-func (o Opcodes) Handle(code wow.OpCode, handler any) {
-	oc := o.Get(code)
+// 	return o[code]
+// }
 
-	if oc == nil {
-		log.Fatal().Msgf("you should define a handler first for this message: 0x%x", int(code))
-		return
-	}
+// func (o Opcodes) Handle(code wow.OpCode, handler any) {
+// 	oc := o.Get(code)
 
-	oc.Handler = handler
-}
+// 	if oc == nil {
+// 		log.Fatal().Msgf("you should define a handler first for this message: 0x%x", int(code))
+// 		return
+// 	}
 
-type Packet interface {
-	OpCode() int
-}
+// 	oc.Handler = handler
+// }
 
-type Handler struct {
-	Name  string
-	State string
-	// Handler func(interfaces.Packet, *system.State)
-	Handler any
-}
+// type Packet interface {
+// 	OpCode() int
+// }
+
+// type Handler struct {
+// 	Name  string
+// 	State string
+// 	// Handler func(interfaces.Packet, *system.State)
+// 	Handler any
+// }
