@@ -92,4 +92,5 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 	res := []byte{0x00} // OK :)
 
 	gc.SendPayload(int(wow.ServerCharCreate), res)
+	gc.ListCharacters()
 }
