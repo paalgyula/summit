@@ -45,6 +45,7 @@ func initYamlDatabase() {
 	err := instance.Load(SummitConfig)
 
 	if err != nil {
+		// BIG TODO - if this error occurs due to a failed unmarshal, the database file gets WIPED
 		log.Warn().Err(err).Msgf("database file: %s not found", SummitConfig)
 
 		instance.Accounts = make([]*Account, 0)
