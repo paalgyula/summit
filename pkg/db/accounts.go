@@ -13,7 +13,8 @@ import (
 func (db *Database) FindAccount(name string) *Account {
 	for _, a := range db.Accounts {
 		if a.Name == name {
-			log.Info().Interface("account", a).Msgf("Account found: %s", name)
+			// log.Info().Interface("account", a).Msgf("Account found: %s", name)
+			log.Info().Msgf("Account found: %s", name)
 
 			return a
 		}
