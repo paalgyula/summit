@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog/log"
 )
@@ -27,7 +28,7 @@ func (db *Database) CreateAccount(name, pass string) (*Account, error) {
 	// need to build verifier from name, pass, salt
 	srp := crypt.NewSRP6(0, 0, big.NewInt(0))
 
-	acc := &Account{Name: strings.ToUpper(name), salt: srp.RandomSalt()}
+	acc := &Account{Name: strings.ToUpper(name), salt: srp.RandomSalt(), Data: make(map[string]string)}
 
 	acc.verifier = srp.GenerateVerifier(acc.Name, strings.ToUpper(pass), acc.salt)
 
@@ -42,6 +43,11 @@ func (db *Database) CreateAccount(name, pass string) (*Account, error) {
 	return acc, nil
 }
 
+type AccountData struct {
+	Data string `yaml:"data"`
+	Time uint32 `yaml:"time"`
+}
+
 type Account struct {
 	Name    string `yaml:"name"`
 	V       string `yaml:"verifier"`
@@ -52,11 +58,13 @@ type Account struct {
 	salt       *big.Int
 	sessionKey *big.Int
 
-	Data map[string]any `yaml:"data"`
+	Data map[string]string `yaml:"data"`
+
+	Metadata [wow.NUM_ACCOUNT_DATA_TYPES]AccountData `yaml:"metadata"`
 }
 
 func (a *Account) Characters(destination any) error {
-	if s, ok := a.Data["characters"].(string); ok {
+	if s, ok := a.Data["characters"]; ok {
 		return json.Unmarshal([]byte(s), destination)
 	}
 
