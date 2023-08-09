@@ -3,6 +3,7 @@ package world
 import (
 	bitmask "github.com/paalgyula/summit/pkg/summit/shared/bitmask"
 	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/paalgyula/summit/pkg/wow/wotlk"
 )
 
 func (gc *GameClient) PingHandler() {
@@ -23,7 +24,7 @@ func (gc *GameClient) SendAccountDataTimes(mask uint32) {
 		}
 		// do we send blank uint32s to pad the rest??
 	}
-	gc.SendPayload(int(wow.ServerAccountDataTimes), w.Bytes())
+	gc.Send(w)
 }
 
 func (gc *GameClient) AccountDataTimesHandler() {
@@ -62,14 +63,21 @@ func (gc *GameClient) UpdateAccountDataHandler(recv_data wow.PacketData) {
 		gc.acc.Metadata[account_type].Time = 0
 
 	} else {
-		// this assumes it's a C-style string.. might not be, might need to just dump the rest?
-		r.ReadString(&gc.acc.Metadata[account_type].Data)
+
+		b_data := make([]byte, decompressed_size)
+		err := r.UncompressBytes(b_data)
+		if err != nil {
+			gc.log.Err(err).
+				Msgf("UAD: Failed to decompress account data. Size: %d", decompressed_size)
+			return
+		}
+		gc.acc.Metadata[account_type].Data = string(b_data)
 		gc.acc.Metadata[account_type].Time = a_timestamp
 	}
 
 	w.Write(a_type)
-	w.Write(uint32(0))
+	w.Write(uint32(wotlk.RESPONSE_SUCCESS))
 
-	gc.SendPayload(int(wow.ServerUpdateAccountDataComplete), w.Bytes())
+	gc.Send(w)
 
 }
