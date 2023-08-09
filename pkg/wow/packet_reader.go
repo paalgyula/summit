@@ -2,6 +2,7 @@ package wow
 
 import (
 	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -170,4 +171,20 @@ func (r *Reader) DumpRemaining() ([]byte, error) {
 	fmt.Printf("%s", hex.Dump(bb))
 
 	return bb, err
+}
+
+// Uncompresses zlib-compressed bytes
+// dest must be the size of the uncompressed bytes
+func (r *Reader) UncompressBytes(dest []byte) error {
+	zr, err := zlib.NewReader(r.reader)
+	if err != nil {
+		return err
+	}
+
+	_, err = io.ReadFull(zr, dest)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
