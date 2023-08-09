@@ -52,7 +52,7 @@ func (pkt *ClientLoginProof) UnmarshalPacket(bb wow.PacketData) error {
 // ServerLoginProof is the server's response to a client's challenge. It contains
 // some SRP information used for handshaking.
 type ServerLoginProof struct {
-	StatusCode uint8
+	StatusCode ChallengeStatus
 	Proof      big.Int
 }
 
@@ -75,7 +75,7 @@ func (pkt *ServerLoginProof) ReadPacket(r io.Reader) int {
 	r.Read(status)
 
 	slp := &ServerLoginProof{
-		StatusCode: status[0],
+		StatusCode: ChallengeStatus(status[0]),
 	}
 
 	if slp.StatusCode != 0 {

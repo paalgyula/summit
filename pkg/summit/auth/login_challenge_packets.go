@@ -77,7 +77,7 @@ func (p *ClientLoginChallenge) MarshalPacket() []byte {
 	return w.Bytes()
 }
 
-type ChallengeStatus = uint8
+type ChallengeStatus uint8
 
 const (
 	ChallengeStatusSuccess ChallengeStatus = iota
