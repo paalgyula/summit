@@ -2,7 +2,6 @@ package console
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"strings"
 
@@ -65,6 +64,6 @@ func processCommand(cmdstr string) {
 	}
 
 	if !found {
-		log.Info().Msg(fmt.Sprintf("Unknown command: %s", cmdstr))
+		log.Info().Msgf("Unknown command: %s", cmdstr)
 	}
 }
