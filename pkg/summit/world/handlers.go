@@ -55,6 +55,8 @@ func (gc *GameClient) RegisterHandlers(custom_handlers ...PacketHandler) {
 	gc.pht.Set(wow.ClientCharEnum, gc.ListCharacters)
 	gc.pht.Set(wow.ClientCharCreate, gc.CreateCharacter)
 	gc.pht.Set(wow.ClientRealmSplit, gc.HandleRealmSplit)
+	gc.pht.Set(wow.ClientReadyForAccountDataTimes, gc.AccountDataTimesHandler)
+	gc.pht.Set(wow.ClientUpdateAccountData, gc.UpdateAccountDataHandler)
 
 	// Then Custom Overrides
 
@@ -74,7 +76,9 @@ func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
 	handle, err := gc.pht.Get(oc)
 	if handle == nil || err != nil {
 		// return errors.New("no handler record found")
-		gc.log.Warn().Msgf("no handler record found: 0x%04x", int(oc))
+		gc.log.Warn().Type("pkt", oc).
+			Str("id", fmt.Sprintf("0x%04x", int(oc))).
+			Msgf("no handler found for packet: %s", oc.String())
 		return nil
 	}
 
@@ -92,12 +96,11 @@ func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
 	case ExternalPacketFunc:
 		t(gc, oc, data)
 	default:
-		gc.log.Error().Msgf("handler function is not defined: %s", t)
 		gc.log.Error().
 			Type("pkt", oc).
-			Str("id", fmt.Sprintf("0x%04x", oc)).
+			Str("id", fmt.Sprintf("0x%04x", int(oc))).
 			Str("name", fmt.Sprintf("%+v", handle)).
-			Msgf("no handler for the packet")
+			Msgf("handler function is not defined: %s", t)
 	}
 
 	// switch oc {
