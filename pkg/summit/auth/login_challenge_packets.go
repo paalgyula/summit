@@ -81,17 +81,15 @@ type ChallengeStatus uint8
 
 const (
 	ChallengeStatusSuccess ChallengeStatus = iota
-	// Account not found
+	// Unable to connect. Please try again later.
 	ChallengeStatusFailed
-	// Account has been banned
-	ChallengeStatusFailBanned
 	// This <game> account has been closed and is no longer available for use. Please
 	// go to <site>/banned.html for further information.
-	ChallengeStatusFailUnknownAccount
+	ChallengeStatusFailBanned = iota + 1
 	// The information you have entered is not valid. Please check the spelling
 	// of the account name and password. If you need help in retrieving a lost or
 	// stolen password, see <site> for more information
-	ChallengeStatusFailUnknown0
+	ChallengeStatusFailUnknownAccount
 	// The information you have entered is not valid. Please check the spelling
 	// of the account name and password. If you need help in retrieving a lost
 	// or stolen password, see <site> for more information
@@ -122,6 +120,26 @@ const (
 	ChallengeStatusFailLockedEnforced
 	// Your trial subscription has expired. Please visit <site> to upgrade your account.
 	ChallengeStatusFailTrialEnded
+	// This account is now attached to a Battle.net account. Please log in with your Battle.net account email address (example: john.doe@blizzard.com) and password.
+	ChallengeStatusFailUseBattleNet
+	// unable to connect
+	ChallengeStatusFailAntiIndulgence
+	// unable to connect
+	ChallengeStatusFailExpired
+	// unable to connect
+	ChallengeStatusFailNoGameAccount
+	// This World of Warcraft account has been temporarily closed due to a chargeback on its subscription. Please refer to this [link] fo further information.
+	ChallengeStatusFailChargeback
+	// In order to log in to World of Warcraft using IGR time, this World of Warcraft account must first be merged with a Battle.net account. Please visit [link] to merge this account.
+	ChallengeStatusFailInternetGameRoomWithoutBnet
+	// Access to your account has been temporarily disabled. Please contact support for more information at: [link/account-error]
+	ChallengeStatusFailGameAccountLocked
+	// Your account has been locked but can be unlocked.
+	ChallengeStatusFailUnlockableLock
+	// You must log in with a Battle.net account username and password. TO create an account please [Click Here] or go to [link] to begin the conversion.
+	ChallengeStatusFailConversionRequired = 0x20
+	// You have been disconnected from the server.
+	ChallengeStatusFailDisconnected = 0xFF
 )
 
 // ServerLoginChallenge is the server's response to a client's challenge. It contains
