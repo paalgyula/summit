@@ -11,12 +11,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type countingReadder struct {
+type countingReader struct {
 	reader    io.Reader
 	BytesRead int
 }
 
-func (cr *countingReadder) Read(b []byte) (int, error) {
+func (cr *countingReader) Read(b []byte) (int, error) {
 	readed, err := cr.reader.Read(b)
 	cr.BytesRead += readed
 
@@ -24,12 +24,12 @@ func (cr *countingReadder) Read(b []byte) (int, error) {
 }
 
 type Reader struct {
-	reader *countingReadder
+	reader *countingReader
 }
 
 func NewPacketReader(bb []byte) *Reader {
 	return &Reader{
-		reader: &countingReadder{
+		reader: &countingReader{
 			reader:    bytes.NewReader(bb),
 			BytesRead: 0,
 		},
@@ -38,7 +38,7 @@ func NewPacketReader(bb []byte) *Reader {
 
 func NewConnectionReader(r io.Reader) *Reader {
 	return &Reader{
-		reader: &countingReadder{
+		reader: &countingReader{
 			reader:    r,
 			BytesRead: 0,
 		},
