@@ -10,8 +10,6 @@ import (
 )
 
 func TestConnection(t *testing.T) {
-	// t.Skip("Still failing needs more attention")
-
 	db.GetInstance().Accounts = append(db.GetInstance().Accounts,
 		&db.Account{
 			Name: "TEST",
@@ -21,6 +19,7 @@ func TestConnection(t *testing.T) {
 
 	as, err := auth.NewServer("localhost:5000", &auth.StaticRealmProvider{})
 	assert.NoError(t, err)
+
 	defer as.Close()
 
 	br := serworm.NewBridge(5001, "localhost:5000", "Test Realm", nil)

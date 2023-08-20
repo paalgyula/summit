@@ -10,6 +10,7 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
+//nolint:wsl
 func main() {
 	c, err := babysocket.NewClient()
 	if err != nil {
@@ -24,6 +25,7 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
+
 		fmt.Println()
 		fmt.Println(sig)
 		done <- true
@@ -109,5 +111,4 @@ func enterWorld(c *babysocket.Client) {
 	p.Write(uint32(0))
 	p.Write(uint32(0))
 	c.SendToAll(p.OpCode(), p.Bytes())
-
 }

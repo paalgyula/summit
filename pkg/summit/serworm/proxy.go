@@ -72,6 +72,7 @@ func (ws *ProxyServer) InitFakeClient() {
 		}
 
 		client := NewRealmClient(loginConn, 0x08)
+
 		realms, err := client.Authenticate(ws.config.User, ws.config.Pass)
 		if err != nil {
 			ws.log.Fatal().Msg("cannot authenticate client")

@@ -120,6 +120,6 @@ type RealmPacket interface {
 
 type PacketData []byte
 
-func (pd PacketData) Reader() *Reader {
+func (pd PacketData) Reader() *PacketReader {
 	return NewPacketReader(pd)
 }

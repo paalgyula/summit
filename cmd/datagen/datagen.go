@@ -1,3 +1,4 @@
+//nolint:exhauststruct
 package main
 
 import (
@@ -9,8 +10,7 @@ import (
 )
 
 func main() {
-
-	var rootCmd = &cobra.Command{
+	rootCmd := &cobra.Command{
 		Use:   "datagen",
 		Short: "A CLI tool for generating files",
 		Long:  "A CLI tool to generate/re-generate required assets for the WoW server",
@@ -19,7 +19,9 @@ func main() {
 				cmd.Help()
 				os.Exit(0)
 			}
-			// fmt.Printf("Generating file with parameters: outfile=%s, type=%s, url=%s, generator=%s\n", outfile, fileType, url, generator)
+
+			// fmt.Printf("Generating file with parameters: outfile=%s, type=%s, url=%s,
+			// generator=%s\n", outfile, fileType, url, generator)
 			// Your code here
 		},
 	}
@@ -97,7 +99,6 @@ func headerConvertCommand() *cobra.Command {
 				packageName, infile, outfile,
 				fromUrl, enumName,
 				useEndField)
-
 			if err != nil {
 				fmt.Println(err)
 			}
@@ -130,13 +131,16 @@ func convertHeader(packageName, inFile, outFile, fromUrl, enumName string, useEn
 
 	enums := tools.ParseHeaderFile(f)
 
-	var out = os.Stdout
+	out := os.Stdout
+
 	if outFile != "" {
 		var err error
+
 		out, err = os.Create(outFile)
 		if err != nil {
 			return fmt.Errorf("cannot open output: %w", err)
 		}
+
 		defer out.Close()
 	}
 

@@ -22,7 +22,6 @@ func (pkt *ClientRealmlistPacket) MarshalPacket() []byte {
 
 func (pkt *ClientRealmlistPacket) UnmarshalPacket(bb wow.PacketData) error {
 	return bb.Reader().Read(pkt)
-	// return binary.Read(bb.Reader(), binary.LittleEndian, &pkt)
 }
 
 // ServerRealmlistPacket is made up of a list of realms.
@@ -30,9 +29,9 @@ type ServerRealmlistPacket struct {
 	Realms []*Realm
 }
 
-func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.Reader) {
+func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.PacketReader) {
 	var size uint16
-	r.Read(&size)
+	_ = r.Read(&size)
 
 	realmPacket, err := r.ReadNBytes(int(size))
 	if err != nil {
@@ -40,10 +39,13 @@ func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.Reader) {
 	}
 
 	r = wow.NewPacketReader(realmPacket)
+
 	var unused uint32
+
 	var realmCount uint16
-	r.Read(&unused)
-	r.Read(&realmCount)
+
+	_ = r.Read(&unused)
+	_ = r.Read(&realmCount)
 
 	pkt.Realms = make([]*Realm, int(realmCount))
 
@@ -82,7 +84,7 @@ func (pkt *ServerRealmlistPacket) MarshalPacket() []byte {
 		realmPkt.Write(realm.Population)
 		realmPkt.Write(realm.NumCharacters)
 		realmPkt.Write(realm.Timezone)
-		realmPkt.Write(uint8(0x2c)) // TODO: who and why need this?
+		realmPkt.Write(uint8(0x2c)) // Find what is this. Maybe a realm ID?
 	}
 
 	realmPkt.Write(uint16(0x0010)) // Terminator

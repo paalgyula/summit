@@ -40,6 +40,7 @@ func (b *Bridge) HandleExternalPacket(client *world.GameClient, oc wow.OpCode, d
 	b.Send2Bridge(oc, data)
 }
 
+//nolint:godox,wsl
 func (b *Bridge) Send2Bridge(oc wow.OpCode, data []byte) {
 	wow.GetPacketDumper().Write(oc, data)
 

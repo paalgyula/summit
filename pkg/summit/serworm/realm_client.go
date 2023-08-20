@@ -107,19 +107,21 @@ func (pw *RealmClient) SendChallenge(user string) {
 
 func (pw *RealmClient) ReadCommand() auth.RealmCommand {
 	var cmd uint8
-	binary.Read(pw.conn, binary.LittleEndian, &cmd)
+
+	_ = binary.Read(pw.conn, binary.LittleEndian, &cmd)
 
 	return auth.RealmCommand(cmd)
 }
 
 func (pw *RealmClient) HandleLoginChallenge() {
 	var slc auth.ServerLoginChallenge
-	readed := slc.ReadPacket(pw.conn)
 
-	log.Debug().Msgf("received challenge with status: 0x%02x readed: %d", slc.Status, readed)
+	readed := slc.ReadPacket(pw.conn)
 	if readed == 0 {
 		panic("failed to read challenge")
 	}
+
+	log.Debug().Msgf("received challenge with status: 0x%02x readed: %d", slc.Status, readed)
 
 	// Initialize SRP6
 	pw.srp = crypt.NewSRP6(int64(slc.G), 3, &slc.N)

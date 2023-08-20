@@ -9,7 +9,7 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
-// ClientLoginChallenge received login challenge packet
+// ClientLoginChallenge received login challenge packet.
 type ClientLoginChallenge struct {
 	GameName        string
 	Version         [3]byte
@@ -51,10 +51,10 @@ func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 	r.ReadL(&p.WorldRegionBias)
 	r.ReadL(&p.IP)
 
-	var len uint8
-	r.ReadB(&len)
+	var size uint8
+	_ = r.ReadB(&size)
 
-	r.ReadStringFixed(&p.AccountName, int(len))
+	r.ReadStringFixed(&p.AccountName, int(size))
 
 	return nil
 }
@@ -81,24 +81,24 @@ type ChallengeStatus uint8
 
 const (
 	ChallengeStatusSuccess ChallengeStatus = iota
-	// Account not found
+	// Account not found.
 	ChallengeStatusFailed
-	// Account has been banned
+	// Account has been banned.
 	ChallengeStatusFailBanned
 	// This <game> account has been closed and is no longer available for use. Please
 	// go to <site>/banned.html for further information.
 	ChallengeStatusFailUnknownAccount
 	// The information you have entered is not valid. Please check the spelling
 	// of the account name and password. If you need help in retrieving a lost or
-	// stolen password, see <site> for more information
+	// stolen password, see <site> for more information.
 	ChallengeStatusFailUnknown0
 	// The information you have entered is not valid. Please check the spelling
 	// of the account name and password. If you need help in retrieving a lost
-	// or stolen password, see <site> for more information
+	// or stolen password, see <site> for more information.
 	ChallengeStatusFailIncorrectPassword
 	// This account is already logged into <game>. Please check the spelling and try again.
 	ChallengeStatusFailAlreadyOnline
-	// You have used up your prepaid time for this account. Please purchase more to continue playing
+	// You have used up your prepaid time for this account. Please purchase more to continue playing.
 	ChallengeStatusFailNoTime
 	// Could not log in to <game> at this time. Please try again later.
 	ChallengeStatusFailDbBusy
@@ -106,19 +106,21 @@ const (
 	// interference of another program. Please visit <site> for more information
 	// and possible solutions to this issue.
 	ChallengeStatusFailVersionInvalid
-	// Downloading
+	// Downloading.
 	ChallengeStatusFailVersionUpdate
-	// Unable to connect
+	// Unable to connect.
 	ChallengeStatusFailInvalidServer
-	// This <game> account has been temporarily suspended. Please go to <site>/banned.html for further information
+	// This <game> account has been temporarily suspended. Please go to <site>/banned.html for further information.
 	ChallengeStatusFailSuspended
-	// Unable to connect
+	// Unable to connect.
 	ChallengeStatusFailFailNoaccess
 	// Connected.
 	ChallengeStatusSuccessSurvey
-	// Access to this account has been blocked by parental controls. Your settings may be changed in your account preferences at <site>
+	// Access to this account has been blocked by parental controls. Your settings may be changed in your
+	// account preferences or at <site>.
 	ChallengeStatusFailParentcontrol
-	// You have applied a lock to your account. You can change your locked status by calling your account lock phone number.
+	// You have applied a lock to your account. You can change your locked status by calling
+	// your account lock phone number.
 	ChallengeStatusFailLockedEnforced
 	// Your trial subscription has expired. Please visit <site> to upgrade your account.
 	ChallengeStatusFailTrialEnded
@@ -151,7 +153,7 @@ func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 		r.Read(&pkt.G)
 
 		pkt.N = big.Int{}
-		r.Read(&tmp)
+		_ = r.Read(&tmp)
 		pkt.N.SetBytes(r.ReadReverseBytes(int(tmp)))
 
 		pkt.Salt.SetBytes(r.ReadReverseBytes(32))

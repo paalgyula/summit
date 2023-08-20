@@ -6,7 +6,7 @@ type RealmCommand uint32
 const (
 	AuthLoginChallenge RealmCommand = iota + 0x00
 	AuthLoginProof
-	AuthReconnectChallenge // TODO: #4 implement reconnect challenge and reconnect proof
+	AuthReconnectChallenge // #4 implement reconnect challenge and reconnect proof
 	AuthReconnectProof
 	RealmList RealmCommand = 0x10
 )

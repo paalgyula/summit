@@ -6,14 +6,17 @@ import (
 	"time"
 )
 
-var Version = "dev"
-var Branch = "master"
-var Gitsha = "-"
-var Compiled = fmt.Sprintf("%d", time.Now().UnixMilli()/1000)
-var Buildhost = "localhost"
+var (
+	Version   = "dev"
+	Branch    = "master"
+	Gitsha    = "-"
+	Compiled  = fmt.Sprintf("%d", time.Now().UnixMilli()/1000)
+	Buildhost = "localhost"
+)
 
 func BuildInfo() string {
 	compileTime := time.Now().Format("2006-01-02 15:04:05")
+
 	if Compiled != "now" {
 		ct, err := strconv.ParseInt(Compiled, 10, 64)
 		if err == nil {

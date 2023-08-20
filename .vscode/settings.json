@@ -6,6 +6,9 @@
     "go.lintFlags": [
         "--fast"
     ],
+    "gopls": {
+        "formatting.gofumpt": true,
+    },
     "[go]": {
         "editor.insertSpaces": false,
         "editor.formatOnSave": true,

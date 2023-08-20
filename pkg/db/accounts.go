@@ -13,8 +13,10 @@ import (
 
 const SummitConfig = "summit.yaml"
 
-var once sync.Once
-var instance *Database
+var (
+	once     sync.Once
+	instance *Database
+)
 
 type Database struct {
 	Accounts []*Account `yaml:"accounts"`
@@ -49,7 +51,7 @@ func (db *Database) Load(path string) error {
 }
 
 func (db *Database) SaveAll() {
-	log.Info().Msg("Saving world state to the datbase")
+	log.Info().Msg("Saving world state to the database")
 
 	f, _ := os.Create(SummitConfig)
 	_ = yaml.NewEncoder(f).Encode(db)
@@ -57,9 +59,7 @@ func (db *Database) SaveAll() {
 
 func InitYamlDatabase() {
 	instance = &Database{}
-	err := instance.Load(SummitConfig)
-
-	if err != nil {
+	if err := instance.Load(SummitConfig); err != nil {
 		log.Warn().Err(err).Msgf("database file: %s not found", SummitConfig)
 
 		instance.Accounts = make([]*Account, 0)

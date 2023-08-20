@@ -30,9 +30,9 @@ type SRP6 struct {
 	B, b *big.Int
 }
 
-// NewSRP6 g=7 k=3 N=bignumber
+// NewSRP6 initializes a new SRP6 instance.
 func NewSRP6(g, k int64, N *big.Int) *SRP6 {
-	srp6 := &SRP6{
+	srp6 := &SRP6{ //nolint:exhauststruct
 		g: int64(7),
 		k: int64(3),
 		n: N,
@@ -58,8 +58,8 @@ func (s *SRP6) RandomSalt() *big.Int {
 
 	// Generate random bytes
 	randomBytes := make([]byte, randomBits/8)
-	_, err := rand.Read(randomBytes)
-	if err != nil {
+
+	if _, err := rand.Read(randomBytes); err != nil {
 		panic(err)
 	}
 
@@ -75,6 +75,9 @@ func (s *SRP6) N() *big.Int {
 	return s.n
 }
 
+// Hash calculates the SHA-1 hash of the provided byte slices.
+//
+// It takes one or more byte slices as input and returns the calculated hash as a byte slice.
 func Hash(parts ...[]byte) []byte {
 	hash := sha1.New()
 	for _, part := range parts {
@@ -94,6 +97,7 @@ func (s *SRP6) GenerateVerifier(accountName, password string, salt *big.Int) *bi
 	)))
 
 	g := big.NewInt(int64(s.g))
+
 	return g.Exp(g, x, s.N())
 }
 
@@ -110,22 +114,21 @@ func (s *SRP6) generatePublicEphemeral(v *big.Int, b *big.Int) *big.Int {
 }
 
 // GenerateServerPubKey generates a public ephemeral pair (B, b) given a user's verifier.
-// The private key stored in this instance for later use
+// The private key stored in this instance for later use.
 func (s *SRP6) GenerateServerPubKey(v *big.Int) *big.Int {
-	s.b = s.RandomSalt()
+	s.b = s.RandomSalt() // Initialize private key first
 	s.B = s.generatePublicEphemeral(v, s.b)
 
 	return s.B
 }
 
+// GenerateClientPubkey generates a client public key for the SRP6 struct.
+//
+// This function does not take any parameters.
+// It returns a pointer to a big.Int.
 func (s *SRP6) GenerateClientPubkey() *big.Int {
-	s.a = s.RandomSalt()
-	// a := big.NewInt(0)
-	// // 894B645E89E1535BBDAD5B8B290650530801B18EBFBF5E8FAB3C82872A3E9BB7
-	// a.SetString("62100066509156017342069496140902949863249758336000796928566441170293728648119", 10)
-	// s.a = a
-
-	s.A = new(big.Int).Exp(big.NewInt(s.g), s.a, s.N())
+	s.a = s.RandomSalt()                                // Private key
+	s.A = new(big.Int).Exp(big.NewInt(s.g), s.a, s.N()) // Public key calculation from private key
 
 	return s.A
 }
@@ -267,5 +270,6 @@ func (s *SRP6) CalculateServerSessionKey(A, v, salt *big.Int, accountName string
 func CalculateServerProof(A, M, K *big.Int) *big.Int {
 	proof := big.NewInt(0)
 	proof.SetBytes(Hash(A.Bytes(), M.Bytes(), K.Bytes()))
+
 	return proof
 }

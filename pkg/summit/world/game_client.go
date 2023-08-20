@@ -30,7 +30,7 @@ type GameClient struct {
 
 	seed uint32
 
-	input *wow.Reader
+	input *wow.PacketReader
 
 	readLock  sync.Mutex
 	writeLock sync.Mutex

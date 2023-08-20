@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// 0      4   5   6   7   8
 const testLoginPacket = "WoW\x00\x02\x04\x03\x9e!68x\x00niW\x00SUne<\x00\x00\x00\x7f\x00\x00\x01\x04TEST"
 
 func TestLoginChallenge(t *testing.T) {
@@ -19,6 +18,7 @@ func TestLoginChallenge(t *testing.T) {
 	}
 
 	var lp auth.ClientLoginChallenge
+
 	data.Unmarshal(&lp)
 
 	assert.Equal(t, lp.GameName, "WoW\x00")
@@ -43,8 +43,6 @@ func TestLoginChallenge(t *testing.T) {
 	t.Run("TestRemarshal", func(t *testing.T) {
 		assert.EqualValues(t, []byte(testLoginPacket), lp.MarshalPacket())
 	})
-
-	// fmt.Printf("%s", hex.Dump(p.MarshalPacket()))
 }
 
 func TestLoginSession(t *testing.T) {

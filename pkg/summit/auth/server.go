@@ -14,7 +14,6 @@ import (
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
-
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -60,6 +59,7 @@ func NewServer(listenAddress string, rp RealmProvider) (*AuthServer, error) {
 	}
 
 	log.Info().Msgf("auth server is listening on: %s", listenAddress)
+
 	as := &AuthServer{
 		l:  l,
 		rp: rp,
@@ -102,19 +102,19 @@ func NewAuthConnection(c net.Conn, rp RealmProvider) *AuthConnection {
 	return rc
 }
 
+//nolint:godox
 func (rc *AuthConnection) HandleLogin(pkt *ClientLoginChallenge) error {
 	res := new(ServerLoginChallenge)
 
-	// TODO: is this safe?
 	res.Status = ChallengeStatusSuccess
 
 	// Validate the packet.
 	gameName := strings.TrimRight(pkt.GameName, "\x00")
 	if gameName != "WoW" {
-		res.Status = ChallengeStatusFailed
 		// TODO: temporary removed this line to allow every client to log in
 		// } else if pkt.Version != static.SupportedGameVersion || pkt.Build != static.SupportedGameBuild {
 		// 	res.Status = ChallengeStatusFailVersionInvalid
+		res.Status = ChallengeStatusFailed
 	} else {
 		rc.account = db.GetInstance().FindAccount(pkt.AccountName)
 
@@ -171,6 +171,7 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 	return rc.Send(AuthLoginProof, response.MarshalPacket())
 }
 
+//nolint:godox
 func (rc *AuthConnection) HandleRealmList() error {
 	rc.log.Debug().Msg("handling realmlist request")
 
@@ -235,6 +236,7 @@ func (rc *AuthConnection) listen() {
 		switch RealmCommand(pkt.Command) {
 		case AuthLoginChallenge:
 			var clc ClientLoginChallenge
+
 			pkt.Unmarshal(&clc)
 
 			fmt.Printf(">> WoW -> Auth ClientLoginChallenge\n%s", hex.Dump(clc.MarshalPacket()))
@@ -242,6 +244,7 @@ func (rc *AuthConnection) listen() {
 			rc.HandleLogin(&clc)
 		case AuthLoginProof:
 			var clp ClientLoginProof
+
 			pkt.Unmarshal(&clp)
 
 			fmt.Printf(">> WoW -> Auth ClientLoginProof\n%s", hex.Dump(clp.MarshalPacket()))
@@ -249,6 +252,7 @@ func (rc *AuthConnection) listen() {
 			rc.HandleProof(&clp)
 		case RealmList:
 			var rlp ClientRealmlistPacket
+
 			pkt.Unmarshal(&rlp)
 
 			fmt.Printf(">> WoW -> Auth ClientRealmlistPacket\n%s", hex.Dump(rlp.MarshalPacket()))
@@ -260,9 +264,10 @@ func (rc *AuthConnection) listen() {
 	}
 }
 
-// read reads the packet from the auth socket
+// read reads the packet from the auth socket.
 func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 	opCodeData := make([]byte, 1)
+
 	n, err := r.Read(opCodeData)
 	if err != nil {
 		return nil, fmt.Errorf("erorr while reading command: %w", err)
@@ -322,6 +327,7 @@ func ReadBytes(buffer io.Reader, length int) ([]byte, error) {
 
 		if n != length {
 			fmt.Printf("WTF: %s\n", hex.Dump(data[:n]))
+
 			return nil, fmt.Errorf("short read: wanted %v bytes, got %v", length, n)
 		}
 	}

@@ -64,7 +64,6 @@ func (pkt *ServerLoginProof) MarshalPacket() []byte {
 
 	if pkt.StatusCode == 0 {
 		w.WriteZeroPadded(wow.ReverseBytes(pkt.Proof.Bytes()), 30)
-		// buffer.Write([]byte("\x00\x00\x00\x00")) // unk1
 	}
 
 	return w.Bytes()
@@ -83,6 +82,7 @@ func (pkt *ServerLoginProof) ReadPacket(r io.Reader) int {
 	}
 
 	data := make([]byte, 30)
+
 	readed, _ := r.Read(data)
 	if readed != 30 {
 		panic(fmt.Sprintf("readed should be 32 got: %d", readed))

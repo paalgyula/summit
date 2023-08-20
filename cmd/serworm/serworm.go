@@ -14,6 +14,7 @@ import (
 
 var listenAddress, serverAddress, username, password string
 
+//nolint:gochecknoinits
 func init() {
 	flag.StringVar(&listenAddress, "listen", "localhost:5000", "address where to listen")
 	// Sorry, and thank you for your support guys!
@@ -26,12 +27,12 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+
 	err := serworm.StartProxy(ctx, listenAddress, serworm.LoginServerConfig{
 		ServerAddress: serverAddress,
 		User:          username,
 		Pass:          password,
 	})
-
 	if err != nil {
 		panic(err)
 	}
@@ -42,6 +43,7 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
+
 		fmt.Println()
 		fmt.Println(sig)
 		done <- true

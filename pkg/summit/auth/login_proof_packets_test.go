@@ -1,10 +1,11 @@
-package auth
+package auth_test
 
 import (
 	"bytes"
 	"math/big"
 	"testing"
 
+	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/stretchr/testify/assert"
@@ -19,6 +20,7 @@ import (
 func TestMarshalPacket(t *testing.T) {
 	// pkt := new(ClientLoginProof)
 	var s, B big.Int
+
 	var Mc, Ms, K *big.Int
 
 	_, _ = Ms, K
@@ -29,9 +31,9 @@ func TestMarshalPacket(t *testing.T) {
 	c := crypt.NewSRP6(7, 3, big.NewInt(0))
 	A := c.GenerateClientPubkey()
 
-	K, Mc = c.CalculateClientSessionKey(&s, &B, "TEST", "TEST")
+	_, Mc = c.CalculateClientSessionKey(&s, &B, "TEST", "TEST")
 
-	clp := ClientLoginProof{
+	clp := auth.ClientLoginProof{
 		A:             *A,
 		M:             *Mc,
 		CRCHash:       []byte{},
@@ -47,7 +49,7 @@ func TestMarshalPacket(t *testing.T) {
 	assert.True(t, A.Cmp(&clp.A) == 0)
 	assert.True(t, Mc.Cmp(&clp.M) == 0)
 
-	slp := &ServerLoginChallenge{
+	slp := &auth.ServerLoginChallenge{
 		Status:  0,
 		B:       B,
 		Salt:    s,
@@ -59,7 +61,7 @@ func TestMarshalPacket(t *testing.T) {
 	t.Run("MarshalPacket", func(t *testing.T) {
 		packetBytes := slp.MarshalPacket()
 
-		slp = new(ServerLoginChallenge)
+		slp = new(auth.ServerLoginChallenge)
 		slp.ReadPacket(bytes.NewReader(packetBytes))
 
 		assert.True(t, slp.B.Cmp(&B) == 0)
@@ -67,6 +69,4 @@ func TestMarshalPacket(t *testing.T) {
 		assert.EqualValues(t, slp.G, 7)
 		assert.True(t, slp.N.Cmp(c.N()) == 0)
 	})
-
-	return
 }

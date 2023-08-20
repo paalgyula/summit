@@ -1,9 +1,12 @@
+//nolint:gomnd
 package wow
 
 import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 )
 
 type HighGuid uint32
@@ -112,9 +115,11 @@ func (g GUID) Pack() []byte {
 
 	mask := uint8(0)
 	packedGUID := make([]byte, 0)
+
 	for i, b := range guidBytes {
 		if b != 0 {
 			mask |= (1 << uint(i))
+
 			packedGUID = append(packedGUID, b)
 		}
 	}
@@ -134,7 +139,7 @@ func (g GUID) TypeID() TypeID {
 	switch g.High() {
 	case ItemGuid:
 		return TypeIDItem
-	//case HIGHGUID_CONTAINER:    return TYPEID_CONTAINER; HIGHGUID_CONTAINER==HIGHGUID_ITEM currently
+	// case HIGHGUID_CONTAINER:    return TYPEID_CONTAINER; HIGHGUID_CONTAINER==HIGHGUID_ITEM currently
 	case UnitGuid, PetGuid:
 		return TypeIDUnit
 	case PlayerGuid:
@@ -145,9 +150,14 @@ func (g GUID) TypeID() TypeID {
 		return TypeIDDynamicoObject
 	case CorpseGuid:
 		return TypeIDCorpse
+	case TransportGuid:
 	default: // unknown
 		return TypeIDObject
 	}
+
+	log.Warn().Msgf("unknown guid type: 0x%04x", g.High())
+
+	return TypeIDObject
 }
 
 type TypeID uint8

@@ -55,6 +55,7 @@ func main() {
 
 	go func() {
 		sig := <-sigCh
+
 		fmt.Println()
 		fmt.Println(sig)
 		done <- true
