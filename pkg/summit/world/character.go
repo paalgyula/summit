@@ -5,12 +5,15 @@ import (
 
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/rs/zerolog/log"
 )
 
 func (gc *GameClient) ListCharacters() {
 	var players []*player.Player
 
-	gc.acc.Characters(&players)
+	if err := gc.acc.Characters(&players); err != nil {
+		log.Error().Err(err).Msg("cannot get players from database")
+	}
 
 	for _, p := range players {
 		p.Init()
@@ -19,7 +22,7 @@ func (gc *GameClient) ListCharacters() {
 	pkt := wow.NewPacket(wow.ServerCharEnum)
 
 	// Character list size, this should be replaced
-	pkt.WriteOne(len(players))
+	_ = pkt.WriteOne(len(players))
 
 	for _, p := range players {
 		p.WriteToLogin(pkt)
@@ -37,7 +40,7 @@ type CharacterCreateRequest struct {
 	HairStyle  uint8
 	HairColor  uint8
 	FacialHair uint8
-	OutfitId   uint8
+	OutfitID   uint8
 }
 
 type CharacterCreateResult uint8
@@ -48,23 +51,25 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	var characerName string
 
-	r.ReadString(&characerName)
+	_ = r.ReadString(&characerName)
 
 	var req CharacterCreateRequest
 
-	r.Read(&req, binary.BigEndian)
+	_ = r.Read(&req, binary.BigEndian)
 
 	// fmt.Printf("%s %+v\n", characerName, req)
 
 	// TODO: #2 when the DBC reader is ready this should be re-written
 	loc := player.WorldLocation{
-		X:    10311.3,
-		Y:    832.463,
-		Z:    1326.41,
-		Map:  1,
-		Zone: 141,
+		X:           10311.3,
+		Y:           832.463,
+		Z:           1326.41,
+		Map:         1,
+		Zone:        141,
+		Orientation: 0,
 	}
 
+	//nolint:exhaustruct
 	p := player.Player{
 		Name:            characerName,
 		Race:            wow.PlayerRace(req.Race),
@@ -75,7 +80,7 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 		HairStyle:       req.HairStyle,
 		HairColor:       req.HairColor,
 		FacialHair:      req.FacialHair,
-		OutfitID:        req.OutfitId,
+		OutfitID:        req.OutfitID,
 		Location:        loc,
 		BindLocation:    loc,
 		Level:           1,
@@ -90,7 +95,7 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	var players player.Players
 
-	gc.acc.Characters(&players)
+	_ = gc.acc.Characters(&players)
 	players.Add(&p)
 
 	gc.acc.UpdateCharacters(players)

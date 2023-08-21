@@ -14,7 +14,7 @@ type Updater struct {
 	updateFlags uint8
 }
 
-//nolint:funlen,wsl
+//nolint:funlen,wsl,cyclop,errcheck
 func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	var o *object.Object
 
@@ -33,14 +33,15 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	}
 
 	pkt.Write(wow.UpdateTypeMovement)
-	pkt.Write(o.Guid())
+	pkt.Write(o.GUID())
 
 	moveFlags := wow.MovementFlagNone
 
 	pkt.Write(upd.updateFlags) // update flags
 
 	if upd.updateFlags&wow.UpdateFlagLiving != 0 {
-		switch o.Guid().TypeID() {
+		//nolint:exhaustive
+		switch o.GUID().TypeID() {
 		case wow.TypeIDUnit:
 			{
 				moveFlags = o.MovementFlags()
@@ -64,6 +65,7 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	}
 
 	if upd.updateFlags&wow.UpdateFlagHasPosition != 0 {
+		//nolint:gocritic
 		if upd.updateFlags&wow.UpdateFlagTransport != 0 &&
 			o.GameObjectType() == wow.GameObjectTypeMoTransport {
 			pkt.Write(float32(0))
@@ -110,7 +112,7 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 		//             *data << float(0);             // is't part of movement packet, we must store and send it...
 		//     }
 
-		if o.Guid().TypeID() == wow.TypeIDPlayer {
+		if o.GUID().TypeID() == wow.TypeIDPlayer {
 			//         *data << (uint32)ToPlayer()->m_movementInfo.GetFallTime();
 			//     else
 			//         *data << uint32(0);                             // last fall time
@@ -169,11 +171,11 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	}
 
 	// // 0x8
-	if upd.updateFlags&wow.UpdateFlagLowGuid != 0 {
-		switch o.Guid().TypeID() {
+	if upd.updateFlags&wow.UpdateFlagLowGUID != 0 {
+		switch o.GUID().TypeID() {
 		case wow.TypeIDObject, wow.TypeIDItem, wow.TypeIDContainer,
 			wow.TypeIDGameObject, wow.TypeIDDynamicoObject, wow.TypeIDCorpse:
-			pkt.Write(o.Guid().Entry()) // GetGUIDLow()
+			pkt.Write(o.GUID().Entry()) // GetGUIDLow()
 		case wow.TypeIDUnit:
 			// *data << uint32(0x0000000B); // unk, can be 0xB or 0xC
 			pkt.WriteUint32(0x0B)
@@ -192,11 +194,12 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	}
 
 	// // 0x10
-	if upd.updateFlags&wow.UpdateFlagHighGuid != 0 {
-		switch o.Guid().TypeID() {
+	if upd.updateFlags&wow.UpdateFlagHighGUID != 0 {
+		//nolint:exhaustive
+		switch o.GUID().TypeID() {
 		case wow.TypeIDObject, wow.TypeIDItem, wow.TypeIDContainer,
 			wow.TypeIDGameObject, wow.TypeIDDynamicoObject, wow.TypeIDCorpse:
-			pkt.Write(o.Guid().High()) // GetGUIDHigh()
+			pkt.Write(o.GUID().High()) // GetGUIDHigh()
 		default:
 			pkt.WriteUint32(0x00) // unk
 		}
@@ -223,11 +226,11 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	// }
 }
 
-func (o *Updater) BuildUpdateObject(player *player.Player) *wow.Packet {
+func (upd *Updater) BuildUpdateObject(player *player.Player) *wow.Packet {
 	p := wow.NewPacket(wow.ServerUpdateObject)
 
-	p.WriteUint32(len(o.UpdateData))
-	p.WriteOne(0) // Has transport
+	_ = p.WriteUint32(len(upd.UpdateData))
+	_ = p.WriteOne(0) // Has transport
 
 	// if (!m_outOfRangeGUIDs.empty())
 	// {
@@ -242,7 +245,7 @@ func (o *Updater) BuildUpdateObject(player *player.Player) *wow.Packet {
 	//     }
 	// }
 
-	o.buildMovementUpdate(player, p)
+	upd.buildMovementUpdate(player, p)
 
 	return p
 }

@@ -14,13 +14,14 @@ func NewUnit() *Unit {
 	obj := NewObject()
 
 	obj.AddUpdateFlags(
-		wow.UpdateFlagHighGuid |
+		wow.UpdateFlagHighGUID |
 			wow.UpdateFlagLiving |
 			wow.UpdateFlagHasPosition,
 	)
 
 	obj.objectType |= wow.TypeMaskUnit
 
+	//nolint:exhaustruct
 	return &Unit{
 		Object: obj,
 		mask:   wow.UnitMaskNone,

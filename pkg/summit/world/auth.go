@@ -7,13 +7,15 @@ import (
 	"github.com/paalgyula/summit/pkg/wow/wotlk"
 )
 
+//nolint:godox
 func (gc *GameClient) sendAuthChallenge() {
+	// TODO: #21 investigate on how the seed used and calculated
 	// gc.seed = uint32(rand.Int31())
 	gc.seed = 0
 
 	// 0x1ec
 	w := wow.NewPacket(wow.ServerAuthChallenge)
-	w.Write(gc.seed) // This is a seed
+	_ = w.Write(gc.seed) // This is a seed
 
 	gc.Send(w)
 }

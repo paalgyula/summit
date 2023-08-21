@@ -46,6 +46,7 @@ type GameClient struct {
 }
 
 func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, handlers ...PacketHandler) *GameClient {
+	//nolint:exhaustruct
 	gc := &GameClient{
 		ID: xid.New().String(),
 		n:  n,
@@ -76,7 +77,7 @@ func (gc *GameClient) recover() {
 	a := recover()
 
 	gc.log.Error().Msgf("panic occurred, dropping client")
-	fmt.Printf("Unhandled Error: %s\n%s",
+	log.Printf("Unhandled Error: %s\n%s",
 		a,
 		string(debug.Stack()),
 	)
@@ -115,18 +116,21 @@ func (gc *GameClient) SendPayload(opcode int, payload []byte) {
 	gc.writeLock.Lock()
 	defer gc.writeLock.Unlock()
 
-	packet := append(header, payload...)
-	_, err = gc.n.Write(packet)
+	_, err = gc.n.Write(append(header, payload...))
 
 	oc := wow.OpCode(opcode)
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%v), payload size: %d packet size: %d", int(oc), oc.String(), size, len(packet))
+		Msgf(">> sending packet 0x%04x (%v), payload size: %d packet size: %d",
+			int(oc),
+			oc.String(),
+			size,
+			len(header)+len(payload))
 }
 
 func (gc *GameClient) Send(packet *wow.Packet) {
 	size := packet.Len()
 
-	header, err := gc.makeHeader(size, packet.OpCode())
+	payload, err := gc.makeHeader(size, packet.OpCode())
 	if err != nil {
 		gc.log.Error().Err(err).Msg("cannot make packet header, dropping client")
 		gc.Close()
@@ -135,7 +139,7 @@ func (gc *GameClient) Send(packet *wow.Packet) {
 	gc.writeLock.Lock()
 	defer gc.writeLock.Unlock()
 
-	payload := append(header, packet.Bytes()...)
+	payload = append(payload, packet.Bytes()...)
 	_, err = gc.n.Write(payload)
 
 	oc := wow.OpCode(packet.OpCode())
@@ -145,8 +149,14 @@ func (gc *GameClient) Send(packet *wow.Packet) {
 
 func (gc *GameClient) makeHeader(packetLen int, opCode int) ([]byte, error) {
 	w := wow.NewPacket(0)
-	w.WriteB(uint16(packetLen + 2))
-	w.Write(uint16(opCode))
+	if err := w.WriteB(uint16(packetLen + 2)); err != nil {
+		return nil, fmt.Errorf("error while writing packet length: %w", err)
+	}
+
+	if err := w.Write(uint16(opCode)); err != nil {
+		return nil, fmt.Errorf("error while writing opcode: %w", err)
+	}
+
 	header := w.Bytes()
 
 	if gc.crypt != nil {
@@ -193,14 +203,18 @@ func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 
 	var length uint16
 	// Get the length first
-	r.ReadB(&length)
+	if err := r.ReadB(&length); err != nil {
+		return 0, -1, fmt.Errorf("error while reading packet length: %w", err)
+	}
 
 	var opcode uint32
 	// Then read the opcode
-	r.ReadL(&opcode)
+	if err := r.ReadL(&opcode); err != nil {
+		return 0, -1, fmt.Errorf("error while reading opcode: %w", err)
+	}
 
-	// fmt.Printf("world: decoded opcode: %02x, %s len: %d encrypted: %t\n",
-	// 	opCode.Int(), opCode.String(), length, gc.crypt != nil)
+	log.Trace().Msgf("world: decoded opcode: %02x, %v len: %d encrypted: %t\n",
+		opcode, wow.OpCode(opcode), length, gc.crypt != nil)
 
 	return wow.OpCode(opcode), int(length) - 4, nil
 }

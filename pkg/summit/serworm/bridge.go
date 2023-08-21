@@ -1,9 +1,8 @@
-//nolint:all
 package serworm
 
 import (
-	"fmt"
 	"net"
+	"strconv"
 
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/paalgyula/summit/pkg/summit/world/packets"
@@ -13,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+//nolint:unused
 type Bridge struct {
 	server string
 	user   string
@@ -35,7 +35,7 @@ type Bridge struct {
 // client: the game client sending the packet.
 // oc: the op opcode of the packet.
 // data: the data block of the packet.
-func (b *Bridge) HandleExternalPacket(client *world.GameClient, oc wow.OpCode, data []byte) {
+func (b *Bridge) HandleExternalPacket(_ *world.GameClient, oc wow.OpCode, data []byte) {
 	wow.GetPacketDumper().Write(oc, data)
 
 	b.Send2Bridge(oc, data)
@@ -64,7 +64,8 @@ func (b *Bridge) Send2Client(oc wow.OpCode, data []byte) {
 	// data = append(header, data...)
 
 	wow.NewPacket(oc)
-	w.WriteBytes(data)
+
+	_, _ = w.WriteBytes(data)
 
 	b.client.Send(w)
 }
@@ -91,18 +92,15 @@ func (b *Bridge) Start(listener net.Listener, ws world.SessionManager) {
 	}
 }
 
-func NewBridge(listenPort int, serverAddr, serverName string, ws world.SessionManager) *Bridge {
+func NewBridge(listenPort int, _, serverName string, ws world.SessionManager) *Bridge {
+	//nolint:exhaustruct
 	b := &Bridge{
 		log: log.With().
 			Str("name", serverName).
 			Str("service", "bridge").Logger(),
 	}
 
-	if serverAddr == "" {
-		serverAddr = "127.0.0.1"
-	}
-
-	listenAddr := fmt.Sprintf("%s:%d", serverAddr, listenPort)
+	listenAddr := "127.0.0.1:" + strconv.Itoa(listenPort)
 	b.log.Info().Msgf("starting bridge on address: %s", listenAddr)
 
 	listener, err := net.Listen("tcp", listenAddr)

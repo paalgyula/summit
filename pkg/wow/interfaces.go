@@ -1,6 +1,6 @@
 package wow
 
-type HasGuid interface {
+type HasGUID interface {
 	Guid() uint64
 }
 
@@ -18,7 +18,7 @@ type HasLocation interface {
 }
 
 type WorldUnit interface {
-	HasGuid
+	HasGUID
 	HasLocation
 	HasObjectType
 	Updater

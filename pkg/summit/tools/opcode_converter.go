@@ -1,3 +1,6 @@
+// These are not prod ready codes, but they are good enough. Skipping linters
+//
+//nolint:all
 package tools
 
 import (

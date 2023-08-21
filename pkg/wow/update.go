@@ -18,8 +18,8 @@ const (
 	UpdateFlagSelf               = 0x01
 	UpdateFlagTransport          = 0x02
 	UpdateFlagHasAttackingTarget = 0x04
-	UpdateFlagLowGuid            = 0x08
-	UpdateFlagHighGuid           = 0x10
+	UpdateFlagLowGUID            = 0x08
+	UpdateFlagHighGUID           = 0x10
 	UpdateFlagLiving             = 0x20
 	UpdateFlagHasPosition        = 0x40
 )

@@ -5,6 +5,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+//nolint:revive,stylecheck
 const (
 	STATUS_NEVER            = "never"
 	STATUS_LOGGEDIN         = "logged_in"

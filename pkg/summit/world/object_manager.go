@@ -24,7 +24,7 @@ const (
 	UpdateFlagTransport          ObjectUpdateFlags = 0x0002
 	UpdateFlagHasTarget          ObjectUpdateFlags = 0x0004
 	UpdateFlagUnknown            ObjectUpdateFlags = 0x0008
-	UpdateFlagLowGuid            ObjectUpdateFlags = 0x0010
+	UpdateFlagLowGUID            ObjectUpdateFlags = 0x0010
 	UpdateFlagLiving             ObjectUpdateFlags = 0x0020
 	UpdateFlagStationaryPosition ObjectUpdateFlags = 0x0040
 	UpdateFlagVehicle            ObjectUpdateFlags = 0x0080
@@ -37,10 +37,10 @@ type ObjectManager struct{}
 func (*ObjectManager) CreateUpdatePacketFor(*player.Player) {
 	p := wow.NewPacket(wow.ServerUpdateObject)
 
-	var updateFlag ObjectUpdateFlags = UpdateFlagNone
+	updateFlag := UpdateFlagNone
 	updateFlag |= UpdateFlagSelf
 
-	p.Write(updateFlag) // Creating self
+	_ = p.Write(updateFlag) // Creating self
 
-	p.Write(uint32(0)) // Has transport
+	_ = p.Write(uint32(0)) // Has transport
 }

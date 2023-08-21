@@ -1,3 +1,4 @@
+//nolint:wrapcheck
 package wow
 
 import (
@@ -78,7 +79,7 @@ func (w *Packet) WriteString(v string, byteOrder ...binary.ByteOrder) {
 		bo = byteOrder[0]
 	}
 
-	binary.Write(w.buf, bo, []byte(v))
+	_ = binary.Write(w.buf, bo, []byte(v))
 	w.buf.WriteRune(0x00)
 }
 
@@ -87,7 +88,7 @@ func (w *Packet) WriteStringFixed(v string, size int) {
 		size = len(v)
 	}
 
-	binary.Write(w.buf, binary.LittleEndian, []byte(v)[:size])
+	_ = binary.Write(w.buf, binary.LittleEndian, []byte(v)[:size])
 }
 
 func (w *Packet) Bytes() []byte {

@@ -5,7 +5,7 @@ import (
 )
 
 // 1973 in MoP? Seems 1326 in wotlk.
-const dataLength int = int(wow.NumMsgTypes)
+// const dataLength int = int(wow.NumMsgTypes)
 
 type Object struct {
 	guid wow.GUID
@@ -22,12 +22,13 @@ type Object struct {
 	isUpdated bool
 
 	uint32Values int
-	valuesCount  int
+	// valuesCount  int
 
 	updateFlags wow.ObjectUpdateFlags
 }
 
 func NewObject() *Object {
+	//nolint:exhaustruct
 	return &Object{
 		objectTypeID: wow.TypeIDObject,
 		objectType:   wow.TypeMaskObject,
@@ -57,6 +58,6 @@ func (o *Object) GameObjectType() wow.GameObjectType {
 	return wow.GameObjectTypeGeneric
 }
 
-func (o *Object) Guid() wow.GUID {
+func (o *Object) GUID() wow.GUID {
 	return o.guid
 }

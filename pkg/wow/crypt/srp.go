@@ -34,7 +34,7 @@ type SRP6 struct {
 
 // NewSRP6 initializes a new SRP6 instance.
 func NewSRP6(g, k int64, N *big.Int) *SRP6 {
-	//nolint:exhauststruct
+	//nolint:exhaustruct
 	srp6 := &SRP6{
 		g: int64(7),
 		k: int64(3),

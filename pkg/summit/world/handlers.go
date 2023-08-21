@@ -3,8 +3,9 @@ package world
 import (
 	"fmt"
 
-	. "github.com/paalgyula/summit/pkg/summit/world/packets"
+	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/rs/zerolog/log"
 )
 
 type (
@@ -21,11 +22,11 @@ type PacketHandler struct {
 }
 
 func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
-	OpcodeTable.Handle(wow.ClientPing, gc.PingHandler)
-	OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
-	OpcodeTable.Handle(wow.ClientCharEnum, gc.ListCharacters)
-	OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
-	OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
+	packets.OpcodeTable.Handle(wow.ClientPing, gc.PingHandler)
+	packets.OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
+	packets.OpcodeTable.Handle(wow.ClientCharEnum, gc.ListCharacters)
+	packets.OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
+	packets.OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
 
 	if len(handlers) < int(wow.NumMsgTypes) {
 		additional := int(wow.NumMsgTypes) - len(handlers)
@@ -38,20 +39,20 @@ func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
 	}
 
 	for _, oh := range handlers {
-		if len(OpcodeTable) <= int(oh.Opcode) {
-			fmt.Println("opcode table too short")
+		if len(packets.OpcodeTable) <= int(oh.Opcode) {
+			log.Printf("opcode table too short\n")
 
 			continue
 		}
 
-		OpcodeTable.Handle(oh.Opcode, oh.Handler)
+		packets.OpcodeTable.Handle(oh.Opcode, oh.Handler)
 	}
 }
 
 func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
 	wow.GetPacketDumper().Write(oc, data)
 
-	handle := OpcodeTable.Get(oc)
+	handle := packets.OpcodeTable.Get(oc)
 	if handle == nil {
 		// return errors.New("no handler record found")
 		gc.log.Warn().Msgf("no handler record found: 0x%04x", int(oc))

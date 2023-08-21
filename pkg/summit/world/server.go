@@ -21,7 +21,7 @@ func init() {
 	log.Logger = log.Output(zerolog.NewConsoleWriter())
 }
 
-type WorldServer struct {
+type Server struct {
 	clients sync.Map
 
 	ctx context.Context
@@ -36,7 +36,7 @@ func StartServer(ctx context.Context, listenAddress string) error {
 	db := db.GetInstance()
 
 	//nolint:exhaustruct
-	ws := &WorldServer{
+	ws := &Server{
 		db:  db,
 		log: log.With().Str("server", "world").Caller().Logger(),
 		ctx: ctx,
@@ -66,7 +66,7 @@ func StartServer(ctx context.Context, listenAddress string) error {
 	return nil
 }
 
-func (ws *WorldServer) Clients() map[string]wow.PayloadSender {
+func (ws *Server) Clients() map[string]wow.PayloadSender {
 	ret := map[string]wow.PayloadSender{}
 
 	ws.clients.Range(func(key, value any) bool {
@@ -81,7 +81,7 @@ func (ws *WorldServer) Clients() map[string]wow.PayloadSender {
 	return ret
 }
 
-func (ws *WorldServer) listenConnections() {
+func (ws *Server) listenConnections() {
 	for {
 		conn, err := ws.l.Accept()
 		if err != nil {
@@ -94,7 +94,7 @@ func (ws *WorldServer) listenConnections() {
 	}
 }
 
-func (ws *WorldServer) AddClient(gc *GameClient) {
+func (ws *Server) AddClient(gc *GameClient) {
 	ws.clients.Store(gc.ID, gc)
 
 	count := 0
@@ -109,16 +109,16 @@ func (ws *WorldServer) AddClient(gc *GameClient) {
 		Msgf("client added to set with id: %s", gc.ID)
 }
 
-func (ws *WorldServer) Disconnected(id string) {
+func (ws *Server) Disconnected(id string) {
 	ws.clients.Delete(id)
 	ws.log.Debug().Msgf("client disconnected: %s", id)
 }
 
-func (ws *WorldServer) Stats() {
+func (ws *Server) Stats() {
 	ws.log.Debug().Msgf(MemUsage())
 }
 
-func (ws *WorldServer) Run() {
+func (ws *Server) Run() {
 	ticker := time.NewTicker(time.Second * 20)
 
 	defer ws.db.SaveAll()

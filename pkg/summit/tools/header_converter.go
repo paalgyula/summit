@@ -38,7 +38,7 @@ func ParseHeaderFile(r io.Reader) []*Enum {
 		// Check if this is the start of an enum
 		if strings.HasPrefix(line, "enum ") {
 			enumName := strings.TrimSpace(strings.TrimPrefix(line, "enum "))
-			currentEnum = &Enum{Name: enumName}
+			currentEnum = &Enum{Name: enumName, Fields: []EnumField{}}
 			enums = append(enums, currentEnum)
 
 			continue
@@ -51,7 +51,7 @@ func ParseHeaderFile(r io.Reader) []*Enum {
 			fieldValue := strings.TrimSpace(strings.Split(line, "=")[1])
 
 			// Remove commas from the values, but not the comments
-			fieldValue = strings.Replace(fieldValue, ",", "", -1)
+			fieldValue = strings.ReplaceAll(fieldValue, ",", "")
 
 			// If contenated (used with base field) then convert the base field to camel too
 			if strings.Contains(fieldValue, "+") {
@@ -96,7 +96,7 @@ func WithEndField(use bool) WriterOption {
 
 // WriteGoSource writes a Go source file.
 //
-//nolint:funlen
+//nolint:funlen,cyclop
 func WriteGoSource(packageName string, enums []*Enum, out io.Writer, opts ...WriterOption) error {
 	cfg := writerConfig{
 		singleEnum: false,
@@ -111,21 +111,21 @@ func WriteGoSource(packageName string, enums []*Enum, out io.Writer, opts ...Wri
 	bb := &bytes.Buffer{}
 	w := bufio.NewWriter(bb)
 
-	w.WriteString("// This file is generated! DO NOT EDIT!\n\n")
-	w.WriteString(fmt.Sprintf("package %s\n\n", packageName))
+	_, _ = w.WriteString("// This file is generated! DO NOT EDIT!\n\n")
+	_, _ = w.WriteString(fmt.Sprintf("package %s\n\n", packageName))
 
 	// If this is a single enum, print the header
 	if cfg.singleEnum {
-		w.WriteString(fmt.Sprintf("type %s int\n\n", cfg.enumName))
+		_, _ = w.WriteString(fmt.Sprintf("type %s int\n\n", cfg.enumName))
 	}
 
 	// Generate the output
 	for _, enum := range enums {
 		if !cfg.singleEnum {
-			w.WriteString(fmt.Sprintf("type %s int\n\n", enum.Name))
+			_, _ = w.WriteString(fmt.Sprintf("type %s int\n\n", enum.Name))
 		}
 
-		w.WriteString("const (\n")
+		_, _ = w.WriteString("const (\n")
 
 		for idx, field := range enum.Fields {
 			if cfg.endField && idx == len(enum.Fields)-1 {
@@ -137,18 +137,18 @@ func WriteGoSource(packageName string, enums []*Enum, out io.Writer, opts ...Wri
 				enumName = cfg.enumName
 			}
 
-			w.WriteString(fmt.Sprintf("\t%s %s = %s\n",
+			_, _ = w.WriteString(fmt.Sprintf("\t%s %s = %s\n",
 				field.Name,
 				enumName, field.Value,
 			))
 		}
 
-		w.WriteString(")\n\n")
+		_, _ = w.WriteString(")\n\n")
 
 		// Write constant end field
 		if cfg.endField {
 			endField := enum.Fields[len(enum.Fields)-1]
-			w.WriteString(fmt.Sprintf("const %s = %s\n\n", endField.Name, endField.Value))
+			_, _ = w.WriteString(fmt.Sprintf("const %s = %s\n\n", endField.Name, endField.Value))
 		}
 	}
 
@@ -157,12 +157,14 @@ func WriteGoSource(packageName string, enums []*Enum, out io.Writer, opts ...Wri
 
 	source, err := format.Source(bb.Bytes())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to format source: %w", err)
 	}
 
-	_, err = out.Write(source)
+	if _, err := out.Write(source); err != nil {
+		return fmt.Errorf("failed to write source: %w", err)
+	}
 
-	return err
+	return nil
 }
 
 func toCamelCase(s string) string {
@@ -182,6 +184,8 @@ func toCamelCase(s string) string {
 //
 // input: string in snake_case
 // returns: string in camelCase
+//
+//nolint:staticcheck
 func convertToCamelCase(input string) string {
 	words := strings.Split(strings.ToLower(input), "_")
 	for i, word := range words {

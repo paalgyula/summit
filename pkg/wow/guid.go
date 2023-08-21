@@ -3,7 +3,6 @@ package wow
 
 import (
 	"encoding/binary"
-	"fmt"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -13,7 +12,7 @@ type HighGUID uint32
 
 const (
 	ItemGUID          HighGUID = 0x4000 // blizz 4000
-	ContainerGuid     HighGUID = 0x4000 // blizz 4000
+	ContainerGUID     HighGUID = 0x4000 // blizz 4000
 	PlayerGUID        HighGUID = 0x0000 // blizz 0000
 	GameObjectGUID    HighGUID = 0xF110 // blizz F110
 	TransportGUID     HighGUID = 0xF120 // blizz F120 (for GAMEOBJECT_TYPE_TRANSPORT)
@@ -27,7 +26,7 @@ const (
 	GroupGUID         HighGUID = 0x1F50
 )
 
-type GuidPool struct {
+type GUIDPool struct {
 	m sync.Mutex
 
 	counter int
@@ -36,8 +35,10 @@ type GuidPool struct {
 	pool    map[HighGUID]int
 }
 
-func NewGuidPool() *GuidPool {
-	gp := &GuidPool{
+func NewGUIDPool() *GUIDPool {
+	gp := &GUIDPool{
+		m:       sync.Mutex{},
+		counter: 0,
 		freeIDs: make([]int, 0),
 		pool:    make(map[HighGUID]int),
 	}
@@ -45,7 +46,7 @@ func NewGuidPool() *GuidPool {
 	return gp
 }
 
-func (gp *GuidPool) Get() GUID {
+func (gp *GUIDPool) Get() GUID {
 	gp.m.Lock()
 	defer gp.m.Unlock()
 
@@ -61,7 +62,7 @@ func (gp *GuidPool) Get() GUID {
 	return GUID(gp.counter)
 }
 
-func (gp *GuidPool) Release(guid GUID) {
+func (gp *GUIDPool) Release(guid GUID) {
 	gp.m.Lock()
 	defer gp.m.Unlock()
 
@@ -98,7 +99,7 @@ func (g GUID) Counter() uint32 {
 }
 
 func (g GUID) PrintRAW() {
-	fmt.Printf("%64b\nValue: %32d Hex: 0x%x\n", g, g, g)
+	log.Printf("%64b\nValue: %32d Hex: 0x%x\n", g, g, g)
 }
 
 func NewGUID(hg HighGUID, counter uint32) GUID {
@@ -136,6 +137,7 @@ func NewItemGUID(counter uint32) GUID {
 }
 
 func (g GUID) TypeID() TypeID {
+	//nolint:exhaustive
 	switch g.High() {
 	case ItemGUID:
 		return TypeIDItem

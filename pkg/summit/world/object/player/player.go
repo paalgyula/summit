@@ -23,15 +23,16 @@ func (l WorldLocation) Location() (float32, float32, float32, uint32) {
 }
 
 // Distance calculates the distance between two locations.
-func (loc *WorldLocation) Distance(point *WorldLocation) float64 {
-	dx := loc.X - point.X
-	dy := loc.Y - point.Y
-	dz := loc.Z - point.Z
+func (l *WorldLocation) Distance(point *WorldLocation) float64 {
+	dx := l.X - point.X
+	dy := l.Y - point.Y
+	dz := l.Z - point.Z
 
 	return math.Sqrt(float64(dx*dx + dy*dy + dz*dz))
 }
 
 func NewPlayer() *Player {
+	//nolint:exhaustruct
 	p := &Player{}
 
 	return p
@@ -167,10 +168,6 @@ type Player struct {
 	Pet Pet
 }
 
-func (p *Player) Guid() wow.GUID {
-	return p.Object.Guid()
-}
-
 // Initializes an empty inventory.
 func (p *Player) InitInventory() {
 	if p.Inventory != nil {
@@ -182,6 +179,7 @@ func (p *Player) InitInventory() {
 	}
 
 	for i := 0; i < InventorySlotBagEnd; i++ {
+		//nolint:exhaustruct
 		p.Inventory.InventorySlots = append(p.Inventory.InventorySlots, &InventoryItem{})
 	}
 }
@@ -212,6 +210,7 @@ func (p *Player) BuildCreateUpdateForPlayer(target *Player) {
 		flags |= wow.UpdateFlagSelf
 	}
 
+	//nolint:revive,staticcheck
 	if flags&wow.UpdateFlagHasPosition != 0 {
 		// UPDATETYPE_CREATE_OBJECT2 dynamic objects, corpses...
 		// if isType(TYPEMASK_DYNAMICOBJECT) || isType(TYPEMASK_CORPSE) || isType(TYPEMASK_PLAYER) {
@@ -244,6 +243,7 @@ func (p *Player) BuildCreateUpdateForPlayer(target *Player) {
 	}
 }
 
+//nolint:errcheck
 func (p *Player) WriteToLogin(w *wow.Packet) {
 	w.Write(p.GUID())
 	w.WriteString(p.Name)

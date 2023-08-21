@@ -9,7 +9,7 @@ type Movement struct {
 	Time       uint32 // time in millisecond
 	Position   WorldLocation
 
-	TransportGuid uint64
+	TransportGUID uint64
 	TransportPos  WorldLocation
 	TransportTime uint32
 

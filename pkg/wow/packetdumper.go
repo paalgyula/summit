@@ -1,3 +1,4 @@
+//nolint:all
 package wow
 
 import (
@@ -12,8 +13,10 @@ import (
 
 var ErrWrongPacketLen = errors.New("wrong packet length")
 
+//nolint:gochecknoglobals
 var dumper *PacketDumper
 
+//nolint:gochecknoglobals
 var o sync.Once
 
 func initDumper() {

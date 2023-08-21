@@ -1,10 +1,10 @@
+//nolint:wrapcheck,errcheck
 package wow
 
 import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 
@@ -151,9 +151,9 @@ func (r *PacketReader) ReadNBytes(n int) ([]byte, error) {
 
 	if n2 != n {
 		log.Warn().Err(err).Msgf("readed %d instead of required: %d", n2, n)
-		fmt.Printf("%s", hex.Dump(buf[:n2]))
+		log.Printf("%s", hex.Dump(buf[:n2]))
 
-		return buf, errors.New("cant read that much bytes")
+		return buf, io.ErrUnexpectedEOF
 	}
 
 	return buf, nil
@@ -189,9 +189,9 @@ func (r *PacketReader) ReadAll() ([]byte, error) {
 func (r *PacketReader) DumpRemaining() ([]byte, error) {
 	r.ResetCounter()
 	bb, err := r.ReadAll()
-	fmt.Println(r.ReadedCount())
+	log.Print(r.ReadedCount())
 
-	fmt.Printf("%s", hex.Dump(bb))
+	log.Printf("%s", hex.Dump(bb))
 
 	return bb, err
 }

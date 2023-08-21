@@ -22,5 +22,7 @@ func init() {
 	}
 }
 
-// Correspondence between opcodes and their names.
+// OpcodeTable Correspondence between opcodes and their names.
+//
+//nolint:gochecknoglobals
 var OpcodeTable = Opcodes{}
