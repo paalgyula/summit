@@ -7,10 +7,10 @@ import (
 )
 
 func TestGuid(t *testing.T) {
-	g := NewGUID(CorpseGuid, 0x9739)
+	g := NewGUID(CorpseGUID, 0x9739)
 	g.PrintRAW()
 
-	assert.Equal(t, CorpseGuid, g.High())
+	assert.Equal(t, CorpseGUID, g.High())
 
 	assert.Equal(t, uint32(0x9739), g.Counter())
 

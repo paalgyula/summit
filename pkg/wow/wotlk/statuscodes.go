@@ -1,3 +1,4 @@
+//nolint:revive,stylecheck
 package wotlk
 
 type StatusCode uint8

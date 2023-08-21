@@ -8,5 +8,5 @@ type RData struct {
 }
 
 func (r *RData) Unmarshal(lp wow.RealmPacket) {
-	lp.UnmarshalPacket(r.Data)
+	_ = lp.UnmarshalPacket(r.Data)
 }

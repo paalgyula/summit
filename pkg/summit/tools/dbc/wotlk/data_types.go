@@ -42,6 +42,7 @@ func CreatesLocalizedString(data []byte) LocalizedString {
 		_ = binary.Read(br, binary.LittleEndian, &location)
 
 		if location != 0 {
+			//nolint:exhaustruct
 			ls.Locales[i] = &StringRef{
 				Location: location,
 			}

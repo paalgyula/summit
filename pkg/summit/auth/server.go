@@ -22,15 +22,16 @@ import (
 var (
 	ErrShortRead = errors.New("short read when reading opcode data")
 	ErrWriteSize = errors.New("the written and sent bytes are not equal")
+	ErrNoHandler = errors.New("no handler implamented")
 )
 
-type AuthServer struct {
+type Server struct {
 	l net.Listener
 	// The realm provider
 	rp RealmProvider
 }
 
-func (as *AuthServer) Run() {
+func (as *Server) Run() {
 	for {
 		c, err := as.l.Accept()
 		if err != nil {
@@ -48,11 +49,12 @@ func (as *AuthServer) Run() {
 	}
 }
 
-func (as *AuthServer) Close() error {
+func (as *Server) Close() error {
+	//nolint:wrapcheck
 	return as.l.Close()
 }
 
-func NewServer(listenAddress string, rp RealmProvider) (*AuthServer, error) {
+func NewServer(listenAddress string, rp RealmProvider) (*Server, error) {
 	l, err := net.Listen("tcp4", listenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("auth.StartServer: %w", err)
@@ -60,7 +62,7 @@ func NewServer(listenAddress string, rp RealmProvider) (*AuthServer, error) {
 
 	log.Info().Msgf("auth server is listening on: %s", listenAddress)
 
-	as := &AuthServer{
+	as := &Server{
 		l:  l,
 		rp: rp,
 	}
@@ -70,11 +72,10 @@ func NewServer(listenAddress string, rp RealmProvider) (*AuthServer, error) {
 	return as, nil
 }
 
-type AuthConnection struct {
+type Connection struct {
 	c net.Conn
 
-	outLock  sync.Mutex
-	readLock sync.Mutex
+	outLock sync.Mutex
 
 	log zerolog.Logger
 	id  string
@@ -86,8 +87,8 @@ type AuthConnection struct {
 	srp *crypt.SRP6
 }
 
-func NewAuthConnection(c net.Conn, rp RealmProvider) *AuthConnection {
-	rc := &AuthConnection{
+func NewAuthConnection(c net.Conn, rp RealmProvider) *Connection {
+	rc := &Connection{
 		c:       c,
 		log:     log.With().Str("addr", c.RemoteAddr().String()).Logger(),
 		account: nil,
@@ -95,6 +96,8 @@ func NewAuthConnection(c net.Conn, rp RealmProvider) *AuthConnection {
 
 		srp: crypt.NewSRP6(7, 3, big.NewInt(0)),
 		rp:  rp,
+
+		outLock: sync.Mutex{},
 	}
 
 	go rc.listen()
@@ -103,7 +106,7 @@ func NewAuthConnection(c net.Conn, rp RealmProvider) *AuthConnection {
 }
 
 //nolint:godox
-func (rc *AuthConnection) HandleLogin(pkt *ClientLoginChallenge) error {
+func (rc *Connection) HandleLogin(pkt *ClientLoginChallenge) error {
 	res := new(ServerLoginChallenge)
 
 	res.Status = ChallengeStatusSuccess
@@ -139,7 +142,8 @@ func (rc *AuthConnection) HandleLogin(pkt *ClientLoginChallenge) error {
 	return rc.Send(AuthLoginChallenge, res.MarshalPacket())
 }
 
-func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
+func (rc *Connection) HandleProof(pkt *ClientLoginProof) error {
+	//nolint:exhaustruct
 	response := ServerLoginProof{}
 
 	K, M := rc.srp.CalculateServerSessionKey(
@@ -150,7 +154,7 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 
 	if M.Cmp(&pkt.M) != 0 {
 		response.StatusCode = 4
-		rc.Send(AuthLoginProof, response.MarshalPacket())
+		_ = rc.Send(AuthLoginProof, response.MarshalPacket())
 		rc.c.Close()
 
 		return nil
@@ -172,10 +176,11 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 }
 
 //nolint:godox
-func (rc *AuthConnection) HandleRealmList() error {
+func (rc *Connection) HandleRealmList() error {
 	rc.log.Debug().Msg("handling realmlist request")
 
 	// TODO: #3 use some protocol to do registration with realm/manage realms and-or offline status
+	//nolint:exhaustruct
 	srl := ServerRealmlistPacket{}
 
 	realms, err := rc.rp.Realms(rc.account.Name)
@@ -188,7 +193,7 @@ func (rc *AuthConnection) HandleRealmList() error {
 	return rc.Send(RealmList, srl.MarshalPacket())
 }
 
-func (rc *AuthConnection) Send(opcode RealmCommand, payload []byte) error {
+func (rc *Connection) Send(opcode RealmCommand, payload []byte) error {
 	size := len(payload)
 
 	rc.log.Debug().
@@ -198,19 +203,19 @@ func (rc *AuthConnection) Send(opcode RealmCommand, payload []byte) error {
 		Msg("sending packet to client")
 
 	w := wow.NewPacket(0)
-	w.Write(uint8(opcode))
-	w.WriteBytes(payload)
+	_ = w.Write(uint8(opcode))
+	_, _ = w.WriteBytes(payload)
 
 	return rc.Write(w.Bytes())
 }
 
-func (rc *AuthConnection) Write(bb []byte) error {
+func (rc *Connection) Write(bb []byte) error {
 	rc.outLock.Lock()
 	defer rc.outLock.Unlock()
 
 	w, err := rc.c.Write(bb)
 	if err != nil {
-		return err
+		return fmt.Errorf("authConnection.Write: %w", err)
 	}
 
 	if w != len(bb) {
@@ -220,7 +225,7 @@ func (rc *AuthConnection) Write(bb []byte) error {
 	return nil
 }
 
-func (rc *AuthConnection) listen() {
+func (rc *Connection) listen() {
 	defer rc.c.Close()
 	rc.log.Info().Msgf("accepting messages from a new login connection")
 
@@ -239,33 +244,35 @@ func (rc *AuthConnection) listen() {
 
 			pkt.Unmarshal(&clc)
 
-			fmt.Printf(">> WoW -> Auth ClientLoginChallenge\n%s", hex.Dump(clc.MarshalPacket()))
+			log.Trace().Msgf(">> WoW -> Auth ClientLoginChallenge\n%s", hex.Dump(clc.MarshalPacket()))
 
-			rc.HandleLogin(&clc)
+			_ = rc.HandleLogin(&clc)
 		case AuthLoginProof:
 			var clp ClientLoginProof
 
 			pkt.Unmarshal(&clp)
 
-			fmt.Printf(">> WoW -> Auth ClientLoginProof\n%s", hex.Dump(clp.MarshalPacket()))
+			log.Trace().Msgf(">> WoW -> Auth ClientLoginProof\n%s", hex.Dump(clp.MarshalPacket()))
 
-			rc.HandleProof(&clp)
+			_ = rc.HandleProof(&clp)
 		case RealmList:
 			var rlp ClientRealmlistPacket
 
 			pkt.Unmarshal(&rlp)
 
-			fmt.Printf(">> WoW -> Auth ClientRealmlistPacket\n%s", hex.Dump(rlp.MarshalPacket()))
+			log.Trace().Msgf(">> WoW -> Auth ClientRealmlistPacket\n%s", hex.Dump(rlp.MarshalPacket()))
 
-			rc.HandleRealmList()
-		default:
+			_ = rc.HandleRealmList()
+		case AuthReconnectChallenge:
+			fallthrough
+		case AuthReconnectProof:
 			rc.log.Fatal().Msgf("unhandled command: %T(0x%02x)", pkt.Command, pkt.Command)
 		}
 	}
 }
 
 // read reads the packet from the auth socket.
-func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
+func (rc *Connection) read(r io.Reader) (*RData, error) {
 	opCodeData := make([]byte, 1)
 
 	n, err := r.Read(opCodeData)
@@ -279,13 +286,14 @@ func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 
 	// In the auth server, the length is based on the packet type.
 	opCode := RealmCommand(opCodeData[0])
-	length := 0
+
+	var length int
 
 	switch opCode {
 	case AuthLoginChallenge:
 		lenData, err := ReadBytes(r, 3)
 		if err != nil {
-			return nil, fmt.Errorf("error while reading header length: %v", err)
+			return nil, fmt.Errorf("error while reading header length: %w", err)
 		}
 
 		length = int(binary.LittleEndian.Uint16(lenData[1:]))
@@ -293,12 +301,12 @@ func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 		length = 74
 	case RealmList:
 		length = 4
-	default:
+	case AuthReconnectChallenge, AuthReconnectProof:
 		rc.log.Error().
 			Hex("packet", opCodeData).
 			Msg("packet is not handled yet")
 
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrNoHandler, opCode)
 	}
 
 	bb, err := ReadBytes(r, length)
@@ -322,13 +330,13 @@ func ReadBytes(buffer io.Reader, length int) ([]byte, error) {
 	if length > 0 {
 		n, err := buffer.Read(data)
 		if err != nil {
-			return nil, fmt.Errorf("error while reading bytes: %v", err)
+			return nil, fmt.Errorf("error while reading bytes: %w", err)
 		}
 
 		if n != length {
-			fmt.Printf("WTF: %s\n", hex.Dump(data[:n]))
+			log.Trace().Msgf("WTF: %s\n", hex.Dump(data[:n]))
 
-			return nil, fmt.Errorf("short read: wanted %v bytes, got %v", length, n)
+			return nil, fmt.Errorf("%w: wanted %v bytes, got %v", ErrShortRead, length, n)
 		}
 	}
 

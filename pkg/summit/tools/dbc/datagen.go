@@ -1,11 +1,11 @@
 package dbc
 
 import (
-	"fmt"
 	"os"
 	"path"
 
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
+	"github.com/rs/zerolog/log"
 )
 
 func LoadAll(dbcDirectoryPath string) {
@@ -28,7 +28,7 @@ func load[C any](fileName string, baseDir ...string) ([]C, error) {
 		return nil, err
 	}
 
-	fmt.Printf("DBC loader: Loaded %d records from %s\n", r.Header.RecordCount, fileName)
+	log.Printf("DBC loader: Loaded %d records from %s\n", r.Header.RecordCount, fileName)
 
 	return r.Records, nil
 }

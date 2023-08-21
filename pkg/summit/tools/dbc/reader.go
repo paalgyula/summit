@@ -1,3 +1,4 @@
+//nolint:all
 package dbc
 
 import (
@@ -8,6 +9,7 @@ import (
 	"reflect"
 
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
+	"github.com/rs/zerolog/log"
 )
 
 // DataHeader is the header of a DBC file with the following fields:
@@ -40,6 +42,7 @@ type Reader[C any] struct {
 //	r: the io.Reader to read DBC files from.
 //	(*Reader[C], error): a pointer to a Reader instance and a possible error that might occur.
 func NewReader[C any](r io.Reader) (*Reader[C], error) {
+	//nolint:exhaustruct
 	dbcReader := &Reader[C]{
 		r:      r,
 		Header: DataHeader{},
@@ -50,7 +53,7 @@ func NewReader[C any](r io.Reader) (*Reader[C], error) {
 		return nil, fmt.Errorf("cannot read DBC header: %w", err)
 	}
 
-	fmt.Printf("Header: records: %d, record size: %d, string block size: %d\n",
+	log.Printf("Header: records: %d, record size: %d, string block size: %d\n",
 		dbcReader.Header.RecordCount,
 		dbcReader.Header.RecordSize,
 		dbcReader.Header.StringBlockSize,
@@ -74,7 +77,7 @@ func (dr *Reader[C]) ReadAll() error {
 		// fmt.Printf(">> %s", hex.Dump(row))
 		var data C
 
-		parseByteArray(row, &data)
+		_ = parseByteArray(row, &data)
 		dr.Records[dr.current] = data
 	}
 
@@ -85,7 +88,7 @@ func (dr *Reader[C]) ReadAll() error {
 
 	// fmt.Printf(">> %s", hex.Dump(strings))
 
-	dr.parseStrings(strings)
+	_ = dr.parseStrings(strings)
 
 	// fmt.Printf("%+v", dr.Records)
 
@@ -111,7 +114,7 @@ func (dr *Reader[C]) parseStrings(strings []byte) error {
 				val, _ := reflect.Value(field).Interface().(wotlk.LocalizedString)
 				for _, l := range val.Locales {
 					if l != nil {
-						r.Seek(int64(l.Location), io.SeekStart)
+						_, _ = r.Seek(int64(l.Location), io.SeekStart)
 						s := readCstring(r)
 
 						l.Value = s

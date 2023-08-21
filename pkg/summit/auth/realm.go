@@ -9,7 +9,7 @@ type StaticRealmProvider struct {
 	RealmList []*Realm
 }
 
-func (srp *StaticRealmProvider) Realms(accountID string) ([]*Realm, error) {
+func (srp *StaticRealmProvider) Realms(_ string) ([]*Realm, error) {
 	return srp.RealmList, nil
 }
 

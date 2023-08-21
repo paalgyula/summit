@@ -1,3 +1,4 @@
+//nolint:all
 package serworm
 
 import (
@@ -25,7 +26,6 @@ type RealmPacket interface {
 }
 
 type RealmClient struct {
-	readMutex  sync.Mutex
 	writeMutex sync.Mutex
 
 	conn    net.Conn

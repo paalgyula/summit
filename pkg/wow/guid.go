@@ -9,22 +9,22 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type HighGuid uint32
+type HighGUID uint32
 
 const (
-	ItemGuid          HighGuid = 0x4000 // blizz 4000
-	ContainerGuid     HighGuid = 0x4000 // blizz 4000
-	PlayerGuid        HighGuid = 0x0000 // blizz 0000
-	GameObjectGuid    HighGuid = 0xF110 // blizz F110
-	TransportGuid     HighGuid = 0xF120 // blizz F120 (for GAMEOBJECT_TYPE_TRANSPORT)
-	UnitGuid          HighGuid = 0xF130 // blizz F130
-	PetGuid           HighGuid = 0xF140 // blizz F140
-	VehicleGuid       HighGuid = 0xF150 // blizz F550
-	DynamicObjectGuid HighGuid = 0xF100 // blizz F100
-	CorpseGuid        HighGuid = 0xF101 // blizz F100
-	MoTransportGuid   HighGuid = 0x1FC0 // blizz 1FC0 (for GAMEOBJECT_TYPE_MO_TRANSPORT)
-	InstanceGuid      HighGuid = 0x1F40 // blizz 1F40
-	GroupGuid         HighGuid = 0x1F50
+	ItemGUID          HighGUID = 0x4000 // blizz 4000
+	ContainerGuid     HighGUID = 0x4000 // blizz 4000
+	PlayerGUID        HighGUID = 0x0000 // blizz 0000
+	GameObjectGUID    HighGUID = 0xF110 // blizz F110
+	TransportGUID     HighGUID = 0xF120 // blizz F120 (for GAMEOBJECT_TYPE_TRANSPORT)
+	UnitGUID          HighGUID = 0xF130 // blizz F130
+	PetGUID           HighGUID = 0xF140 // blizz F140
+	VehicleGUID       HighGUID = 0xF150 // blizz F550
+	DynamicObjectGUID HighGUID = 0xF100 // blizz F100
+	CorpseGUID        HighGUID = 0xF101 // blizz F100
+	MoTransportGUID   HighGUID = 0x1FC0 // blizz 1FC0 (for GAMEOBJECT_TYPE_MO_TRANSPORT)
+	InstanceGUID      HighGUID = 0x1F40 // blizz 1F40
+	GroupGUID         HighGUID = 0x1F50
 )
 
 type GuidPool struct {
@@ -33,13 +33,13 @@ type GuidPool struct {
 	counter int
 
 	freeIDs []int
-	pool    map[HighGuid]int
+	pool    map[HighGUID]int
 }
 
 func NewGuidPool() *GuidPool {
 	gp := &GuidPool{
 		freeIDs: make([]int, 0),
-		pool:    make(map[HighGuid]int),
+		pool:    make(map[HighGUID]int),
 	}
 
 	return gp
@@ -72,17 +72,17 @@ type GUID uint64
 
 func (g *GUID) HasEntry() bool {
 	switch g.High() {
-	case ItemGuid, PlayerGuid, DynamicObjectGuid, CorpseGuid, MoTransportGuid, InstanceGuid, GroupGuid:
+	case ItemGUID, PlayerGUID, DynamicObjectGUID, CorpseGUID, MoTransportGUID, InstanceGUID, GroupGUID:
 		return false
-	case GameObjectGuid, TransportGuid, UnitGuid, PetGuid, VehicleGuid:
+	case GameObjectGUID, TransportGUID, UnitGUID, PetGUID, VehicleGUID:
 		return true
 	}
 
 	return false
 }
 
-func (g GUID) High() HighGuid {
-	return HighGuid((g >> 48) & 0x0000FFFF)
+func (g GUID) High() HighGUID {
+	return HighGUID((g >> 48) & 0x0000FFFF)
 }
 
 func (g GUID) Entry() uint32 {
@@ -101,7 +101,7 @@ func (g GUID) PrintRAW() {
 	fmt.Printf("%64b\nValue: %32d Hex: 0x%x\n", g, g, g)
 }
 
-func NewGUID(hg HighGuid, counter uint32) GUID {
+func NewGUID(hg HighGUID, counter uint32) GUID {
 	return GUID(
 		// rawValue: uint64((uint64(hg) << 48) & uint64(counter)),
 		uint64(counter) | (uint64(hg) << 48),
@@ -128,29 +128,29 @@ func (g GUID) Pack() []byte {
 }
 
 func NewPlayerGUID(counter uint32) GUID {
-	return NewGUID(PlayerGuid, counter)
+	return NewGUID(PlayerGUID, counter)
 }
 
 func NewItemGUID(counter uint32) GUID {
-	return NewGUID(ItemGuid, counter)
+	return NewGUID(ItemGUID, counter)
 }
 
 func (g GUID) TypeID() TypeID {
 	switch g.High() {
-	case ItemGuid:
+	case ItemGUID:
 		return TypeIDItem
 	// case HIGHGUID_CONTAINER:    return TYPEID_CONTAINER; HIGHGUID_CONTAINER==HIGHGUID_ITEM currently
-	case UnitGuid, PetGuid:
+	case UnitGUID, PetGUID:
 		return TypeIDUnit
-	case PlayerGuid:
+	case PlayerGUID:
 		return TypeIDPlayer
-	case GameObjectGuid, MoTransportGuid:
+	case GameObjectGUID, MoTransportGUID:
 		return TypeIDGameObject
-	case DynamicObjectGuid:
+	case DynamicObjectGUID:
 		return TypeIDDynamicoObject
-	case CorpseGuid:
+	case CorpseGUID:
 		return TypeIDCorpse
-	case TransportGuid:
+	case TransportGUID:
 	default: // unknown
 		return TypeIDObject
 	}

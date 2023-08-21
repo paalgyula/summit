@@ -1,3 +1,4 @@
+//nolint:all
 package crypt
 
 import (

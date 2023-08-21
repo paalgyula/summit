@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"fmt"
 	"io"
 	"math/big"
 	"strings"
@@ -40,6 +39,7 @@ func (p *ClientLoginChallenge) OpCode() RealmCommand {
 	return AuthLoginChallenge
 }
 
+//nolint:errcheck
 func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 	r := bb.Reader()
 	r.ReadStringFixed(&p.GameName, 4)
@@ -59,6 +59,7 @@ func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 	return nil
 }
 
+//nolint:errcheck
 func (p *ClientLoginChallenge) MarshalPacket() []byte {
 	w := wow.NewPacket(wow.OpCode(AuthLoginChallenge))
 
@@ -101,7 +102,7 @@ const (
 	// You have used up your prepaid time for this account. Please purchase more to continue playing.
 	ChallengeStatusFailNoTime
 	// Could not log in to <game> at this time. Please try again later.
-	ChallengeStatusFailDbBusy
+	ChallengeStatusFailDBBusy
 	// Unable to validate game version. This may be caused by file corruption or
 	// interference of another program. Please visit <site> for more information
 	// and possible solutions to this issue.
@@ -139,6 +140,7 @@ type ServerLoginChallenge struct {
 	N big.Int
 }
 
+//nolint:errcheck
 func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 	r := wow.NewConnectionReader(data)
 
@@ -166,6 +168,8 @@ func (pkt *ServerLoginChallenge) ReadPacket(data io.Reader) int {
 }
 
 // Bytes writes out the packet to an array of bytes.
+//
+//nolint:errcheck
 func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
 	w := wow.NewPacket(wow.OpCode(AuthLoginChallenge))
 
@@ -176,7 +180,8 @@ func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
 		// Public key of SRP6
 		w.WriteZeroPadded(wow.ReverseBytes(pkt.B.Bytes()), 32)
 
-		fmt.Println("B: ", pkt.B.Text(16))
+		// Only for debug purposes
+		// fmt.Println("B: ", pkt.B.Text(16))
 
 		// G is the generator of SRP6
 		w.WriteOne(0x01)
@@ -189,7 +194,7 @@ func (pkt *ServerLoginChallenge) MarshalPacket() []byte {
 
 		// Salt of the password generator
 		w.WriteZeroPadded(wow.ReverseBytes(pkt.Salt.Bytes()), 32)
-		fmt.Println("Salt: ", pkt.Salt.Text(16))
+		// fmt.Println("Salt: ", pkt.Salt.Text(16))
 
 		w.WriteBytes(pkt.SaltCRC)
 

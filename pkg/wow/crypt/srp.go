@@ -1,5 +1,7 @@
 // The Secure Remote Password protocol (SRP) is an augmented password-authenticated key exchange (PAKE) protocol,
 // specifically designed to work around existing patents.
+//
+//nolint:all
 package crypt
 
 import (

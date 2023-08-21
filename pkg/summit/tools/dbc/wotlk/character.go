@@ -35,8 +35,8 @@ type ChrRacesEntry struct {
 	RaceID            uint32          `dbc:"offset=1"`
 	Flags             uint32          `dbc:"offset=2"`
 	FactionID         uint32          `dbc:"offset=3"`
-	MaleDisplayId     uint32          `dbc:"offset=5"`
-	FemaleDisplayId   uint32          `dbc:"offset=6"`
+	MaleDisplayID     uint32          `dbc:"offset=5"`
+	FemaleDisplayID   uint32          `dbc:"offset=6"`
 	BaseLanguage      uint32          `dbc:"offset=8"`
 	Name              LocalizedString `dbc:"offset=15"`
 	RequiredExpansion uint32          `dbc:"offset=69"`

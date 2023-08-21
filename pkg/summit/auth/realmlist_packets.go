@@ -15,11 +15,12 @@ func (pkt *ClientRealmlistPacket) OpCode() RealmCommand {
 
 func (pkt *ClientRealmlistPacket) MarshalPacket() []byte {
 	w := wow.NewPacket(wow.OpCode(RealmList))
-	w.WriteUint32(0x00) // padding
+	_ = w.WriteUint32(0x00) // padding
 
 	return w.Bytes()
 }
 
+//nolint:wrapcheck
 func (pkt *ClientRealmlistPacket) UnmarshalPacket(bb wow.PacketData) error {
 	return bb.Reader().Read(pkt)
 }
@@ -29,6 +30,7 @@ type ServerRealmlistPacket struct {
 	Realms []*Realm
 }
 
+//nolint:errcheck
 func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.PacketReader) {
 	var size uint16
 	_ = r.Read(&size)
@@ -67,6 +69,8 @@ func (pkt *ServerRealmlistPacket) ReadPacket(r *wow.PacketReader) {
 }
 
 // MarshalPacket converts the ServerRealmlist packet to an array of bytes.
+//
+//nolint:errcheck
 func (pkt *ServerRealmlistPacket) MarshalPacket() []byte {
 	w := wow.NewPacket(wow.OpCode(RealmList))
 

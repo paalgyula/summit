@@ -23,7 +23,7 @@ type ProxyServer struct {
 	log zerolog.Logger
 
 	// bridge     *Bridge
-	authServer *auth.AuthServer
+	authServer *auth.Server
 
 	realms []*auth.Realm
 }

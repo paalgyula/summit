@@ -21,6 +21,7 @@ func (ClientLoginProof) OpCode() RealmCommand {
 	return AuthLoginProof
 }
 
+//nolint:errcheck
 func (pkt ClientLoginProof) MarshalPacket() []byte {
 	w := wow.NewPacket(wow.OpCode(AuthLoginProof))
 
@@ -43,6 +44,7 @@ func (pkt *ClientLoginProof) UnmarshalPacket(bb wow.PacketData) error {
 	pkt.M.SetBytes(r.ReadReverseBytes(20))
 	pkt.CRCHash, _ = r.ReadNBytes(20)
 
+	//nolint:errcheck
 	r.ReadL(&pkt.NumberOfKeys)
 	// return r.ReadL(&pkt.SecurityFlags)
 
@@ -60,10 +62,10 @@ type ServerLoginProof struct {
 func (pkt *ServerLoginProof) MarshalPacket() []byte {
 	w := wow.NewPacket(wow.OpCode(AuthLoginProof))
 
-	w.Write(pkt.StatusCode)
+	_ = w.Write(pkt.StatusCode)
 
 	if pkt.StatusCode == 0 {
-		w.WriteZeroPadded(wow.ReverseBytes(pkt.Proof.Bytes()), 30)
+		_, _ = w.WriteZeroPadded(wow.ReverseBytes(pkt.Proof.Bytes()), 30)
 	}
 
 	return w.Bytes()
@@ -71,8 +73,9 @@ func (pkt *ServerLoginProof) MarshalPacket() []byte {
 
 func (pkt *ServerLoginProof) ReadPacket(r io.Reader) int {
 	status := make([]byte, 1)
-	r.Read(status)
+	_, _ = r.Read(status)
 
+	//nolint:exhaustruct
 	slp := &ServerLoginProof{
 		StatusCode: status[0],
 	}
