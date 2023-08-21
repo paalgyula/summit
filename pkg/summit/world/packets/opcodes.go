@@ -27,6 +27,7 @@ func (o Opcodes) Handle(code wow.OpCode, handler any) {
 
 	if oc == nil {
 		log.Fatal().Msgf("you should define a handler first for this message: 0x%x", int(code))
+
 		return
 	}
 

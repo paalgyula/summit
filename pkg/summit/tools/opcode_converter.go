@@ -11,9 +11,10 @@ import (
 	"strings"
 )
 
+//nolint:lll
 const OpcodeHeaderURL = `https://raw.githubusercontent.com/azerothcore/azerothcore-wotlk/master/src/server/game/Server/Protocol/Opcodes.h`
 
-// OpcodeTemplate parsed opcode holder struct
+// OpcodeTemplate parsed opcode holder struct.
 type OpcodeTemplate struct {
 	Name    string
 	Value   string
@@ -39,11 +40,11 @@ func WriteOpcodeSource(packageName string, opcodes []*OpcodeTemplate, out io.Wri
 
 	bb, err := format.Source(buf.Bytes())
 	if err != nil {
-
 		return fmt.Errorf("failed to format source: %w", err)
 	}
 
 	_, err = out.Write(bb)
+
 	return err
 }
 
@@ -56,6 +57,7 @@ func ParseOpcodes(r io.Reader) ([]*OpcodeTemplate, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		mm := pattern.FindAllStringSubmatch(line, -1)
+
 		for _, v := range mm {
 			opcodes = append(opcodes, &OpcodeTemplate{
 				convertOpcodeName(v[1]), v[3], v[5],
@@ -75,6 +77,7 @@ func convertOpcodeName(code string) string {
 		"SMSG", "SERVER",
 		"CMSG", "CLIENT",
 	).Replace(code)
+
 	return toCamelCase(code)
 }
 
@@ -88,8 +91,8 @@ func Fetch(url string) (io.Reader, error) {
 
 	// Read the body into memory
 	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, resp.Body)
-	if err != nil {
+
+	if _, err = io.Copy(buf, resp.Body); err != nil {
 		return nil, err
 	}
 

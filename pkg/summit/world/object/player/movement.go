@@ -2,7 +2,7 @@ package player
 
 import "github.com/paalgyula/summit/pkg/wow"
 
-// Movement info
+// Movement info.
 type Movement struct {
 	MoveFlags  wow.MovementFlag
 	MoveFlags2 uint8

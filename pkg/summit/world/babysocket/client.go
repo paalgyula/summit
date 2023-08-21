@@ -14,8 +14,10 @@ type Client struct {
 	writeLock sync.Mutex
 }
 
-type OnDataFunc func()
-type OnPacketFunc func(string, int, []byte)
+type (
+	OnDataFunc   func()
+	OnPacketFunc func(string, int, []byte)
+)
 
 func NewClient(addr ...string) (*Client, error) {
 	socketPath := "babysocket"
@@ -35,8 +37,8 @@ func NewClient(addr ...string) (*Client, error) {
 
 func (c *Client) readData() error {
 	var dp DataPacket
-	err := gob.NewDecoder(c.client).Decode(&dp)
-	if err != nil {
+
+	if err := gob.NewDecoder(c.client).Decode(&dp); err != nil {
 		panic(err)
 	}
 
@@ -50,6 +52,7 @@ func (c *Client) readData() error {
 	}
 
 	fmt.Printf("data: %+v\n", dp)
+
 	return nil
 }
 

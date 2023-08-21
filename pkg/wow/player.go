@@ -2,7 +2,6 @@ package wow
 
 type PlayerClass uint8
 
-// TODO: generate this from dbc?
 const (
 	ClassWarior      PlayerClass = 0x01
 	ClassPaladin     PlayerClass = 0x02

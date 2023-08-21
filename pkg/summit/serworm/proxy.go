@@ -34,7 +34,7 @@ type LoginServerConfig struct {
 	Pass          string
 }
 
-func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig) (err error) {
+func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig) error {
 	db := db.GetInstance()
 
 	ws := &ProxyServer{
@@ -46,7 +46,7 @@ func StartProxy(ctx context.Context, listenAddress string, config LoginServerCon
 
 	as, err := auth.NewServer(listenAddress, ws)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot start auth server: %w", err)
 	}
 
 	ws.authServer = as
@@ -108,10 +108,7 @@ func (ws *ProxyServer) Disconnected(id string) {
 func (ws *ProxyServer) Run() {
 	defer log.Warn().Msg("proxy server stopped")
 
-	for {
-		select {
-		case <-ws.ctx.Done():
-			return
-		}
+	for range ws.ctx.Done() {
+		return
 	}
 }

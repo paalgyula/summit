@@ -45,10 +45,9 @@ const (
 	MovementFlagSafeFall        MovementFlag = 0x20000000 // Feather Fall (spell)
 	MovementFlagHover           MovementFlag = 0x40000000
 
-	MovementFlagMoving MovementFlag = MovementFlagForward | MovementFlagBackward | MovementFlagStrafeLeft | MovementFlagStrafeRight |
-		MovementFlagPitchUp | MovementFlagPitchDown |
-		MovementFlagFalling | MovementFlagFallingFar | MovementFlagAscending |
-		MovementFlagSplineElevation
+	MovementFlagMoving MovementFlag = MovementFlagForward | MovementFlagBackward | MovementFlagStrafeLeft |
+		MovementFlagStrafeRight | MovementFlagPitchUp | MovementFlagPitchDown | MovementFlagFalling |
+		MovementFlagFallingFar | MovementFlagAscending | MovementFlagSplineElevation
 
 	MovementFlagTurning MovementFlag = MovementFlagTurnLeft | MovementFlagTurnRight
 

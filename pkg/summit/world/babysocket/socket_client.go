@@ -19,12 +19,14 @@ func (sc *socketClient) Listen() {
 	defer sc.disconnected()
 
 	var data DataPacket
+
 	dec := gob.NewDecoder(sc.conn)
 
 	for {
 		err := dec.Decode(&data)
 		if err != nil {
 			log.Err(err).Msg("babysocket listener error")
+
 			return
 		}
 

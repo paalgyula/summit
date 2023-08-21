@@ -94,9 +94,9 @@ func (wc *WowCrypt) Encrypt(data []byte) []byte {
 	return bb
 }
 
-func (ac *WowCrypt) Decrypt(data []byte) []byte {
+func (wc *WowCrypt) Decrypt(data []byte) []byte {
 	bb := make([]byte, len(data))
-	ac.decoder.XORKeyStream(bb, data)
+	wc.decoder.XORKeyStream(bb, data)
 
 	return bb
 }

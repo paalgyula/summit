@@ -33,6 +33,7 @@ func (um *UpdateMask) GetBit(index uint32) bool {
 	if index < um.count {
 		return ((um.updateMask[index>>3]) & (1 << (index & 0x7))) != 0
 	}
+
 	return false
 }
 
@@ -47,6 +48,7 @@ func (um *UpdateMask) GetUpdateBlockCount() uint32 {
 			break
 		}
 	}
+
 	return (x + 1)
 }
 
@@ -77,6 +79,7 @@ func (um *UpdateMask) SetCount(valuesCount uint32) {
 
 	um.count = valuesCount
 	um.blocks = um.count >> 5
+
 	if um.count&31 != 0 {
 		um.blocks++
 	}

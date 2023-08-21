@@ -16,6 +16,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+//nolint:gochecknoinits
 func init() {
 	log.Logger = log.Output(zerolog.NewConsoleWriter())
 }
@@ -31,7 +32,7 @@ type WorldServer struct {
 	bs *babysocket.Server
 }
 
-func StartServer(ctx context.Context, listenAddress string) (err error) {
+func StartServer(ctx context.Context, listenAddress string) error {
 	db := db.GetInstance()
 
 	ws := &WorldServer{
@@ -42,6 +43,8 @@ func StartServer(ctx context.Context, listenAddress string) (err error) {
 		clients: sync.Map{},
 	}
 
+	var err error
+
 	ws.l, err = net.Listen("tcp4", listenAddress)
 	if err != nil {
 		return fmt.Errorf("world.StartServer: %w", err)
@@ -49,7 +52,7 @@ func StartServer(ctx context.Context, listenAddress string) (err error) {
 
 	bs, err := babysocket.NewServer(ctx, "babysocket", ws)
 	if err != nil {
-		return err
+		return fmt.Errorf("world.StartServer: %w", err)
 	}
 
 	ws.bs = bs
@@ -66,9 +69,11 @@ func (ws *WorldServer) Clients() map[string]wow.PayloadSender {
 	ret := map[string]wow.PayloadSender{}
 
 	ws.clients.Range(func(key, value any) bool {
-		v := value.(*GameClient)
+		v, _ := value.(*GameClient)
+		ck, _ := key.(string)
 
-		ret[key.(string)] = v
+		ret[ck] = v
+
 		return true
 	})
 
@@ -92,8 +97,10 @@ func (ws *WorldServer) AddClient(gc *GameClient) {
 	ws.clients.Store(gc.ID, gc)
 
 	count := 0
+
 	ws.clients.Range(func(key, value any) bool {
 		count++
+
 		return true
 	})
 
@@ -131,6 +138,7 @@ func (ws *WorldServer) Run() {
 
 func MemUsage() string {
 	var m runtime.MemStats
+
 	runtime.ReadMemStats(&m)
 
 	var bb bytes.Buffer

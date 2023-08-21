@@ -1,3 +1,4 @@
+//nolint:godox
 package packets
 
 import (
@@ -8,6 +9,7 @@ import (
 
 // TODO: #1 this file should be generated
 
+//nolint:gochecknoinits
 func init() {
 	OpcodeTable = make(Opcodes, int(wow.NumMsgTypes))
 
@@ -20,5 +22,5 @@ func init() {
 	}
 }
 
-// Correspondence between opcodes and their names
+// Correspondence between opcodes and their names.
 var OpcodeTable = Opcodes{}

@@ -9,6 +9,7 @@ import (
 
 func (gc *GameClient) ListCharacters() {
 	var players []*player.Player
+
 	gc.acc.Characters(&players)
 
 	for _, p := range players {
@@ -41,12 +42,16 @@ type CharacterCreateRequest struct {
 
 type CharacterCreateResult uint8
 
+//nolint:godox
 func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 	r := wow.NewPacketReader(data)
+
 	var characerName string
+
 	r.ReadString(&characerName)
 
 	var req CharacterCreateRequest
+
 	r.Read(&req, binary.BigEndian)
 
 	// fmt.Printf("%s %+v\n", characerName, req)
@@ -84,6 +89,7 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 	p.InitInventory()
 
 	var players player.Players
+
 	gc.acc.Characters(&players)
 	players.Add(&p)
 

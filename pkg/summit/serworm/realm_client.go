@@ -43,7 +43,7 @@ type RealmClient struct {
 }
 
 func NewRealmClient(conn net.Conn, version int) *RealmClient {
-	rs := &RealmClient{
+	rs := &RealmClient{ //nolint:exhaustruct
 		conn:         conn,
 		version:      version,
 		log:          log.With().Str("module", "realmclient").Logger(),
@@ -67,7 +67,7 @@ func (pw *RealmClient) Authenticate(user, pass string) ([]*auth.Realm, error) {
 
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("timeout expired: %w", ctx.Err())
 	case realms := <-pw.realmChannel:
 		return realms, nil
 	}

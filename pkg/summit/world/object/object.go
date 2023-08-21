@@ -4,7 +4,7 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
-// 1973 in MoP? Seems 1326 in wotlk
+// 1973 in MoP? Seems 1326 in wotlk.
 const dataLength int = int(wow.NumMsgTypes)
 
 type Object struct {

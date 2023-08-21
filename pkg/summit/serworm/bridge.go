@@ -1,8 +1,8 @@
 package serworm
 
 import (
+	"fmt"
 	"net"
-	"strconv"
 
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/paalgyula/summit/pkg/summit/world/packets"
@@ -97,7 +97,11 @@ func NewBridge(listenPort int, serverAddr, serverName string, ws world.SessionMa
 			Str("service", "bridge").Logger(),
 	}
 
-	listenAddr := "127.0.0.1:" + strconv.Itoa(listenPort)
+	if serverAddr == "" {
+		serverAddr = "127.0.0.1"
+	}
+
+	listenAddr := fmt.Sprintf("%s:%d", serverAddr, listenPort)
 	b.log.Info().Msgf("starting bridge on address: %s", listenAddr)
 
 	listener, err := net.Listen("tcp", listenAddr)

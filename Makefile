@@ -23,6 +23,10 @@ default: build
 clean:
 	rm -Rf bin/*
 
+lint:
+	@echo "--> Linting the project with golangci-lint..."
+	@golangci-lint run ./...
+
 build:
 	@echo "--> Compiling the project"
 	@mkdir -p bin/

@@ -80,8 +80,8 @@ func (s *Server) SendPacketToBabies(source string, opcode int, data []byte) {
 	}
 
 	bb := &bytes.Buffer{}
-	err := gob.NewEncoder(bb).Encode(dp)
-	if err != nil {
+
+	if err := gob.NewEncoder(bb).Encode(dp); err != nil {
 		panic("encoder error")
 	}
 

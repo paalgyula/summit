@@ -14,9 +14,12 @@ type Updater struct {
 	updateFlags uint8
 }
 
+//nolint:funlen,wsl
 func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	var o *object.Object
+
 	var u *object.Unit
+
 	var p *player.Player
 
 	switch t := unit.(type) {
@@ -43,7 +46,6 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 				moveFlags = o.MovementFlags()
 				moveFlags &= ^wow.MovementFlagOnTransport
 			}
-			break
 		case wow.TypeIDPlayer:
 			{
 				moveFlags = o.MovementFlags()
@@ -53,9 +55,7 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 				} else {
 					moveFlags &= ^wow.MovementFlagOnTransport
 				}
-
 			}
-			break
 		}
 
 		pkt.Write(moveFlags)                      // movement flags
@@ -85,7 +85,6 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 
 	// // 0x20
 	if upd.updateFlags&wow.UpdateFlagLiving != 0 {
-
 		// {
 		//     // 0x00000200
 		//     if (moveFlags & MOVEMENTFLAG_ONTRANSPORT)
@@ -108,7 +107,7 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 		//         if (GetTypeId() == TYPEID_PLAYER)
 		//             *data << (float)ToPlayer()->m_movementInfo.s_pitch;
 		//         else
-		//             *data << float(0);                          // is't part of movement packet, we must store and send it...
+		//             *data << float(0);             // is't part of movement packet, we must store and send it...
 		//     }
 
 		if o.Guid().TypeID() == wow.TypeIDPlayer {

@@ -32,8 +32,7 @@ const (
 	UpdateFlagRotation           ObjectUpdateFlags = 0x0200
 )
 
-type ObjectManager struct {
-}
+type ObjectManager struct{}
 
 func (*ObjectManager) CreateUpdatePacketFor(*player.Player) {
 	p := wow.NewPacket(wow.ServerUpdateObject)

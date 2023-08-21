@@ -13,7 +13,7 @@ import (
 // DataHeader is the header of a DBC file with the following fields:
 // Magic: always 'WDBC'
 // RecordCount: records per file
-// FieldCount: fields per record
+// FieldCount: fields per record.
 type DataHeader struct {
 	Magic [4]byte // always 'WDBC'
 	// records per file
@@ -108,7 +108,7 @@ func (dr *Reader[C]) parseStrings(strings []byte) error {
 
 			// LocalizedString
 			if field.Type() == reflect.TypeOf(wotlk.LocalizedString{}) {
-				val := reflect.Value(field).Interface().(wotlk.LocalizedString)
+				val, _ := reflect.Value(field).Interface().(wotlk.LocalizedString)
 				for _, l := range val.Locales {
 					if l != nil {
 						r.Seek(int64(l.Location), io.SeekStart)
@@ -121,7 +121,7 @@ func (dr *Reader[C]) parseStrings(strings []byte) error {
 
 			// String reference
 			if field.Type() == reflect.TypeOf((*wotlk.StringRef)(nil)) {
-				sr := reflect.Value(field).Interface().(*wotlk.StringRef)
+				sr, _ := reflect.Value(field).Interface().(*wotlk.StringRef)
 				r.Seek(int64(sr.Location), io.SeekStart)
 				s := readCstring(r)
 
@@ -138,10 +138,11 @@ func (dr *Reader[C]) parseStrings(strings []byte) error {
 // returns a string.
 func readCstring(r io.Reader) string {
 	s := bytes.NewBufferString("")
+
 	for {
 		bb := make([]byte, 1)
-		_, err := r.Read(bb)
-		if err != nil {
+
+		if _, err := r.Read(bb); err != nil {
 			return s.String()
 		}
 
@@ -155,6 +156,7 @@ func readCstring(r io.Reader) string {
 	return s.String()
 }
 
+//nolint:funlen
 func parseByteArray(data []byte, obj interface{}) error {
 	v := reflect.ValueOf(obj).Elem()
 
@@ -163,6 +165,7 @@ func parseByteArray(data []byte, obj interface{}) error {
 	for i := 0; i < v.NumField(); i++ {
 		field := v.Field(i)
 		dbcTag := v.Type().Field(i).Tag.Get("dbc")
+
 		if dbcTag == "" {
 			continue
 		}

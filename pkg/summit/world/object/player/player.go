@@ -22,7 +22,7 @@ func (l WorldLocation) Location() (float32, float32, float32, uint32) {
 	return l.X, l.Y, l.Z, l.Map
 }
 
-// Distance calculates the distance between two locations
+// Distance calculates the distance between two locations.
 func (loc *WorldLocation) Distance(point *WorldLocation) float64 {
 	dx := loc.X - point.X
 	dy := loc.Y - point.Y
@@ -37,14 +37,16 @@ func NewPlayer() *Player {
 	return p
 }
 
+//nolint:funlen
 func CreatePlayer() {
-	p := NewPlayer()
-	// uint8 powertype = cEntry->powerType;
+	// p := NewPlayer()
+	// // uint8 powertype = cEntry->powerType;
 
-	var unitfield uint32
-	powertype := wow.PowerTypeRage
+	// var unitfield uint32
 
-	_, _, _ = p, unitfield, powertype
+	// powertype := wow.PowerTypeRage
+
+	// _, _, _ = p, unitfield, powertype
 
 	// switch powertype {
 	// case wow.PowerTypeEnergy,wow.PowerTypeMana:
@@ -169,7 +171,7 @@ func (p *Player) Guid() wow.GUID {
 	return p.Object.Guid()
 }
 
-// Initializes an empty inventory
+// Initializes an empty inventory.
 func (p *Player) InitInventory() {
 	if p.Inventory != nil {
 		return
@@ -185,7 +187,6 @@ func (p *Player) InitInventory() {
 }
 
 func (p *Player) SetFloatValue() {
-
 }
 
 func (p *Player) GUID() wow.GUID {
@@ -285,6 +286,4 @@ func (p *Player) WriteToLogin(w *wow.Packet) {
 		w.Write(slot.InventoryType)
 		w.Write(slot.EnchantSlot)
 	}
-
-	// Yipeee
 }

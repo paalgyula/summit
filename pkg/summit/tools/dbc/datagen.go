@@ -23,10 +23,12 @@ func load[C any](fileName string, baseDir ...string) ([]C, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if err := r.ReadAll(); err != nil {
 		return nil, err
 	}
 
 	fmt.Printf("DBC loader: Loaded %d records from %s\n", r.Header.RecordCount, fileName)
+
 	return r.Records, nil
 }

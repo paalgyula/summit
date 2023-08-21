@@ -54,6 +54,7 @@ type BillingDetails struct {
 	BillingTimeRested    uint32
 }
 
+//nolint:godox
 func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	r := wow.NewPacketReader(data)
 	pkt := new(ClientAuthSessionPacket)
@@ -63,14 +64,11 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	r.ReadString(&pkt.AccountName)
 	r.Read(&pkt.ClientSeed)
 
-	// recvPacket.read_skip<uint32>();
-	// recvPacket.read_skip<uint32>();
-	// recvPacket.read_skip<uint32>();
-	// recvPacket.read_skip<uint64>();
-
 	// Skip fragment Whats that?
 	var tmp uint32
+
 	var tmp2 uint64
+
 	r.Read(&tmp)
 	r.Read(&tmp)
 	r.Read(&tmp)
@@ -88,6 +86,7 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	// TODO: check the digest
 
 	var err error
+
 	gc.crypt, err = crypt.NewWowcrypt(acc.SessionKey())
 	if err != nil {
 		panic(err)
@@ -97,12 +96,8 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 
 	p := wow.NewPacket(wow.ServerAuthResponse)
 	p.Write(uint8(wotlk.AUTH_OK))
-	// w.Write(uint32(0)) // BillingTimeRemaining
-	// w.Write(uint8(0))  // BillingFlags
-	// w.Write(uint32(0)) // BillingTimeRested
 	p.Write(&BillingDetails{})
 	p.Write(uint8(2)) // Expansion
 
 	gc.Send(p)
-
 }

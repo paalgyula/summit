@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+//nolint:gochecknoglobals
 var listenAddress, serverAddress, username, password string
 
 //nolint:gochecknoinits

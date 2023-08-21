@@ -66,7 +66,7 @@ func (r *PacketReader) ReadBytes(p []byte) (int, error) {
 }
 
 // Reads the object from the buffer. The byte order can be specified,
-// but the default is LittleEndian
+// but the default is LittleEndian.
 func (r *PacketReader) Read(p any, byteOrder ...binary.ByteOrder) error {
 	var bo binary.ByteOrder = binary.LittleEndian
 	if len(byteOrder) > 0 {
@@ -92,7 +92,7 @@ func (r *PacketReader) ReadB(v any) error {
 	return binary.Read(r.reader, binary.BigEndian, v)
 }
 
-// ReadStringFixed reads fixed length string
+// ReadStringFixed reads fixed length string.
 func (r *PacketReader) ReadStringFixed(dest *string, length int, byteOrder ...binary.ByteOrder) error {
 	var bo binary.ByteOrder = binary.LittleEndian
 	if len(byteOrder) > 0 {
@@ -123,6 +123,7 @@ func (r *PacketReader) ReadString(dest *string, byteOrder ...binary.ByteOrder) e
 	var bb []byte
 
 	var b byte
+
 	binary.Read(r.reader, bo, &b)
 
 	for b != '\x00' {
@@ -139,7 +140,7 @@ func (r *PacketReader) ReadString(dest *string, byteOrder ...binary.ByteOrder) e
 }
 
 // ReadNBytes reads first N bytes from the reader and returns it.
-// When can't read from enough bytes from the stream, it will throw an error
+// When can't read from enough bytes from the stream, it will throw an error.
 func (r *PacketReader) ReadNBytes(n int) ([]byte, error) {
 	buf := make([]byte, n)
 

@@ -7,7 +7,7 @@
 // running the following command in the root of the project: `make install` this command will
 // build the 'datagen' binary and copies to your GOBIN directory. After you can run the go generate command
 // or simply invoke it with `make gen` command which will do the rest for you. The
-// pre-generated opcodes already commited to the repo so you don't need to re-generate them, but
+// pre-generated opcodes already committed to the repo so you don't need to re-generate them, but
 // if you want to play with you can do it manually.
 //
 //go:generate datagen opcodes -p wow -o opcodes.gen.go

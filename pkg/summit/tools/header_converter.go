@@ -27,7 +27,9 @@ type Enum struct {
 func ParseHeaderFile(r io.Reader) []*Enum {
 	// Read the input line by line
 	scanner := bufio.NewScanner(r)
+
 	var enums []*Enum
+
 	var currentEnum *Enum
 
 	for scanner.Scan() {
@@ -38,6 +40,7 @@ func ParseHeaderFile(r io.Reader) []*Enum {
 			enumName := strings.TrimSpace(strings.TrimPrefix(line, "enum "))
 			currentEnum = &Enum{Name: enumName}
 			enums = append(enums, currentEnum)
+
 			continue
 		}
 
@@ -59,6 +62,7 @@ func ParseHeaderFile(r io.Reader) []*Enum {
 			field := EnumField{Name: convertToCamelCase(fieldName), Value: fieldValue}
 
 			currentEnum.Fields = append(currentEnum.Fields, field)
+
 			continue
 		}
 	}
@@ -72,10 +76,10 @@ type writerConfig struct {
 	enumName   string
 }
 
-// WriterOption is a function that can be passed to NewWriter
+// WriterOption is a function that can be passed to NewWriter.
 type WriterOption func(*writerConfig)
 
-// WithSingleEnum sets whether this is a single enum
+// WithSingleEnum sets whether this is a single enum.
 func WithSingleEnum(enumName string) WriterOption {
 	return func(c *writerConfig) {
 		c.singleEnum = true
@@ -83,14 +87,16 @@ func WithSingleEnum(enumName string) WriterOption {
 	}
 }
 
-// WithEndField sets when the enum uses reference fields to the previous enum
+// WithEndField sets when the enum uses reference fields to the previous enum.
 func WithEndField(use bool) WriterOption {
 	return func(c *writerConfig) {
 		c.endField = use
 	}
 }
 
-// WriteGoSource writes a Go source file
+// WriteGoSource writes a Go source file.
+//
+//nolint:funlen
 func WriteGoSource(packageName string, enums []*Enum, out io.Writer, opts ...WriterOption) error {
 	cfg := writerConfig{
 		singleEnum: false,
@@ -136,6 +142,7 @@ func WriteGoSource(packageName string, enums []*Enum, out io.Writer, opts ...Wri
 				enumName, field.Value,
 			))
 		}
+
 		w.WriteString(")\n\n")
 
 		// Write constant end field
@@ -161,15 +168,11 @@ func WriteGoSource(packageName string, enums []*Enum, out io.Writer, opts ...Wri
 func toCamelCase(s string) string {
 	re := regexp.MustCompile(`([^a-zA-Z0-9]*)([a-zA-Z0-9]+)`)
 	parts := re.FindAllStringSubmatch(s, -1)
+
 	var result string
 
 	for _, p := range parts {
-		// if p[1] == "_" {
-		// 	result += strings.ToUpper(p[2])
-		// }
-		// else {
 		result += cases.Title(language.English).String(strings.ToLower(p[2]))
-		// }
 	}
 
 	return result
@@ -184,11 +187,13 @@ func convertToCamelCase(input string) string {
 	for i, word := range words {
 		if i == len(words)-1 && isNumeric(word) {
 			words[i] = "_" + word
+
 			continue
 		}
 
 		words[i] = strings.Title(word)
 	}
+
 	return strings.Join(words, "")
 }
 
@@ -198,5 +203,6 @@ func convertToCamelCase(input string) string {
 // returns: true if str is a valid decimal number, false otherwise
 func isNumeric(str string) bool {
 	_, err := strconv.ParseUint(str, 10, 8)
+
 	return err == nil
 }

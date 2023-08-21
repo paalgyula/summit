@@ -57,7 +57,7 @@ func (w *Packet) WriteB(v any) error {
 	return binary.Write(w.buf, binary.BigEndian, v)
 }
 
-// Deprecated: use the simple Write method instead
+// Deprecated: use the simple Write method instead.
 func (w *Packet) WriteByte(b byte) error {
 	return w.buf.WriteByte(b)
 }

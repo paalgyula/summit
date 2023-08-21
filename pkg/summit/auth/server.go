@@ -154,19 +154,19 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 		rc.c.Close()
 
 		return nil
-	} else {
-		response.StatusCode = 0
-		response.Proof.Set(crypt.CalculateServerProof(&pkt.A, M, K))
-
-		rc.log = rc.log.With().
-			Str("account", rc.account.Name).
-			Logger()
-
-		rc.account.SetKey(K)
-
-		// Save session key
-		db.GetInstance().SaveAll()
 	}
+
+	response.StatusCode = 0
+	response.Proof.Set(crypt.CalculateServerProof(&pkt.A, M, K))
+
+	rc.log = rc.log.With().
+		Str("account", rc.account.Name).
+		Logger()
+
+	rc.account.SetKey(K)
+
+	// Save session key
+	db.GetInstance().SaveAll()
 
 	return rc.Send(AuthLoginProof, response.MarshalPacket())
 }

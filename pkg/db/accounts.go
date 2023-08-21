@@ -96,7 +96,11 @@ func (a *Account) Characters(destination any) error {
 }
 
 func (a *Account) UpdateCharacters(data any) {
-	bb, _ := json.Marshal(data)
+	bb, err := json.Marshal(data)
+	if err != nil {
+		log.Error().Err(err).Send()
+	}
+
 	a.Data["characters"] = string(bb)
 }
 

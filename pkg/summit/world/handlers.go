@@ -7,8 +7,10 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
-type handlePacket = func(wow.PacketData)
-type handleCommand = func()
+type (
+	handlePacket  = func(wow.PacketData)
+	handleCommand = func()
+)
 
 // ExternalPacketFunc register packet for external processing.
 type ExternalPacketFunc = func(*GameClient, wow.OpCode, []byte)
@@ -38,8 +40,10 @@ func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
 	for _, oh := range handlers {
 		if len(OpcodeTable) <= int(oh.Opcode) {
 			fmt.Println("opcode table too short")
+
 			continue
 		}
+
 		OpcodeTable.Handle(oh.Opcode, oh.Handler)
 	}
 }
@@ -51,6 +55,7 @@ func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
 	if handle == nil {
 		// return errors.New("no handler record found")
 		gc.log.Warn().Msgf("no handler record found: 0x%04x", int(oc))
+
 		return nil
 	}
 

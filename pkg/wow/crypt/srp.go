@@ -32,7 +32,8 @@ type SRP6 struct {
 
 // NewSRP6 initializes a new SRP6 instance.
 func NewSRP6(g, k int64, N *big.Int) *SRP6 {
-	srp6 := &SRP6{ //nolint:exhauststruct
+	//nolint:exhauststruct
+	srp6 := &SRP6{
 		g: int64(7),
 		k: int64(3),
 		n: N,
@@ -96,7 +97,7 @@ func (s *SRP6) GenerateVerifier(accountName, password string, salt *big.Int) *bi
 		[]byte(fmt.Sprintf("%s:%s", accountName, password))),
 	)))
 
-	g := big.NewInt(int64(s.g))
+	g := big.NewInt(s.g)
 
 	return g.Exp(g, x, s.N())
 }

@@ -6,6 +6,7 @@ import (
 
 func (gc *GameClient) HandleRealmSplit(data wow.PacketData) {
 	var unknown uint32
+
 	data.Reader().Read(&unknown)
 
 	w := wow.NewPacket(wow.ServerRealmSplit)

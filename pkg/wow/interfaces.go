@@ -12,7 +12,7 @@ type HasObjectType interface {
 	ObjectType() string
 }
 
-// HasLocation is an interface for objects that can be located
+// HasLocation is an interface for objects that can be located.
 type HasLocation interface {
 	Location() (float32, float32, float32, uint)
 }
