@@ -26,7 +26,7 @@ type Server struct {
 }
 
 func NewServer(ctx context.Context, socketPath string, cp ClientProvider) (*Server, error) {
-	logger := log.With().Str("service", "babysocket").Logger()
+	logger := log.With().Ctx(ctx).Str("service", "babysocket").Logger()
 
 	_ = os.Remove(socketPath)
 
@@ -40,6 +40,7 @@ func NewServer(ctx context.Context, socketPath string, cp ClientProvider) (*Serv
 		clients: make(map[string]*socketClient, 0),
 		log:     logger,
 		cp:      cp,
+		m:       sync.Mutex{},
 	}
 
 	s.Listen()
@@ -73,10 +74,12 @@ func (s *Server) SendToAll(opcode int, data []byte) {
 
 func (s *Server) SendPacketToBabies(source string, opcode int, data []byte) {
 	dp := &DataPacket{
+		Opcode:  opcode,
 		Command: CommandPacket,
 		Source:  source,
 		Size:    len(data),
 		Data:    data,
+		Target:  "", // Don't need to specify, sending to all babies ;)
 	}
 
 	bb := &bytes.Buffer{}

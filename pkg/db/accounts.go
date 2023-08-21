@@ -14,7 +14,10 @@ import (
 const SummitConfig = "summit.yaml"
 
 var (
-	once     sync.Once
+	//nolint:gochecknoglobals
+	once sync.Once
+
+	//nolint:gochecknoglobals
 	instance *Database
 )
 
@@ -58,11 +61,12 @@ func (db *Database) SaveAll() {
 }
 
 func InitYamlDatabase() {
-	instance = &Database{}
+	instance = &Database{
+		Accounts: make([]*Account, 0),
+	}
+
 	if err := instance.Load(SummitConfig); err != nil {
 		log.Warn().Err(err).Msgf("database file: %s not found", SummitConfig)
-
-		instance.Accounts = make([]*Account, 0)
 	}
 
 	log.Info().Msgf("Loaded database with %d accounts", len(instance.Accounts))
@@ -89,10 +93,18 @@ type Account struct {
 
 func (a *Account) Characters(destination any) error {
 	if s, ok := a.Data["characters"].(string); ok {
-		return json.Unmarshal([]byte(s), destination)
+		if err := json.Unmarshal([]byte(s), destination); err != nil {
+			return fmt.Errorf("Account.Characters: %w", err)
+		}
+
+		return nil
 	}
 
-	return json.Unmarshal([]byte{}, destination)
+	if err := json.Unmarshal([]byte{}, destination); err != nil {
+		return fmt.Errorf("Account.Characters: %w", err)
+	}
+
+	return nil
 }
 
 func (a *Account) UpdateCharacters(data any) {

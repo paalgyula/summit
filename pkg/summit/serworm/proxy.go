@@ -22,7 +22,7 @@ type ProxyServer struct {
 	db  *db.Database
 	log zerolog.Logger
 
-	bridge     *Bridge
+	// bridge     *Bridge
 	authServer *auth.AuthServer
 
 	realms []*auth.Realm
@@ -37,23 +37,24 @@ type LoginServerConfig struct {
 func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig) error {
 	db := db.GetInstance()
 
-	ws := &ProxyServer{
+	//nolint:exhaustruct
+	srv := &ProxyServer{
 		db:     db,
 		log:    log.With().Str("server", "proxy").Caller().Logger(),
 		ctx:    ctx,
 		config: config,
 	}
 
-	as, err := auth.NewServer(listenAddress, ws)
+	as, err := auth.NewServer(listenAddress, srv)
 	if err != nil {
 		return fmt.Errorf("cannot start auth server: %w", err)
 	}
 
-	ws.authServer = as
+	srv.authServer = as
 
-	ws.log.Info().Msgf("proxy server is listening on: %s", listenAddress)
+	srv.log.Info().Msgf("proxy server is listening on: %s", listenAddress)
 
-	go ws.Run()
+	go srv.Run()
 
 	return nil
 }

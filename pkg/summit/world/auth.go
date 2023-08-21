@@ -28,24 +28,25 @@ type ClientAuthSessionPacket struct {
 	AddonsCompressed []byte
 }
 
+//nolint:errcheck
 func (cas *ClientAuthSessionPacket) Bytes() []byte {
-	w := wow.NewPacket(wow.ClientAuthSession)
-	w.Write(cas.ClientBuild)
-	w.Write(cas.ServerID)
-	w.WriteString(cas.AccountName)
-	w.Write(cas.ClientSeed)
+	pkt := wow.NewPacket(wow.ClientAuthSession)
+	pkt.Write(cas.ClientBuild)
+	pkt.Write(cas.ServerID)
+	pkt.WriteString(cas.AccountName)
+	pkt.Write(cas.ClientSeed)
 
 	// Duno whats this (paalgyula)
-	w.Write(uint32(0x00))
-	w.Write(uint32(0x00))
-	w.Write(uint32(0x00))
-	w.Write(uint64(0x00))
+	pkt.Write(uint32(0x00))
+	pkt.Write(uint32(0x00))
+	pkt.Write(uint32(0x00))
+	pkt.Write(uint64(0x00))
 
-	w.WriteReverseBytes(cas.Digest[:20])
-	w.Write(cas.AddonSize)
-	w.Write(cas.AddonsCompressed)
+	pkt.WriteReverseBytes(cas.Digest[:20])
+	pkt.Write(cas.AddonSize)
+	pkt.Write(cas.AddonsCompressed)
 
-	return w.Bytes()
+	return pkt.Bytes()
 }
 
 type BillingDetails struct {
@@ -54,28 +55,28 @@ type BillingDetails struct {
 	BillingTimeRested    uint32
 }
 
-//nolint:godox
+//nolint:godox,errcheck
 func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
-	r := wow.NewPacketReader(data)
+	reader := wow.NewPacketReader(data)
 	pkt := new(ClientAuthSessionPacket)
 
-	r.Read(&pkt.ClientBuild)
-	r.Read(&pkt.ServerID)
-	r.ReadString(&pkt.AccountName)
-	r.Read(&pkt.ClientSeed)
+	reader.Read(&pkt.ClientBuild)
+	reader.Read(&pkt.ServerID)
+	reader.ReadString(&pkt.AccountName)
+	reader.Read(&pkt.ClientSeed)
 
 	// Skip fragment Whats that?
 	var tmp uint32
 
 	var tmp2 uint64
 
-	r.Read(&tmp)
-	r.Read(&tmp)
-	r.Read(&tmp)
-	r.Read(&tmp2)
+	reader.Read(&tmp)
+	reader.Read(&tmp)
+	reader.Read(&tmp)
+	reader.Read(&tmp2)
 
-	r.ReadL(&pkt.Digest)
-	r.ReadL(&pkt.AddonSize)
+	reader.ReadL(&pkt.Digest)
+	reader.ReadL(&pkt.AddonSize)
 
 	// TODO: rewrite back from singleton to instance based DB
 	acc := db.GetInstance().FindAccount(pkt.AccountName)
@@ -94,9 +95,14 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 
 	gc.log.Debug().Str("key", acc.SessionKey().Text(16)).Send()
 
+	//nolint:varnamelen
 	p := wow.NewPacket(wow.ServerAuthResponse)
 	p.Write(uint8(wotlk.AUTH_OK))
-	p.Write(&BillingDetails{})
+	p.Write(&BillingDetails{
+		BillingTimeRemaining: 0,
+		BillingFlags:         0,
+		BillingTimeRested:    0,
+	})
 	p.Write(uint8(2)) // Expansion
 
 	gc.Send(p)

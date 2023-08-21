@@ -2,10 +2,13 @@ package babysocket
 
 import (
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 )
+
+var ErrNotImplemented = errors.New("not implemented")
 
 type Client struct {
 	client        net.Conn
@@ -30,6 +33,7 @@ func NewClient(addr ...string) (*Client, error) {
 		return nil, fmt.Errorf("cannot connect to babysocket: %w", err)
 	}
 
+	//nolint:exhaustruct
 	return &Client{
 		client: c,
 	}, nil
@@ -47,17 +51,20 @@ func (c *Client) readData() error {
 		if c.packetHandler != nil {
 			c.packetHandler(dp.Source, dp.Opcode, dp.Data)
 		}
-	default:
-		fmt.Printf("data command not handled: %+v\n", dp)
+	case CommandInstruction:
+		return fmt.Errorf("CommandInstruction %w", ErrNotImplemented)
+	case CommandResponse:
+		return fmt.Errorf("CommandResponse %w", ErrNotImplemented)
 	}
 
-	fmt.Printf("data: %+v\n", dp)
+	// fmt.Printf("data: %+v\n", dp)
 
 	return nil
 }
 
 func (c *Client) SendToAll(opcode int, data []byte) {
-	c.send(DataPacket{
+	_ = c.send(DataPacket{
+		Source:  "",  // Don't need to specify
 		Target:  "*", // special target
 		Command: CommandPacket,
 		Size:    len(data),
@@ -71,17 +78,19 @@ func (c *Client) send(dp DataPacket) error {
 	c.writeLock.Lock()
 	defer c.writeLock.Unlock()
 
+	//nolint:wrapcheck
 	return gob.NewEncoder(c.client).Encode(dp)
 }
 
 func (c *Client) Start() {
 	go func() {
 		for {
-			c.readData()
+			_ = c.readData()
 		}
 	}()
 }
 
 func (c *Client) Close() error {
+	//nolint:wrapcheck
 	return c.client.Close()
 }

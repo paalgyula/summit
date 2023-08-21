@@ -1,3 +1,4 @@
+//nolint:all
 package main
 
 import (
@@ -12,12 +13,12 @@ import (
 
 //nolint:wsl
 func main() {
-	c, err := babysocket.NewClient()
+	client, err := babysocket.NewClient()
 	if err != nil {
 		panic(err)
 	}
 
-	c.Start()
+	client.Start()
 
 	done := make(chan bool, 1)
 	sigCh := make(chan os.Signal, 1)
@@ -34,7 +35,7 @@ func main() {
 	fmt.Println("sending to all")
 
 	p := SendCantLogin()
-	c.SendToAll(p.OpCode(), p.Bytes())
+	client.SendToAll(p.OpCode(), p.Bytes())
 
 	// enterWorld(c)
 

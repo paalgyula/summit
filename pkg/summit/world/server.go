@@ -35,6 +35,7 @@ type WorldServer struct {
 func StartServer(ctx context.Context, listenAddress string) error {
 	db := db.GetInstance()
 
+	//nolint:exhaustruct
 	ws := &WorldServer{
 		db:  db,
 		log: log.With().Str("server", "world").Caller().Logger(),

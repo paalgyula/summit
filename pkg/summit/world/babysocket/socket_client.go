@@ -2,7 +2,6 @@ package babysocket
 
 import (
 	"encoding/gob"
-	"fmt"
 	"net"
 
 	"github.com/paalgyula/summit/pkg/wow"
@@ -30,14 +29,20 @@ func (sc *socketClient) Listen() {
 			return
 		}
 
-		fmt.Printf("data from baby client: %+v\n", data)
+		log.Printf("data from baby client: %+v\n", data)
 
 		switch data.Command {
 		case CommandPacket:
 			if data.Target == "*" {
-				fmt.Printf("broadcasting opcode packet: %T\n", wow.OpCode(data.Opcode))
+				log.Printf("broadcasting opcode packet: %T\n", wow.OpCode(data.Opcode))
 				sc.s.SendToAll(data.Opcode, data.Data)
 			}
+		case CommandInstruction:
+			fallthrough
+		case CommandResponse:
+			fallthrough
+		default:
+			log.Error().Msgf("command type %+v is not implemented", data.Command)
 		}
 	}
 }

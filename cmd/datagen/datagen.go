@@ -1,4 +1,4 @@
-//nolint:exhauststruct
+//nolint:all
 package main
 
 import (
@@ -16,7 +16,7 @@ func main() {
 		Long:  "A CLI tool to generate/re-generate required assets for the WoW server",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) == 0 {
-				cmd.Help()
+				_ = cmd.Help()
 				os.Exit(0)
 			}
 
