@@ -5,76 +5,44 @@ import (
 	"strconv"
 
 	"github.com/paalgyula/summit/pkg/summit/world"
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
-	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 //nolint:unused
-type Bridge struct {
-	server string
-	user   string
-	pass   string
+type WorldBridge struct {
+	serverAddr string
+	user       string
+	pass       string
 
-	client *world.GameClient
+	// client *world.GameClient
 
-	socket    *RealmClient
-	worldConn net.Conn
+	// socket    *RealmClient
+	// worldConn net.Conn
 
-	crypt *crypt.WowCrypt
-	srp   *crypt.SRP6
+	// crypt *crypt.WowCrypt
 
 	log zerolog.Logger
 }
 
-// HandleExternalPacket handles an external packet received from the client by writing
-// it to the packet dumper and sending the packet to the bridge.
+// HandleProxy handles an external packet received from the client by writing
+// it to the packet dumper and sending the packet to the upstream.
 //
 // client: the game client sending the packet.
 // oc: the op opcode of the packet.
 // data: the data block of the packet.
-func (b *Bridge) HandleExternalPacket(_ *world.GameClient, oc wow.OpCode, data []byte) {
+func (wb *WorldBridge) HandleProxy(_ *world.GameClient, oc wow.OpCode, data []byte) {
 	wow.GetPacketDumper().Write(oc, data)
 
-	b.Send2Bridge(oc, data)
+	// wb.Send2Upstream(oc, data)
 }
 
-//nolint:godox,wsl
-func (b *Bridge) Send2Bridge(oc wow.OpCode, data []byte) {
-	wow.GetPacketDumper().Write(oc, data)
-
-	// TODO: send to server
-}
-
-func (b *Bridge) Send2Client(oc wow.OpCode, data []byte) {
-	w := wow.NewPacket(oc)
-
-	// w.WriteB(uint16(len(data) + 2))
-	// w.Write(uint16(oc))
-	// header := w.Bytes()
-
-	// if b.crypt != nil {
-	// 	header = b.crypt.Encrypt(w.Bytes())
-	// } else {
-	// 	b.log.Error().Msg("no encryption?!")
-	// }
-
-	// data = append(header, data...)
-
-	wow.NewPacket(oc)
-
-	_, _ = w.WriteBytes(data)
-
-	b.client.Send(w)
-}
-
-func (b *Bridge) Start(listener net.Listener, ws world.SessionManager) {
+func (wb *WorldBridge) Start(listener net.Listener, sessionManager world.SessionManager) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			b.log.Error().Err(err).Msg("cannot accept connection")
+			wb.log.Error().Err(err).Msg("cannot accept connection")
 
 			continue
 		}
@@ -83,25 +51,33 @@ func (b *Bridge) Start(listener net.Listener, ws world.SessionManager) {
 		for i := 0; i < int(wow.NumMsgTypes); i++ {
 			handlers[i] = world.PacketHandler{
 				Opcode:  wow.OpCode(i),
-				Handler: b.HandleExternalPacket,
+				Handler: wb.HandleProxy,
 			}
 		}
 
-		b.client = world.NewGameClient(conn, ws, nil, handlers...)
-		packets.OpcodeTable.Handle(wow.ClientAuthSession, b.client.AuthSessionHandler)
+		gc := world.NewGameClient(conn, sessionManager, nil, handlers...)
+
+		_, err = NewWorldClient(gc, wb.serverAddr)
+		if err != nil {
+			log.Error().Err(err).Send()
+		}
+
+		// TODO: re-activate AuthSessionHandler
+		// packets.OpcodeTable.Handle(wow.ClientAuthSession, wb.client.AuthSessionHandler)
 	}
 }
 
-func NewBridge(listenPort int, _, serverName string, ws world.SessionManager) *Bridge {
+func NewWorldBridge(listenPort int, serverAddr string, serverName string, ws world.SessionManager) *WorldBridge {
 	//nolint:exhaustruct
-	b := &Bridge{
+	b := &WorldBridge{
+		serverAddr: serverAddr,
 		log: log.With().
 			Str("name", serverName).
 			Str("service", "bridge").Logger(),
 	}
 
 	listenAddr := "127.0.0.1:" + strconv.Itoa(listenPort)
-	b.log.Info().Msgf("starting bridge on address: %s", listenAddr)
+	b.log.Info().Msgf("starting world bridge on address: %s", listenAddr)
 
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {

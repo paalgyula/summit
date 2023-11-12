@@ -3,6 +3,7 @@ package world
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"runtime/debug"
 	"sync"
@@ -20,8 +21,8 @@ import (
 var ErrCannotReadHeader = errors.New("cannot read opcode")
 
 type SessionManager interface {
-	AddClient(*GameClient)
-	Disconnected(string)
+	AddClient(gc *GameClient)
+	Disconnected(reason string)
 }
 
 type GameClient struct {
@@ -217,6 +218,10 @@ func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 		opcode, wow.OpCode(opcode), length, gc.crypt != nil)
 
 	return wow.OpCode(opcode), int(length) - 4, nil
+}
+
+func (gc *GameClient) SessionKey() big.Int {
+	return *gc.acc.SessionKey()
 }
 
 func (gc *GameClient) Close() error {

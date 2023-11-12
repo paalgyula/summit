@@ -11,7 +11,7 @@ var (
 	Version   = "dev"
 	Branch    = "master"
 	Gitsha    = "-"
-	Compiled  = fmt.Sprintf("%d", time.Now().UnixMilli()/1000)
+	Compiled  = strconv.FormatInt(time.Now().UnixMilli()/1000, 10)
 	Buildhost = "localhost"
 )
 

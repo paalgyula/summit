@@ -31,7 +31,7 @@ func main() {
 		panic(err)
 	}
 
-	server, err := auth.NewServer("0.0.0.0:5000", &auth.StaticRealmProvider{
+	rp := &auth.StaticRealmProvider{
 		RealmList: []*auth.Realm{
 			{
 				Icon:          6,
@@ -44,7 +44,9 @@ func main() {
 				Timezone:      8,
 			},
 		},
-	})
+	}
+
+	server, err := auth.NewServer("0.0.0.0:5000", auth.WithRealmProvider(rp))
 	if err != nil {
 		panic(err)
 	}

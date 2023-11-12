@@ -37,7 +37,7 @@ type WowCrypt struct {
 	decKey []byte
 }
 
-func NewWowcrypt(key *big.Int) (*WowCrypt, error) {
+func NewWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
 	wc := new(WowCrypt)
 
 	// Encoder setup
@@ -59,7 +59,7 @@ func NewWowcrypt(key *big.Int) (*WowCrypt, error) {
 	}
 
 	wc.Reset() // Initializes the ciphers with the keys.
-	wc.Skip(1024)
+	wc.Skip(skip)
 
 	return wc, nil
 }

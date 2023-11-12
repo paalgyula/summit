@@ -39,6 +39,7 @@ func NewPacketReader(bb []byte) *PacketReader {
 	}
 }
 
+// NewConnectionReader initializes a new PacketReader from a net.Conn (or from any reader implementation).
 func NewConnectionReader(r io.Reader) *PacketReader {
 	return &PacketReader{
 		reader: &countingReadder{

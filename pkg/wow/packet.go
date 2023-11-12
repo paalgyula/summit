@@ -116,7 +116,7 @@ func PadBigIntBytes(data []byte, nBytes int) []byte {
 }
 
 type RealmPacket interface {
-	UnmarshalPacket(PacketData) error
+	UnmarshalPacket(data PacketData) error
 }
 
 type PacketData []byte

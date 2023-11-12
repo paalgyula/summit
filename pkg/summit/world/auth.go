@@ -90,7 +90,7 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 
 	var err error
 
-	gc.crypt, err = crypt.NewWowcrypt(acc.SessionKey())
+	gc.crypt, err = crypt.NewWowcrypt(acc.SessionKey(), 1024)
 	if err != nil {
 		panic(err)
 	}

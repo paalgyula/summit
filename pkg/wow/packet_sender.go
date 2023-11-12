@@ -5,5 +5,5 @@ type PayloadSender interface {
 }
 
 type PacketSender interface {
-	Send(Packet)
+	Send(pkt Packet)
 }
