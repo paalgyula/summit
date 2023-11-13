@@ -106,6 +106,7 @@ func (ws *Server) AddClient(gc *GameClient) {
 	})
 
 	ws.log.Debug().Int("clients", count).
+		Str("acc", gc.AccountName()).
 		Msgf("client added to set with id: %s", gc.ID)
 }
 
