@@ -51,15 +51,14 @@ Because I'm perv a bit. I left the WoW community with this version, so I've deci
 - easy to implement/pluggable packet(handler) system
 - Some scripting interface (js maybe) to script the dungeons
 - exportable metrics
-- clustering
-- administation interface with gRPC connector
+- clustering *(with grid based world)*
+- administation interface with gRPC connector hosted on https://buf.build *(planned)*
 - federated auth server (one authentication server, anyone can join with a `custom` server)
-- Kubernetes ready scalable world
-- Binary file based database no 3rd party sql needed `(WIP)`
+- Binary file based database no 3rd party sql needed *(plan)*
 
 If you have any question, feel free to contact me:
 
-paalgyula@pm.me | gophers.slack.com/#wow | fb.me/
+paalgyula@pm.me | gophers.slack.com/#wow | https://fb.me/nev3rkn0wn | ig: @nev3rkn0wn
 
 # PR-s are welcome!
 
