@@ -1,3 +1,4 @@
+//nolint:gosec
 package crypt
 
 import (
@@ -6,7 +7,6 @@ import (
 
 // Generates verifier hash and client seed.
 func AuthSessionProof(accountName string, serverSeed, clientSeed []byte, sessionKey []byte) []byte {
-	//nolint:gosec
 	hash := sha1.New()
 
 	hash.Write([]byte(accountName))

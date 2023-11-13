@@ -34,10 +34,9 @@ type WorldBridge struct {
 // data: the data block of the packet.
 func (wb *WorldBridge) HandleProxy(_ *world.GameClient, oc wow.OpCode, data []byte) {
 	wow.GetPacketDumper().Write(oc, data)
-
-	// wb.Send2Upstream(oc, data)
 }
 
+//nolint:godox,wsl
 func (wb *WorldBridge) Start(listener net.Listener, sessionManager world.SessionManager) {
 	for {
 		conn, err := listener.Accept()

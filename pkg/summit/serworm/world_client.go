@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+//nolint:lll
 const defaultAddonInfo = `9e020000789c75d2c16ac3300cc671ef2976e99becb4b450c2eacbe29e8b627f4b446c39384eb7f63dfabe65b70d94f34f48f047afc69826f2fd4e255cdefdc8b82241eab9352fe97b7732ffbc404897d557cea25a43a54759c63c6f70ad115f8c182c0b279ab52196c032a80bf61421818a4639f5544f79d834879faae001fd3ab89ce3a2e0d1ee47d20b1d6db7962b6e3ac6db3ceab2720c0dc9a46a2bcb0caf1f6c2b5297fd84ba95c7922f59954fe2a082fb2daadf739c60496880d6dbe509fa13b84201ddc4316e310bca5f7b7b1c3e9ee193c88d`
 
 type WorldClient struct {
@@ -75,6 +76,7 @@ func (wc *WorldClient) listen() {
 }
 
 func (wc *WorldClient) handlePacket(oc wow.OpCode, size int) {
+	//nolint
 	switch oc {
 	case wow.ServerAuthChallenge:
 		wc.log.Trace().Msgf("Handling server auth challenge %d of auth challenge", size)
@@ -127,7 +129,7 @@ func (wc *WorldClient) handlePacket(oc wow.OpCode, size int) {
 			AddonInfo:       addonInfo,
 		}
 
-		wc.conn.Write(cas.Bytes())
+		_, _ = wc.conn.Write(cas.Bytes())
 
 	default:
 		wc.log.Error().Msgf("received packet: %s with len: %d but not handled", oc.String(), size)
@@ -140,6 +142,7 @@ func NewWorldClient(gc *world.GameClient, worldAddress string) (*WorldClient, er
 		return nil, fmt.Errorf("world client: %w", err)
 	}
 
+	//nolint:exhaustruct
 	wc := &WorldClient{
 		crypt:  nil,
 		client: gc,
