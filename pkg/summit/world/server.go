@@ -36,7 +36,7 @@ func StartServer(ctx context.Context, listenAddress string) error {
 	db := db.GetInstance()
 
 	//nolint:exhaustruct
-	ws := &Server{
+	worldServer := &Server{
 		db:  db,
 		log: log.With().Str("server", "world").Caller().Logger(),
 		ctx: ctx,
@@ -46,22 +46,22 @@ func StartServer(ctx context.Context, listenAddress string) error {
 
 	var err error
 
-	ws.l, err = net.Listen("tcp4", listenAddress)
+	worldServer.l, err = net.Listen("tcp4", listenAddress)
 	if err != nil {
 		return fmt.Errorf("world.StartServer: %w", err)
 	}
 
-	bs, err := babysocket.NewServer(ctx, "babysocket", ws)
+	bs, err := babysocket.NewServer(ctx, "babysocket", worldServer)
 	if err != nil {
 		return fmt.Errorf("world.StartServer: %w", err)
 	}
 
-	ws.bs = bs
+	worldServer.bs = bs
 
-	ws.log.Info().Msgf("world server is listening on: %s", listenAddress)
+	worldServer.log.Info().Msgf("world server is listening on: %s", listenAddress)
 
-	go ws.listenConnections()
-	go ws.Run()
+	go worldServer.listenConnections()
+	go worldServer.Run()
 
 	return nil
 }
@@ -106,6 +106,7 @@ func (ws *Server) AddClient(gc *GameClient) {
 	})
 
 	ws.log.Debug().Int("clients", count).
+		Str("acc", gc.AccountName()).
 		Msgf("client added to set with id: %s", gc.ID)
 }
 

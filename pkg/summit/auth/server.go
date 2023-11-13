@@ -22,7 +22,7 @@ import (
 var (
 	ErrShortRead = errors.New("short read when reading opcode data")
 	ErrWriteSize = errors.New("the written and sent bytes are not equal")
-	ErrNoHandler = errors.New("no handler implamented")
+	ErrNoHandler = errors.New("no handler implemented")
 )
 
 type Server struct {
@@ -54,7 +54,7 @@ func (as *Server) Close() error {
 	return as.l.Close()
 }
 
-func NewServer(listenAddress string, rp RealmProvider) (*Server, error) {
+func NewServer(listenAddress string, opts ...ServerOption) (*Server, error) {
 	l, err := net.Listen("tcp4", listenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("auth.StartServer: %w", err)
@@ -63,8 +63,14 @@ func NewServer(listenAddress string, rp RealmProvider) (*Server, error) {
 	log.Info().Msgf("auth server is listening on: %s", listenAddress)
 
 	as := &Server{
-		l:  l,
-		rp: rp,
+		l: l,
+		rp: &StaticRealmProvider{
+			RealmList: make([]*Realm, 0),
+		},
+	}
+
+	for _, opt := range opts {
+		opt(as)
 	}
 
 	go as.Run()

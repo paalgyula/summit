@@ -45,7 +45,7 @@ func StartProxy(ctx context.Context, listenAddress string, config LoginServerCon
 		config: config,
 	}
 
-	as, err := auth.NewServer(listenAddress, srv)
+	as, err := auth.NewServer(listenAddress, auth.WithRealmProvider(srv))
 	if err != nil {
 		return fmt.Errorf("cannot start auth server: %w", err)
 	}
@@ -59,57 +59,57 @@ func StartProxy(ctx context.Context, listenAddress string, config LoginServerCon
 	return nil
 }
 
-func (ws *ProxyServer) Realms(string) ([]*auth.Realm, error) {
-	ws.InitFakeClient()
+func (proxy *ProxyServer) Realms(string) ([]*auth.Realm, error) {
+	proxy.InitFakeRealmClient()
 
-	return ws.realms, nil
+	return proxy.realms, nil
 }
 
-func (ws *ProxyServer) InitFakeClient() {
-	if ws.realms == nil {
-		loginConn, err := net.Dial("tcp4", ws.config.ServerAddress)
+func (proxy *ProxyServer) InitFakeRealmClient() {
+	if proxy.realms == nil {
+		loginConn, err := net.Dial("tcp4", proxy.config.ServerAddress)
 		if err != nil {
 			panic(err)
 		}
 
 		client := NewRealmClient(loginConn, 0x08)
 
-		realms, err := client.Authenticate(ws.config.User, ws.config.Pass)
+		realms, err := client.Authenticate(proxy.config.User, proxy.config.Pass)
 		if err != nil {
-			ws.log.Fatal().Msg("cannot authenticate client")
+			proxy.log.Fatal().Msg("cannot authenticate client")
 		}
 
-		ws.log.Debug().Msgf("starting %d bridge realms", len(realms))
-		ws.startServers(realms)
+		proxy.log.Debug().Msgf("starting %d bridge realms", len(realms))
+		proxy.startServers(realms)
 	}
 }
 
-func (ws *ProxyServer) startServers(realms []*auth.Realm) {
-	ws.realms = make([]*auth.Realm, len(realms))
+func (proxy *ProxyServer) startServers(realms []*auth.Realm) {
+	proxy.realms = make([]*auth.Realm, len(realms))
 
 	portBase := 5983
 	for i, realm := range realms {
-		_ = NewBridge(portBase+i, realm.Address, realm.Name, ws)
+		_ = NewWorldBridge(portBase+i, realm.Address, realm.Name, proxy)
 		realm.Address = fmt.Sprintf("127.0.0.1:%d", portBase+i)
 
-		ws.realms[i] = realm
+		proxy.realms[i] = realm
 	}
 }
 
-func (ws *ProxyServer) AddClient(gc *world.GameClient) {
-	ws.client = gc
-	ws.log.Error().Msgf("client connected, opening bridge for: %s", gc.ID)
+func (proxy *ProxyServer) AddClient(gc *world.GameClient) {
+	proxy.client = gc
+	proxy.log.Error().Msgf("client connected, opening bridge for: %s", gc.ID)
 }
 
-func (ws *ProxyServer) Disconnected(id string) {
-	ws.log.Debug().Msgf("client disconnected: %s", id)
+func (proxy *ProxyServer) Disconnected(id string) {
+	proxy.log.Debug().Msgf("client disconnected: %s", id)
 	os.Exit(0)
 }
 
-func (ws *ProxyServer) Run() {
+func (proxy *ProxyServer) Run() {
 	defer log.Warn().Msg("proxy server stopped")
 
-	for range ws.ctx.Done() {
+	for range proxy.ctx.Done() {
 		return
 	}
 }

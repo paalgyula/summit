@@ -1,4 +1,4 @@
-package crypt
+package crypt_test
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -14,7 +15,7 @@ func TestGenerateEphemeralPair(t *testing.T) {
 	var N big.Int
 	N.SetString("62100066509156017342069496140902949863249758336000796928566441170293728648119", 10)
 
-	s := NewSRP6(7, 3, &N)
+	s := crypt.NewSRP6(7, 3, &N)
 
 	verifier.SetString("3e3f49a5a14a43b870f8de5534e318c63394738c364a71f205a8ba277bb56ff6", 16)
 
@@ -37,7 +38,7 @@ func TestGenerateVerifier(t *testing.T) {
 	var N big.Int
 	N.SetString("62100066509156017342069496140902949863249758336000796928566441170293728648119", 10)
 
-	srp6 := NewSRP6(7, 3, &N)
+	srp6 := crypt.NewSRP6(7, 3, &N)
 
 	salt.SetString("9398c11e0e7128c7a56e3fde45b418744ffe9c7f41aaed48ac27e62d3700e223", 16)
 	expectedV.SetString("3e3f49a5a14a43b870f8de5534e318c63394738c364a71f205a8ba277bb56ff6", 16)
@@ -54,13 +55,13 @@ func TestCalculateSessionKey(t *testing.T) {
 	var N big.Int
 	N.SetString("62100066509156017342069496140902949863249758336000796928566441170293728648119", 10)
 
-	srp6 := NewSRP6(7, 3, &N)
+	srp6 := crypt.NewSRP6(7, 3, &N)
 
 	A.SetString("1234344069974946706941181551060269688256096998192437644043961152849307948728", 10)
 	srp6.GenerateServerPubKey(big.NewInt(0))
 
 	srp6.B.SetString("16630279820182697578309394812726193457375869535456855997552735653810818403718", 10)
-	srp6.b.SetString("3679141816495610969398422835318306156547245306", 10)
+	srp6.SetServerPrivateKey("3679141816495610969398422835318306156547245306")
 
 	// TEST:TEST
 	v.SetString("3e3f49a5a14a43b870f8de5534e318c63394738c364a71f205a8ba277bb56ff6", 16)
@@ -83,7 +84,7 @@ func TestCalculateServerProof(t *testing.T) {
 	K.SetString("1223778727786691224255566132121120158338166041153346746306820190174949498228440143950889596323712", 10)
 	expectedProof.SetString("1284245613498486112994244042115912960631626548879", 10)
 
-	proof := CalculateServerProof(&A, &M, &K)
+	proof := crypt.CalculateServerProof(&A, &M, &K)
 
 	assert.Equal(t, proof.Cmp(&expectedProof), 0)
 }
@@ -98,10 +99,10 @@ func TestFullPasswordlessFlow(t *testing.T) {
 
 	I := strings.ToUpper(username)
 
-	sClient := NewSRP6(7, 3, &N)
-	sServer := NewSRP6(7, 3, &N)
+	sClient := crypt.NewSRP6(7, 3, &N)
+	sServer := crypt.NewSRP6(7, 3, &N)
 
-	//1. server generate salt (s), and verifier (v) generation
+	// 1. server generate salt (s), and verifier (v) generation
 	sSalt := sServer.RandomSalt()
 	// sSalt := big.NewInt(0)
 	// sSalt.SetString("9398c11e0e7128c7a56e3fde45b418744ffe9c7f41aaed48ac27e62d3700e223", 16)
@@ -112,10 +113,10 @@ func TestFullPasswordlessFlow(t *testing.T) {
 
 	// 1. client sends username I and public ephemeral value A to the server
 	A := sClient.GenerateClientPubkey()
-	fmt.Printf("I: %s a: 0x%x\nA: 0x%x\n\tclient->server (I, A)\n\n", username, sClient.a, A)
+	// fmt.Printf("I: %s a: 0x%x\nA: 0x%x\n\tclient->server (I, A)\n\n", username, sClient.a, A)
 
 	B := sServer.GenerateServerPubKey(sVerifier)
-	fmt.Printf("s: 0x%x\nb: 0x%x\nB: 0x%x\n\tserver->client (s, B)\n\n", sSalt, sServer.b, B)
+	// fmt.Printf("s: 0x%x\nb: 0x%x\nB: 0x%x\n\tserver->client (s, B)\n\n", sSalt, sServer.b, B)
 
 	// Server and client exchanges A, B, I
 	uS := sServer.RandomScrambling(A, B)
@@ -132,6 +133,6 @@ func TestFullPasswordlessFlow(t *testing.T) {
 }
 
 func TestNLength(t *testing.T) {
-	srp := NewSRP6(7, 3, big.NewInt(0))
+	srp := crypt.NewSRP6(7, 3, big.NewInt(0))
 	assert.Len(t, srp.N().Bytes(), 32)
 }

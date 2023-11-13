@@ -47,6 +47,13 @@ func NewSRP6(g, k int64, N *big.Int) *SRP6 {
 	return srp6
 }
 
+// SetServerPrivateKey sets server's private key. This is useful for testing purposes only.
+// Use GenerateServerPubkey when it's possible! The val parameter should be a valid DECIMAL string.
+func (s *SRP6) SetServerPrivateKey(val string) {
+	s.b = new(big.Int)
+	s.b.SetString(val, 10)
+}
+
 func (s *SRP6) GValue() int64 {
 	return s.g
 }

@@ -22,17 +22,13 @@ type PacketHandler struct {
 }
 
 func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
-	packets.OpcodeTable.Handle(wow.ClientPing, gc.PingHandler)
-	packets.OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
-	packets.OpcodeTable.Handle(wow.ClientCharEnum, gc.ListCharacters)
-	packets.OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
-	packets.OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
-
 	if len(handlers) < int(wow.NumMsgTypes) {
+		os := len(handlers)
+
 		additional := int(wow.NumMsgTypes) - len(handlers)
 		for i := 0; i < additional; i++ {
 			handlers = append(handlers, PacketHandler{
-				Opcode:  wow.OpCode(len(handlers) + i + 1),
+				Opcode:  wow.OpCode(os + i + 1),
 				Handler: "none",
 			})
 		}
@@ -40,13 +36,19 @@ func (gc *GameClient) RegisterHandlers(handlers ...PacketHandler) {
 
 	for _, oh := range handlers {
 		if len(packets.OpcodeTable) <= int(oh.Opcode) {
-			log.Printf("opcode table too short\n")
+			log.Printf("opcode table too short: 0x%03x", oh.Opcode)
 
 			continue
 		}
 
 		packets.OpcodeTable.Handle(oh.Opcode, oh.Handler)
 	}
+
+	packets.OpcodeTable.Handle(wow.ClientPing, gc.PingHandler)
+	packets.OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
+	packets.OpcodeTable.Handle(wow.ClientCharEnum, gc.ListCharacters)
+	packets.OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
+	packets.OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
 }
 
 func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
