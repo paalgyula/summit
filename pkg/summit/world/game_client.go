@@ -2,9 +2,9 @@ package world
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"runtime/debug"
 	"sync"
@@ -225,8 +225,10 @@ func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 	return wow.OpCode(opcode), int(length) - 4, nil
 }
 
-func (gc *GameClient) SessionKey() *big.Int {
-	return gc.acc.SessionKey()
+func (gc *GameClient) SessionKey() []byte {
+	bb, _ := hex.DecodeString(gc.acc.Session)
+
+	return bb
 }
 
 func (gc *GameClient) Close() error {

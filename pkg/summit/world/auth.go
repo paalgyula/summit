@@ -90,8 +90,8 @@ func (cas *ClientAuthSessionPacket) ReadPacket(reader *wow.PacketReader) {
 
 func (cas *ClientAuthSessionPacket) String() string {
 	return fmt.Sprintf(
-		"AccountName: %s ClientSeed: 0x%x Digest: %s",
-		cas.AccountName, cas.ClientSeed, hex.EncodeToString(cas.Digest),
+		"AccountName: %s ClientSeed: 0x%x Digest: %s, AddonInfo: %s",
+		cas.AccountName, cas.ClientSeed, hex.EncodeToString(cas.Digest), hex.EncodeToString(cas.AddonInfo),
 	)
 }
 
@@ -125,7 +125,9 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 
 	var err error
 
-	gc.crypt, err = crypt.NewWowcrypt(acc.SessionKey(), 1024)
+	key, _ := hex.DecodeString(acc.Session)
+
+	gc.crypt, err = crypt.NewWowcrypt(key, 1024)
 	if err != nil {
 		panic(err)
 	}

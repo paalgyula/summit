@@ -138,8 +138,3 @@ func (a *Account) Salt() *big.Int {
 
 	return a.salt
 }
-
-// SessionKey gets a big.Int version of the account session key.
-func (a *Account) SessionKey() *big.Int {
-	return a.sessionKey
-}
