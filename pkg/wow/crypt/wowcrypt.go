@@ -7,7 +7,6 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -28,7 +27,8 @@ const digestLength = 20
 // ErrSizeNotMach the error when the digest size is not 20 bytes long.
 var ErrSizeNotMach = errors.New("digest size is not 20 bytes long")
 
-// WowCrypt is a wrapper for rc4 ciphers.
+// WowCrypt is a wrapper for rc4 ciphers. This crypter can be initialized with
+// NewWowcrypt constructor.
 type WowCrypt struct {
 	encoder *rc4.Cipher
 	decoder *rc4.Cipher
@@ -37,12 +37,14 @@ type WowCrypt struct {
 	decKey []byte
 }
 
-func NewWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
+// NewWowcrypt initializes the wow packet header crypter. The key should be the session key
+// which has been created on the auth session packet. The default skip for WOTLK client is 1024.
+func NewWowcrypt(key []byte, skip int) (*WowCrypt, error) {
 	wc := new(WowCrypt)
 
 	// Encoder setup
 	h := hmac.New(sha1.New, r) // r -> server to client
-	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
+	_, _ = h.Write(wow.ReverseBytes(key))
 	wc.encKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
@@ -51,7 +53,7 @@ func NewWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
 
 	// Decoder setup
 	h = hmac.New(sha1.New, s) // s -> client to server
-	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
+	_, _ = h.Write(wow.ReverseBytes(key))
 	wc.decKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
@@ -64,6 +66,7 @@ func NewWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
 	return wc, nil
 }
 
+// Skip skips n bytes in both encrypter and decrypter.
 func (wc *WowCrypt) Skip(n int) {
 	skip := make([]byte, n)
 
@@ -88,6 +91,7 @@ func (wc *WowCrypt) Reset() error {
 	return nil
 }
 
+// Encrypt uses the encoder to encode the given data.
 func (wc *WowCrypt) Encrypt(data []byte) []byte {
 	bb := make([]byte, len(data))
 	wc.encoder.XORKeyStream(bb, data)
@@ -95,6 +99,7 @@ func (wc *WowCrypt) Encrypt(data []byte) []byte {
 	return bb
 }
 
+// Decrypt uses decoder to convert back the encrypted data.
 func (wc *WowCrypt) Decrypt(data []byte) []byte {
 	bb := make([]byte, len(data))
 	wc.decoder.XORKeyStream(bb, data)
