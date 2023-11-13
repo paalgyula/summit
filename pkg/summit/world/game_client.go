@@ -1,6 +1,7 @@
 package world
 
 import (
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"math/big"
@@ -30,7 +31,7 @@ type GameClient struct {
 	n   net.Conn
 	log zerolog.Logger
 
-	seed uint32
+	serverSeed []byte
 
 	input *wow.PacketReader
 
@@ -64,6 +65,10 @@ func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, handler
 		ws:        ws,
 		bs:        bs,
 	}
+
+	// * new server seed instead of 0x00
+	gc.serverSeed = make([]byte, 4)
+	_, _ = rand.Read(gc.serverSeed)
 
 	// Register opcode handlers from handlers.go
 	gc.RegisterHandlers(handlers...)
@@ -220,10 +225,18 @@ func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 	return wow.OpCode(opcode), int(length) - 4, nil
 }
 
-func (gc *GameClient) SessionKey() big.Int {
-	return *gc.acc.SessionKey()
+func (gc *GameClient) SessionKey() *big.Int {
+	return gc.acc.SessionKey()
 }
 
 func (gc *GameClient) Close() error {
 	return gc.n.Close() //nolint:wrapcheck
+}
+
+func (gc *GameClient) AccountName() string {
+	if gc.acc != nil {
+		return gc.acc.Name
+	}
+
+	return ""
 }
