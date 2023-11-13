@@ -2,5 +2,5 @@ bin/
 /dbc/
 lib
 server
-**/__debug_bin
 packetdump.txt
+__debug**
