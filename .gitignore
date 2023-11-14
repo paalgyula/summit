@@ -4,3 +4,4 @@ lib
 server
 packetdump.txt
 __debug**
+dist/
