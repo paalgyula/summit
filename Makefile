@@ -20,6 +20,13 @@ BUILDCMD=CGO_ENABLED=0 GOOS=linux go build -a -tags ${TAGS} -ldflags "-s -w ${LF
 
 default: build
 
+deps:
+	go install golang.org/x/tools/cmd/stringer@latest
+
+gen: deps
+	go install cmd/datagen/datagen.go
+	go generate ./...
+
 clean:
 	rm -Rf bin/*
 
