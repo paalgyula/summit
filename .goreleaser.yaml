@@ -16,7 +16,27 @@ before:
     - go generate ./...
 
 builds:
+  - main: ./cmd/datagen
+    id: datagen
+    binary: datagen
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+  - main: ./cmd/serworm
+    id: serworm
+    binary: serworm
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
   - main: ./cmd/summit
+    id: summit
+    binary: summit
     env:
       - CGO_ENABLED=0
     goos:
