@@ -45,6 +45,13 @@ func TestReadOutfitData(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Lenf(t, data, 126, "Expected 126 records in CharStartOutfit.dbc")
 
+	hw := data[0] // Human warrior
+	assert.EqualValues(t, 1, hw.ClassID)
+	assert.EqualValues(t, 1, hw.RaceID)
+	assert.EqualValues(t, 0, hw.Gender)
+
+	assert.Equal(t, []int32{38, 39, 40}, hw.DisplayItemID)
+
 	// for i, csoe := range data {
 	// 	fmt.Printf("%04d. %+v\n", i, csoe)
 	// }

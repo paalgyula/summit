@@ -32,12 +32,13 @@ type Server struct {
 
 	bs *babysocket.Server
 
-	data *basedata.BaseData
+	data *basedata.Store
 }
 
 func StartServer(ctx context.Context, listenAddress string) error {
 	db := db.GetInstance()
-	data, err := basedata.LoadFromFile()
+
+	data, err := basedata.LoadFromFile("summit.dat")
 	if err != nil {
 		return fmt.Errorf("world.StartServer: %w", err)
 	}

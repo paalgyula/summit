@@ -3,6 +3,7 @@ package player
 import (
 	"math"
 
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -168,8 +169,9 @@ type Player struct {
 	Pet Pet
 }
 
-// Initializes an empty inventory.
-func (p *Player) InitInventory() {
+// Initializes the inventory. The slots can be nul, in this case it will be initialized as
+// an empty inventory.
+func (p *Player) InitInventory(slots []*basedata.InventorySlot) {
 	if p.Inventory != nil {
 		return
 	}
@@ -178,9 +180,26 @@ func (p *Player) InitInventory() {
 		InventorySlots: []*InventoryItem{},
 	}
 
-	for i := 0; i < InventorySlotBagEnd; i++ {
-		//nolint:exhaustruct
-		p.Inventory.InventorySlots = append(p.Inventory.InventorySlots, &InventoryItem{})
+	if slots == nil {
+		for i := 0; i < InventorySlotBagEnd; i++ {
+			p.Inventory.AddEmpty()
+		}
+	} else {
+		for i, slot := range slots {
+			if i >= InventorySlotBagEnd {
+				continue
+			}
+
+			if slot.ItemID == -1 {
+				p.Inventory.AddEmpty()
+			} else {
+				p.Inventory.InventorySlots = append(p.Inventory.InventorySlots, &InventoryItem{
+					DisplayInfoID: uint32(slot.DisplayItemID),
+					InventoryType: slot.InventoryType,
+					EnchantSlot:   0,
+				})
+			}
+		}
 	}
 }
 
@@ -192,7 +211,7 @@ func (p *Player) GUID() wow.GUID {
 }
 
 func (p *Player) Init() {
-	p.InitInventory()
+	p.InitInventory(nil)
 }
 
 func (p *Player) Transport() *object.Transport {

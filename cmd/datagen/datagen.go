@@ -2,15 +2,12 @@
 package main
 
 import (
-	"encoding/gob"
 	"fmt"
 	"os"
 
 	"github.com/paalgyula/summit/pkg/summit/tools"
-	"github.com/paalgyula/summit/pkg/summit/tools/dbc"
-	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
-	"github.com/paalgyula/summit/pkg/summit/world/basedata"
-	"github.com/paalgyula/summit/pkg/wow"
+	"github.com/paalgyula/summit/pkg/summit/tools/data"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -46,28 +43,11 @@ func convertDBC() *cobra.Command {
 		Use:   "dbc",
 		Short: "Convert DBC files to go binary format",
 		Run: func(cmd *cobra.Command, args []string) {
-			dbcBase := "./dbc"
+			converter := data.NewConverter("dbc")
 
-			data, err := dbc.Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcBase)
-			if err != nil {
-				panic("the dbc files are not in place!")
+			if err := converter.CreateSummitBaseData(); err != nil {
+				log.Fatal().Err(err).Msg("data conversion failed")
 			}
-
-			playerCreateInfo := make([]basedata.PlayerCreateInfo, len(data))
-			for i, csoe := range data {
-				inventory := make([]basedata.InventorySlot, 24)
-
-				playerCreateInfo[i] = basedata.PlayerCreateInfo{
-					Race:      wow.PlayerRace(csoe.RaceID),
-					Class:     wow.PlayerClass(csoe.ClassID),
-					Gender:    wow.PlayerGender(csoe.Gender),
-					Inventory: inventory,
-				}
-			}
-
-			f, _ := os.Create("summit.dat")
-			enc := gob.NewEncoder(f)
-			enc.Encode(data)
 		},
 	}
 

@@ -3,6 +3,7 @@ package world
 import (
 	"encoding/binary"
 
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
@@ -32,9 +33,9 @@ func (gc *GameClient) ListCharacters() {
 }
 
 type CharacterCreateRequest struct {
-	Race       uint8
-	Class      uint8
-	Gender     uint8
+	Race       wow.PlayerRace
+	Class      wow.PlayerClass
+	Gender     wow.PlayerGender
 	Skin       uint8
 	Face       uint8
 	HairStyle  uint8
@@ -57,24 +58,24 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	_ = r.Read(&req, binary.BigEndian)
 
-	// fmt.Printf("%s %+v\n", characerName, req)
+	pci := basedata.GetInstance().
+		LookupCharacterCreateInfo(req.Race, req.Class, req.Gender)
 
-	// TODO: #2 when the DBC reader is ready this should be re-written
 	loc := player.WorldLocation{
-		X:           10311.3,
-		Y:           832.463,
-		Z:           1326.41,
-		Map:         1,
-		Zone:        141,
-		Orientation: 0,
+		X:           pci.X,
+		Y:           pci.Y,
+		Z:           pci.Z,
+		Orientation: pci.O,
+		Map:         pci.Map,
+		Zone:        pci.Zone,
 	}
 
 	//nolint:exhaustruct
 	p := player.Player{
 		Name:            characerName,
-		Race:            wow.PlayerRace(req.Race),
-		Class:           wow.PlayerClass(req.Class),
-		Gender:          wow.PlayerGender(req.Gender),
+		Race:            req.Race,
+		Class:           req.Class,
+		Gender:          req.Gender,
 		Skin:            req.Skin,
 		Face:            req.Face,
 		HairStyle:       req.HairStyle,
@@ -91,7 +92,7 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 		Pet:             player.Pet{},
 	}
 
-	p.InitInventory()
+	p.InitInventory(pci.Inventory)
 
 	var players player.Players
 
@@ -103,4 +104,6 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 	res := []byte{0x00} // OK :)
 
 	gc.SendPayload(int(wow.ServerCharCreate), res)
+
+	gc.ListCharacters()
 }

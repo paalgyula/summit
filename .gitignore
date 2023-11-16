@@ -5,3 +5,6 @@ server
 packetdump.txt
 __debug**
 dist/
+
+# Generated dat file
+summit.dat

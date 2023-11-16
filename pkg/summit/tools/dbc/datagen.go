@@ -28,7 +28,7 @@ func Load[C any](fileName string, baseDir ...string) ([]C, error) {
 		return nil, err
 	}
 
-	log.Printf("DBC loader: Loaded %d records from %s\n", r.Header.RecordCount, fileName)
+	log.Debug().Msgf("DBC loader: Loaded %d records from %s", r.Header.RecordCount, fileName)
 
 	return r.Records, nil
 }
