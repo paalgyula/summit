@@ -3,14 +3,14 @@ package wotlk
 import "github.com/paalgyula/summit/pkg/wow"
 
 type CharStartOutfitEntry struct {
-	ID            uint32   `dbc:"offset=0"`
-	RaceID        uint8    `dbc:"offset=1"`
-	ClassID       uint8    `dbc:"offset=1,byte=1"`
-	Gender        uint8    `dbc:"offset=1,byte=2"`
-	OutfitID      uint8    `dbc:"offset=1,byte=3"`
-	ItemID        []uint32 `dbc:"offset=2,len=12"`
-	DisplayItemID []uint32 `dbc:"offset=27,len=12"`
-	InventoryType []uint32 `dbc:"offset=52,len=12"`
+	ID            uint32  `dbc:"offset=0"`
+	RaceID        uint8   `dbc:"offset=1"`
+	ClassID       uint8   `dbc:"offset=1,byte=1"`
+	Gender        uint8   `dbc:"offset=1,byte=2"`
+	OutfitID      uint8   `dbc:"offset=1,byte=3"`
+	ItemID        []int32 `dbc:"offset=2,len=24"`
+	DisplayItemID []int32 `dbc:"offset=26,len=24"`
+	InventoryType []int32 `dbc:"offset=50,len=24"`
 }
 
 type InventorySlot struct {
@@ -25,8 +25,8 @@ func (e *CharStartOutfitEntry) GetSlot(id int) *InventorySlot {
 	}
 
 	return &InventorySlot{
-		ItemID:        e.ItemID[id],
-		DisplayItemID: e.DisplayItemID[id],
+		ItemID:        uint32(e.ItemID[id]),
+		DisplayItemID: uint32(e.DisplayItemID[id]),
 		InventoryType: wow.InventoryType(e.InventoryType[id]),
 	}
 }

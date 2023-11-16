@@ -76,7 +76,7 @@ func TestParseCharEnum(t *testing.T) {
 		GuildID:      0,
 	}
 
-	p.InitInventory()
+	p.InitInventory(nil)
 
 	w := wow.NewPacket(0)
 	p.WriteToLogin(w)
@@ -97,7 +97,8 @@ func TestAssertBytes(t *testing.T) {
 		"000000000000000000000000000000000000000000000000000000000000000000",
 		"000000000000000000000000000062480000110000000000000000000000000000",
 		"000000000000000000000000000000000000000000000000000000000000000000",
-		"0000000000000000000000000000000000000000"}, ""), 16)
+		"0000000000000000000000000000000000000000",
+	}, ""), 16)
 
 	fmt.Printf("%s", hex.Dump(bn.Bytes()))
 
@@ -152,7 +153,7 @@ func TestAssertBytes(t *testing.T) {
 
 	r.Read(&p.Pet)
 
-	p.InitInventory()
+	p.InitInventory(nil)
 
 	for _, is := range p.Inventory.InventorySlots {
 		r.Read(is)

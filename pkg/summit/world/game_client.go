@@ -2,7 +2,6 @@ package world
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -31,6 +30,7 @@ type GameClient struct {
 	n   net.Conn
 	log zerolog.Logger
 
+	// Server side generated seed for authentication proofing
 	serverSeed []byte
 
 	input *wow.PacketReader
@@ -66,7 +66,7 @@ func NewGameClient(n net.Conn, ws SessionManager, bs *babysocket.Server, handler
 		bs:        bs,
 	}
 
-	// * new server seed instead of 0x00
+	// New server seed on connection
 	gc.serverSeed = make([]byte, 4)
 	_, _ = rand.Read(gc.serverSeed)
 
@@ -176,11 +176,13 @@ func (gc *GameClient) handlePacket() error {
 	gc.readLock.Lock()
 	defer gc.readLock.Unlock()
 
+	// Read and decode the header when crypt is not nil
 	opCode, length, err := gc.readHeader()
 	if err != nil && length < 0 {
 		return err
 	}
 
+	// Read the rest of the packet
 	data, err := gc.input.ReadNBytes(length)
 	if err != nil {
 		return fmt.Errorf("with opcode: %0X, %w", opCode, err)
@@ -226,9 +228,7 @@ func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 }
 
 func (gc *GameClient) SessionKey() []byte {
-	bb, _ := hex.DecodeString(gc.acc.Session)
-
-	return bb
+	return gc.acc.SessionKey().Bytes()
 }
 
 func (gc *GameClient) Close() error {

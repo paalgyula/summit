@@ -13,3 +13,11 @@ type InventoryItem struct {
 type Inventory struct {
 	InventorySlots []*InventoryItem
 }
+
+func (i *Inventory) AddEmpty() {
+	i.InventorySlots = append(i.InventorySlots, &InventoryItem{
+		DisplayInfoID: 0,
+		InventoryType: 0,
+		EnchantSlot:   0,
+	})
+}

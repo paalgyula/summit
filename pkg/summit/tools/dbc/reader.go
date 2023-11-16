@@ -207,6 +207,30 @@ func parseByteArray(data []byte, obj interface{}) error {
 
 				continue
 				// fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
+			} else if field.Type().Elem().Kind() == reflect.Uint16 {
+				value := make([]uint16, size/4)
+				br := bytes.NewReader(data[offset : offset+size])
+				err := binary.Read(br, binary.LittleEndian, &value)
+				if err != nil {
+					return err
+				}
+
+				field.Set(reflect.ValueOf(value))
+
+				continue
+				// fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
+			} else if field.Type().Elem().Kind() == reflect.Int32 {
+				value := make([]int32, size/4)
+				br := bytes.NewReader(data[offset : offset+size])
+				err := binary.Read(br, binary.LittleEndian, &value)
+				if err != nil {
+					return err
+				}
+
+				field.Set(reflect.ValueOf(value))
+
+				continue
+				// fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
 			} else {
 				fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
 			}

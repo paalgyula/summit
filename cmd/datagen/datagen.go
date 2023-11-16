@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/paalgyula/summit/pkg/summit/tools"
+	"github.com/paalgyula/summit/pkg/summit/tools/data"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -26,11 +28,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(&cobra.Command{
-		Use:   "dbc",
-		Short: "Convert DBC files to go source", // I know..
-	})
-
+	rootCmd.AddCommand(convertDBC())
 	rootCmd.AddCommand(opcodeGenCommand())
 	rootCmd.AddCommand(headerConvertCommand())
 
@@ -38,6 +36,22 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func convertDBC() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dbc",
+		Short: "Convert DBC files to go binary format",
+		Run: func(cmd *cobra.Command, args []string) {
+			converter := data.NewConverter("dbc")
+
+			if err := converter.CreateSummitBaseData(); err != nil {
+				log.Fatal().Err(err).Msg("data conversion failed")
+			}
+		},
+	}
+
+	return cmd
 }
 
 func opcodeGenCommand() *cobra.Command {
