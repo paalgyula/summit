@@ -11,6 +11,7 @@ import (
 
 	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -30,21 +31,26 @@ type Server struct {
 	log zerolog.Logger
 
 	bs *babysocket.Server
+
+	data *basedata.BaseData
 }
 
 func StartServer(ctx context.Context, listenAddress string) error {
 	db := db.GetInstance()
+	data, err := basedata.LoadFromFile()
+	if err != nil {
+		return fmt.Errorf("world.StartServer: %w", err)
+	}
 
 	//nolint:exhaustruct
 	worldServer := &Server{
-		db:  db,
-		log: log.With().Str("server", "world").Caller().Logger(),
-		ctx: ctx,
+		db:   db,
+		log:  log.With().Str("server", "world").Caller().Logger(),
+		ctx:  ctx,
+		data: data,
 
 		clients: sync.Map{},
 	}
-
-	var err error
 
 	worldServer.l, err = net.Listen("tcp4", listenAddress)
 	if err != nil {

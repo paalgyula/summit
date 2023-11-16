@@ -121,6 +121,10 @@ func (a *Account) SetKey(k *big.Int) {
 	a.Session = k.Text(16)
 }
 
+func (a *Account) SessionKey() *big.Int {
+	return a.sessionKey
+}
+
 // Verifier gets a big.Int version of the account verifier.
 func (a *Account) Verifier() *big.Int {
 	if a.verifier == nil {

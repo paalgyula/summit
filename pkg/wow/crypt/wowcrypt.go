@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -38,13 +39,18 @@ type WowCrypt struct {
 }
 
 // NewWowcrypt initializes the wow packet header crypter. The key should be the session key
+// The session key should be 40 bytes long.
 // which has been created on the auth session packet. The default skip for WOTLK client is 1024.
-func NewWowcrypt(key []byte, skip int) (*WowCrypt, error) {
+func NewWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
+	if len(key.Bytes()) != 40 {
+		panic("the crypt key should be 40 bytes long")
+	}
+
 	wc := new(WowCrypt)
 
 	// Encoder setup
 	h := hmac.New(sha1.New, r) // r -> server to client
-	_, _ = h.Write(wow.ReverseBytes(key))
+	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
 	wc.encKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
@@ -53,14 +59,16 @@ func NewWowcrypt(key []byte, skip int) (*WowCrypt, error) {
 
 	// Decoder setup
 	h = hmac.New(sha1.New, s) // s -> client to server
-	_, _ = h.Write(wow.ReverseBytes(key))
+	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
 	wc.decKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
 		return nil, ErrSizeNotMach
 	}
 
-	wc.Reset() // Initializes the ciphers with the keys.
+	if err := wc.Reset(); err != nil { // Initializes the ciphers with the keys.
+		return nil, fmt.Errorf("cannot initialize ciphers: %w", err)
+	}
 	wc.Skip(skip)
 
 	return wc, nil
@@ -80,12 +88,12 @@ func (wc *WowCrypt) Reset() error {
 
 	wc.decoder, err = rc4.NewCipher(wc.decKey)
 	if err != nil {
-		return fmt.Errorf("crypt.NewWowcrypt: %w", err)
+		return fmt.Errorf("crypt.NewWowCrypt: %w", err)
 	}
 
 	wc.encoder, err = rc4.NewCipher(wc.encKey)
 	if err != nil {
-		return fmt.Errorf("crypt.NewWowcrypt: %w", err)
+		return fmt.Errorf("crypt.NewWowCrypt: %w", err)
 	}
 
 	return nil

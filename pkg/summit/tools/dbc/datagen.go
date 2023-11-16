@@ -9,11 +9,11 @@ import (
 )
 
 func LoadAll(dbcDirectoryPath string) {
-	_, _ = load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcDirectoryPath)
-	_, _ = load[wotlk.MapEntry]("Map.dbc", dbcDirectoryPath)
+	_, _ = Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcDirectoryPath)
+	_, _ = Load[wotlk.MapEntry]("Map.dbc", dbcDirectoryPath)
 }
 
-func load[C any](fileName string, baseDir ...string) ([]C, error) {
+func Load[C any](fileName string, baseDir ...string) ([]C, error) {
 	f, err := os.Open(path.Join(append(baseDir, fileName)...))
 	if err != nil {
 		panic(err)

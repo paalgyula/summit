@@ -114,35 +114,49 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 		gc.acc = acc
 	}
 
-	// TODO: create server seed inseted of 0x00
-	crypt.AuthSessionProof(acc.Name, []byte{0, 0, 0, 0}, pkt.ClientSeed, []byte(acc.Session))
+	// TODO: implement auth proof calculation
+	// proof := crypt.AuthSessionProof(acc.Name, gc.serverSeed, pkt.ClientSeed, []byte(acc.Session))
 
 	gc.log.Error().Msg("digest calculation not implemented yet, allowing all clients!!!")
-
-	gc.log.Warn().Msgf("%s ServerSeed: 0x%x SKey: %s", pkt.String(), gc.serverSeed, acc.Session)
+	// gc.log.Warn().Msgf("%s ServerSeed: 0x%x SKey: %s", pkt.String(), gc.serverSeed, acc.Session)
+	gc.log.Warn().Msgf("%s ServerSeed: 0x%x SKey: %s", pkt.String(), 0x00, acc.Session)
 
 	gc.log = gc.log.With().Str("acc", gc.acc.Name).Logger()
 
 	var err error
 
-	key, _ := hex.DecodeString(acc.Session)
-
-	gc.crypt, err = crypt.NewWowcrypt(key, 1024)
+	gc.crypt, err = crypt.NewWowcrypt(acc.SessionKey(), 1024)
 	if err != nil {
 		panic(err)
 	}
 
-	// gc.log.Debug().Str("key", acc.SessionKey().Text(16)).Send()
-
 	//nolint:varnamelen
 	p := wow.NewPacket(wow.ServerAuthResponse)
-	p.Write(uint8(wotlk.AUTH_OK))
+
+	queued := false
+
+	if queued {
+		// * Server is full, user queued
+		p.WriteOne(wotlk.AUTH_WAIT_QUEUE)
+	} else {
+		// * Auth OK case
+		p.WriteOne(wotlk.AUTH_OK)
+	}
+
 	p.Write(&BillingDetails{
 		BillingTimeRemaining: 0,
 		BillingFlags:         0,
 		BillingTimeRested:    0,
 	})
+
+	// TODO: get the expansion from account (database)
 	p.Write(uint8(2)) // Expansion
+
+	// Queue info
+	if queued {
+		p.Write(uint32(4))
+		p.WriteOne(0x00) // ? Whats this
+	}
 
 	gc.Send(p)
 }

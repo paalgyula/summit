@@ -2,10 +2,15 @@
 package main
 
 import (
+	"encoding/gob"
 	"fmt"
 	"os"
 
 	"github.com/paalgyula/summit/pkg/summit/tools"
+	"github.com/paalgyula/summit/pkg/summit/tools/dbc"
+	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/spf13/cobra"
 )
 
@@ -26,11 +31,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(&cobra.Command{
-		Use:   "dbc",
-		Short: "Convert DBC files to go source", // I know..
-	})
-
+	rootCmd.AddCommand(convertDBC())
 	rootCmd.AddCommand(opcodeGenCommand())
 	rootCmd.AddCommand(headerConvertCommand())
 
@@ -38,6 +39,39 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+}
+
+func convertDBC() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dbc",
+		Short: "Convert DBC files to go binary format",
+		Run: func(cmd *cobra.Command, args []string) {
+			dbcBase := "./dbc"
+
+			data, err := dbc.Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcBase)
+			if err != nil {
+				panic("the dbc files are not in place!")
+			}
+
+			playerCreateInfo := make([]basedata.PlayerCreateInfo, len(data))
+			for i, csoe := range data {
+				inventory := make([]basedata.InventorySlot, 24)
+
+				playerCreateInfo[i] = basedata.PlayerCreateInfo{
+					Race:      wow.PlayerRace(csoe.RaceID),
+					Class:     wow.PlayerClass(csoe.ClassID),
+					Gender:    wow.PlayerGender(csoe.Gender),
+					Inventory: inventory,
+				}
+			}
+
+			f, _ := os.Create("summit.dat")
+			enc := gob.NewEncoder(f)
+			enc.Encode(data)
+		},
+	}
+
+	return cmd
 }
 
 func opcodeGenCommand() *cobra.Command {
