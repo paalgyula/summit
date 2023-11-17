@@ -22,10 +22,23 @@ default: build
 
 deps:
 	go install golang.org/x/tools/cmd/stringer@latest
+	go install github.com/josharian/impl@latest
 
-gen: deps
-	go install cmd/datagen/datagen.go
-	go generate ./...
+gen: 
+	@echo "Generating interface stubs"
+	cd pkg/store/localdb && impl 'repo *LocalStore' store.AccountRepository >> localstore.go 
+	cd pkg/store/localdb && impl 'repo *LocalStore' store.CharacterRepository >> localstore.go  
+	cd pkg/store/localdb && impl 'repo *LocalStore' store.WorldRepository >> localstore.go  
+
+	cd pkg/store/mysqldb && impl 'store *AccountStore' store.AccountRepository >> accountstore.go 
+	cd pkg/store/mysqldb && impl 'store *CharacterStore' store.CharacterRepository >> characterstore.go  
+	cd pkg/store/mysqldb && impl 'store *WorldStore' store.WorldRepository >> worldstore.go  
+
+	cd pkg/summit/world && impl 'ws *Server' world.SessionManager >> sessionmanager.go
+
+	@go install cmd/datagen/datagen.go
+	@go generate ./...
+	@go install 
 
 clean:
 	rm -Rf bin/*
