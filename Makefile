@@ -29,19 +29,21 @@ deps:
 ## Generates interface stubs
 gen: 
 	@echo "Generating database interface stubs"
-	@cd pkg/store/localdb && impl 'repo *LocalStore' store.AccountRepository >> localstore.go 
-	@cd pkg/store/localdb && impl 'repo *LocalStore' store.CharacterRepository >> localstore.go  
-	@cd pkg/store/localdb && impl 'repo *LocalStore' store.WorldRepository >> localstore.go  
+	@cd pkg/store/localdb && impl 'db *LocalStore' store.AccountRepo >> localstore.go 
+	@cd pkg/store/localdb && impl 'db *LocalStore' store.CharacterRepo >> localstore.go  
+	@cd pkg/store/localdb && impl 'db *LocalStore' store.WorldRepo >> localstore.go  
 
-	@cd pkg/store/mysqldb && impl 'store *AccountStore' store.AccountRepository >> accountstore.go 
-	@cd pkg/store/mysqldb && impl 'store *CharacterStore' store.CharacterRepository >> characterstore.go  
-	@cd pkg/store/mysqldb && impl 'store *WorldStore' store.WorldRepository >> worldstore.go  
+	@cd pkg/store/mysqldb && impl 'store *AccountStore' store.AccountRepo >> accountstore.go 
+	@cd pkg/store/mysqldb && impl 'store *CharacterStore' store.CharacterRepo >> characterstore.go  
+	@cd pkg/store/mysqldb && impl 'store *WorldStore' store.WorldRepo >> worldstore.go  
 
 	@echo "Generating world server interface stubs"
 	@cd pkg/summit/world && impl 'ws *Server' world.SessionManager >> sessionmanager.go
 
 	@echo "Generating auth server interface stubs"
 	@cd pkg/summit/auth && impl 'ms *ManagementServiceImpl' ManagementService >> management.go	
+	@cd pkg/summit/auth && impl 'mc *ManagementClient' ManagementService >> management_client.go	
+
 
 	@go install cmd/datagen/datagen.go
 	@go generate ./...
@@ -74,3 +76,4 @@ build-dist: clean
 install:	
 	@echo "Installing summit tools..."
 	@go install cmd/datagen/datagen.go
+	@go install cmd/summitctl/summitctl.go

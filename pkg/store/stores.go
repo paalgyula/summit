@@ -6,8 +6,8 @@ type AccountRepo interface {
 	// FindAccount retrives an account from the store or returns nil if does not exists.
 	FindAccount(name string) *Account
 
-	// CreateAccount creates an account with SRP6 encoded password (salt, verifier).
-	CreateAccount(name, salt, verifier string) (*Account, error)
+	// CreateAccount creates an account. The account verifier and salt should be set.
+	CreateAccount(account *Account) error
 }
 
 type CharacterRepo interface {

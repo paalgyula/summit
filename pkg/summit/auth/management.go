@@ -4,9 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -35,12 +38,16 @@ func NewManagementService(store store.AccountRepo) *ManagementServiceImpl {
 	return &ManagementServiceImpl{
 		store:    store,
 		sessions: make(map[string]*Session),
+
+		log: log.With().Str("service", "management").Logger(),
 	}
 }
 
 type ManagementServiceImpl struct {
 	store    store.AccountRepo
 	sessions map[string]*Session
+
+	log zerolog.Logger
 }
 
 // Register tries to register an account on the auth server if it does not exists already.
@@ -57,10 +64,22 @@ func (ms *ManagementServiceImpl) Register(user string, pass string, email string
 	salt := pwcrypt.RandomSalt()
 	verifier := pwcrypt.GenerateVerifier(strings.ToUpper(user), pass, salt)
 
-	_, err := store.NewAccount(user, salt.Text(16), verifier.Text(16))
+	acc, err := store.AccountFromCreds(user, salt.Text(16), verifier.Text(16))
 	if err != nil {
 		return fmt.Errorf("unknown error: %w", err)
 	}
+
+	acc.Email = email
+	acc.CreatedAt = time.Now()
+
+	// TODO: implement email activation flow
+	acc.Activated = true
+
+	if err := ms.store.CreateAccount(acc); err != nil {
+		return fmt.Errorf("account persist: %w", err)
+	}
+
+	log.Info().Str("acc", user).Msg("account [%s] has been registered")
 
 	return nil
 }

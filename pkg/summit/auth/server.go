@@ -9,7 +9,6 @@ import (
 	"time"
 
 	authv1 "github.com/paalgyula/summit/pkg/pb/proto/auth/v1"
-	"github.com/paalgyula/summit/pkg/store"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
@@ -64,7 +63,7 @@ func (as *Server) Close() error {
 	return as.logonListener.Close()
 }
 
-func NewServer(listenAddress string, store store.AccountRepo, opts ...ServerOption) (*Server, error) {
+func NewServer(listenAddress string, management ManagementService, opts ...ServerOption) (*Server, error) {
 	logonListener, err := net.Listen("tcp4", listenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("logonListener: %w", err)
@@ -73,7 +72,7 @@ func NewServer(listenAddress string, store store.AccountRepo, opts ...ServerOpti
 	as := &Server{
 		logonListener: logonListener,
 		rpcListener:   nil, // initializing later
-		management:    NewManagementService(store),
+		management:    management,
 		realmProvider: &StaticRealmProvider{
 			RealmList: make([]*Realm, 0),
 		},
@@ -107,7 +106,7 @@ func (s *Server) StartManagementServer() {
 		srv: s.management,
 	})
 
-	log.Printf("management server listening at %v", s.rpcListener.Addr())
+	s.log.Info().Msgf("management server listening at %v", s.rpcListener.Addr())
 	if err := srv.Serve(s.rpcListener); err != nil {
 		log.Fatal().Err(err).Msgf("failed to serve: %v", err)
 	}

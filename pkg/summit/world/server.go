@@ -2,7 +2,7 @@ package world
 
 import (
 	"bytes"
-	"context"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paalgyula/summit/pkg/store"
+	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -17,63 +18,60 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-//nolint:gochecknoinits
-func init() {
-	log.Logger = log.Output(zerolog.NewConsoleWriter())
-}
-
 type Server struct {
 	clients sync.Map
 
-	ctx context.Context
-	l   net.Listener
-	log zerolog.Logger
+	gameListener net.Listener
+	log          zerolog.Logger
 
 	// Database access
-	characterStore store.CharacterRepo
-	worldStore     store.WorldRepo
+	charStore  store.CharacterRepo
+	worldStore store.WorldRepo
 
 	bs *babysocket.Server
 
-	data *basedata.Store
+	// Management client for auth. Can be direct, or gRPC based.
+	authManagement auth.ManagementService
+
+	baseData *basedata.Store
 }
 
-func StartServer(ctx context.Context, listenAddress string,
-	worldRepo store.WorldRepo, characterRepo store.CharacterRepo,
-) error {
-	data, err := basedata.LoadFromFile("summit.dat")
-	if err != nil {
-		return fmt.Errorf("world.StartServer: %w", err)
+func NewServer(opts ...ServerOption) (*Server, error) {
+	worldServer := new(Server)
+
+	worldServer.log = log.With().
+		Str("service", "world").
+		Caller().Logger()
+	worldServer.clients = sync.Map{}
+
+	// Apply options
+	for _, so := range opts {
+		if err := so(worldServer); err != nil {
+			return nil, err
+		}
 	}
 
-	//nolint:exhaustruct
-	worldServer := &Server{
-		log:  log.With().Str("server", "world").Caller().Logger(),
-		ctx:  ctx,
-		data: data,
+	if worldServer.gameListener == nil {
+		//nolint:gosec
+		l, err := net.Listen("tcp", ":8129") // Create default listener
+		if err != nil {
+			return nil, fmt.Errorf("gameserver listen error: %w", err)
+		}
 
-		characterStore: characterRepo,
-		worldStore:     worldRepo,
-
-		clients: sync.Map{},
+		worldServer.gameListener = l
 	}
 
-	worldServer.l, err = net.Listen("tcp4", listenAddress)
-	if err != nil {
-		return fmt.Errorf("world.StartServer: %w", err)
-	}
+	return worldServer, nil
+}
 
-	bs, err := babysocket.NewServer(ctx, "babysocket", worldServer)
-	if err != nil {
-		return fmt.Errorf("world.StartServer: %w", err)
-	}
+func (ws *Server) StartServer(worldStore store.WorldRepo, charStore store.CharacterRepo) error {
+	ws.log.Info().Msgf("world server is listening on: %s", ws.gameListener.Addr().String())
 
-	worldServer.bs = bs
+	ws.charStore = charStore
+	ws.worldStore = worldStore
 
-	worldServer.log.Info().Msgf("world server is listening on: %s", listenAddress)
-
-	go worldServer.listenConnections()
-	go worldServer.Run()
+	go ws.startListener()
+	go ws.Run()
 
 	return nil
 }
@@ -93,10 +91,14 @@ func (ws *Server) Clients() map[string]wow.PayloadSender {
 	return ret
 }
 
-func (ws *Server) listenConnections() {
+func (ws *Server) startListener() {
 	for {
-		conn, err := ws.l.Accept()
+		conn, err := ws.gameListener.Accept()
 		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+
 			log.Error().Err(err).Msg("listener error")
 
 			continue
@@ -134,7 +136,7 @@ func (ws *Server) Stats() {
 func (ws *Server) Run() {
 	ticker := time.NewTicker(time.Second * 20)
 
-	defer ws.l.Close()
+	defer ws.gameListener.Close()
 	defer ws.log.Warn().Msg("world server stopped")
 
 	for {
@@ -143,8 +145,9 @@ func (ws *Server) Run() {
 			// log.Info().Msg("Garbage collector timer: unimplemented")
 			// ws.Stats()
 			// ws.SaveAll()
-		case <-ws.ctx.Done():
-			return
+			// ! TODO: shutdown with another channel
+			// case <-ws.ctx.Done():
+			// 	return
 		}
 	}
 }

@@ -1,8 +1,8 @@
+//nolint:revive
 package auth
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -156,9 +156,9 @@ func (rc *AuthConnection) Send(opcode RealmCommand, payload []byte) error {
 	size := len(payload)
 
 	rc.log.Debug().
+		Str("packet", opcode.String()).
 		Str("opcode", fmt.Sprintf("0x%04x", int(opcode))).
 		Int("size", size).
-		Hex("data", payload).
 		Msg("sending packet to client")
 
 	w := wow.NewPacket(0)
@@ -192,7 +192,13 @@ func (rc *AuthConnection) listen() {
 		// Read packets infinitely :)
 		pkt, err := rc.read(rc.c)
 		if err != nil || pkt == nil {
-			log.Error().Err(err).Msg("error while reading from client")
+			if errors.Is(err, io.EOF) {
+				rc.log.Info().Msg("client disconnected from realm")
+
+				return
+			}
+
+			rc.log.Error().Err(err).Msg("error while reading from client")
 
 			return
 		}
@@ -203,7 +209,7 @@ func (rc *AuthConnection) listen() {
 
 			pkt.Unmarshal(&clc)
 
-			log.Trace().Msgf(">> WoW -> Auth ClientLoginChallenge\n%s", hex.Dump(clc.MarshalPacket()))
+			rc.log.Trace().Msgf(">> WoW -> Auth ClientLoginChallenge")
 
 			_ = rc.HandleLogin(&clc)
 		case AuthLoginProof:
@@ -211,7 +217,7 @@ func (rc *AuthConnection) listen() {
 
 			pkt.Unmarshal(&clp)
 
-			log.Trace().Msgf(">> WoW -> Auth ClientLoginProof")
+			rc.log.Trace().Msgf(">> WoW -> Auth ClientLoginProof")
 
 			_ = rc.HandleProof(&clp)
 		case RealmList:

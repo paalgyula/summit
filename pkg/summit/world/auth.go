@@ -124,8 +124,8 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	// proof := crypt.AuthSessionProof(acc.Name, gc.serverSeed, pkt.ClientSeed, []byte(acc.Session))
 
 	gc.log.Error().Msg("digest calculation not implemented yet, allowing all clients!!!")
-	gc.log.Trace().Msgf("%s ServerSeed: 0x%x SKey: %s",
-		pkt.String(), gc.serverSeed, authSession.SessionKey)
+	// gc.log.Trace().Msgf("%s ServerSeed: 0x%x SKey: %s",
+	// 	pkt.String(), gc.serverSeed, authSession.SessionKey)
 
 	gc.log = gc.log.With().Str("acc", gc.AccountName).Logger()
 

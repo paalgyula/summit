@@ -10,7 +10,7 @@ import (
 var ErrInvalidHexNumber = errors.New("invalid hex number")
 
 // Initializes a new account object.
-func NewAccount(name, salt, verifier string) (*Account, error) {
+func AccountFromCreds(name, salt, verifier string) (*Account, error) {
 	v, succ := new(big.Int).SetString(verifier, 16)
 	if !succ {
 		return nil, fmt.Errorf("cannot convert verifier: %w", ErrInvalidHexNumber)
@@ -36,6 +36,9 @@ type AccountBan struct {
 }
 
 type Account struct {
+	// ID of the account.
+	ID string
+
 	// Name username of the account
 	// Deprecated: don't use it this will be replaced by the email address completely.
 	Name string

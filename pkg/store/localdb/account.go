@@ -3,16 +3,27 @@ package localdb
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
 
 type Account struct {
-	ID       string         `yaml:"id"`
-	Name     string         `yaml:"name"`
-	Salt     string         `yaml:"salt"`
-	Verifier string         `yaml:"verifier"`
-	Data     map[string]any `yaml:"data"`
+	ID string `yaml:"id"`
+
+	Name     string `yaml:"name"`
+	Email    string `yaml:"email"`
+	Salt     string `yaml:"salt"`
+	Verifier string `yaml:"verifier"`
+
+	CreatedAt time.Time  `yaml:"createdAt"`
+	LastLogin *time.Time `yaml:"lastLogin,omitempty"`
+
+	Activated bool `yaml:"activated"`
+
+	BanInfo any `yaml:"banInfo"`
+
+	Data map[string]any `yaml:"data"`
 }
 
 func (a *Account) Characters(destination any) error {

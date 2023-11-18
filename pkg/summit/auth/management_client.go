@@ -6,6 +6,7 @@ import (
 	"time"
 
 	authv1 "github.com/paalgyula/summit/pkg/pb/proto/auth/v1"
+	"github.com/paalgyula/summit/pkg/store"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -56,12 +57,46 @@ func (mc *ManagementClient) Register(user, pass, email string) error {
 		return fmt.Errorf("management.Register: %w", err)
 	}
 
-	switch res.Status {
+	switch res.GetStatus() {
 	case authv1.RegistrationStatus_SUCCESS:
 		return nil
 	case authv1.RegistrationStatus_EMAIL_ALREADY_EXISTS:
 		return ErrAccountAlreadyExists
+	case authv1.RegistrationStatus_INVALID_USERNAME,
+		authv1.RegistrationStatus_WEAK_PASSWORD,
+		authv1.RegistrationStatus_OTHER_ERROR:
+		fallthrough
 	default:
-		return fmt.Errorf("%w: %s", ErrAccountCreateError, res.ErrorMessage)
+		return fmt.Errorf("%w: %s", ErrAccountCreateError, res.GetErrorMessage())
 	}
+}
+
+// FindAccount finds an account in the store.
+func (mc *ManagementClient) FindAccount(user string) *store.Account {
+	panic("not implemented") // TODO: Implement
+}
+
+// GetSession returns the auth session if any.
+func (mc *ManagementClient) GetSession(user string) *Session {
+	ctx, cancel := context.WithTimeout(context.Background(), mc.RequestTimeout)
+	defer cancel()
+
+	// TODO: is this a good idea to ignore the error?
+	res, _ := mc.client.GetSession(ctx, &authv1.GetSessionRequest{
+		Username: user,
+	})
+
+	if res.GetFound() {
+		return &Session{
+			AccountName: user,
+			SessionKey:  res.GetSessionKey(),
+		}
+	}
+
+	return nil
+}
+
+// AddSession adds session to the auth session store.
+func (mc *ManagementClient) AddSession(session *Session) {
+	panic("not implemented") // TODO: Implement
 }

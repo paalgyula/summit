@@ -64,7 +64,9 @@ func (gc *GameClient) Handle(oc wow.OpCode, data []byte) error {
 
 	switch t := handle.Handler.(type) {
 	case string:
-		gc.log.Warn().Msgf("handler defined as string: %s", t)
+		gc.log.Warn().
+			Str("packet", oc.String()).
+			Msgf("handler defined as string: %s", t)
 	case handlePacket:
 		t(data)
 	case handleCommand:

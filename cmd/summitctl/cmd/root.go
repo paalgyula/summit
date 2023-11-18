@@ -6,13 +6,18 @@ package cmd
 import (
 	"os"
 
+	"github.com/paalgyula/summit/docs"
 	"github.com/spf13/cobra"
 )
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "summitctl [subcommand]",
-	Short: "A management interface forsummit wow emulator",
+	Use:     "summitctl [subcommand]",
+	Version: docs.Version,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: false,
+	},
+	Short: "A management interface for SUMMIT wow emulator",
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -25,5 +30,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	rootCmd.PersistentFlags().StringP("config", "c", "config.yaml", "config file location")
 }

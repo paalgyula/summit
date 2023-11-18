@@ -24,17 +24,33 @@ type SessionManager interface {
 
 // GetAuthSession retrives the auth session from login (auth) server.
 func (ws *Server) GetAuthSession(account string) *auth.Session {
-	panic("not implemented") // TODO: Implement
+	// Request session via management interface.
+	ws.log.Trace().Msgf("requesting auth session for account: %s", account)
+
+	sess := ws.authManagement.GetSession(account)
+
+	if sess != nil {
+		ws.log.Trace().Interface("authSession", sess).Msgf("session found")
+	}
+
+	return sess
 }
 
 // GetCharacters fetches the character list (with full character info) from the store.
-func (ws *Server) GetCharacters(account string, characters *player.Players) (err error) {
-	*characters, err = ws.characterStore.GetCharacters(account)
+func (ws *Server) GetCharacters(account string, characters *player.Players) error {
+	chars, err := ws.charStore.GetCharacters(account)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range chars {
+		characters.Add(c)
+	}
 
 	return err
 }
 
 // CreateCharacter saves a new character into the database.
 func (ws *Server) CreateCharacter(account string, character *player.Player) error {
-	return ws.characterStore.CreateCharacter(account, character)
+	return ws.charStore.CreateCharacter(account, character)
 }

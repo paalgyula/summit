@@ -3,6 +3,7 @@ package localdb
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
@@ -35,14 +36,22 @@ type LocalStore struct {
 func (db *LocalStore) FindAccount(name string) *store.Account {
 	for _, a := range db.Accounts {
 		if a.Name == name {
-			log.Info().Interface("account", a).Msgf("Account found: %s", name)
+			log.Info().Msgf("Account found: %s, banned: %t", name, a.BanInfo != nil)
 
-			acc, err := store.NewAccount(a.Name, a.Salt, a.Verifier)
+			acc, err := store.AccountFromCreds(a.Name, a.Salt, a.Verifier)
 			if err != nil {
 				log.Error().Err(err).Msg("account found but looks corrupt")
 
 				return nil
 			}
+
+			acc.Email = a.Email
+			acc.CreatedAt = a.CreatedAt
+			acc.LastLogin = a.LastLogin
+			acc.Activated = a.Activated
+
+			// TODO: #39 implement proper marshal/unmarshal for account ban
+			// acc.Ban = a.BanInfo
 
 			return acc
 		}
@@ -73,32 +82,47 @@ func (db *LocalStore) SaveAll() {
 }
 
 // Retrives characters from the store for the specified account.
-func (repo *LocalStore) GetCharacters(account string) (player.Players, error) {
-	panic("not implemented") // TODO: Implement
+func (db *LocalStore) GetCharacters(account string) (player.Players, error) {
+	var pp player.Players
+
+	for _, a := range db.Accounts {
+		if a.Name == strings.ToUpper(account) {
+			if err := a.Characters(&pp); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return pp, nil
 }
 
 // CreateCharacter persists the character in the store.
-func (repo *LocalStore) CreateCharacter(account string, character *player.Player) error {
+func (db *LocalStore) CreateCharacter(account string, character *player.Player) error {
 	panic("not implemented") // TODO: Implement
 }
 
 // DeleteCharacter removes character from db.
-func (repo *LocalStore) DeleteCharacter(characterID int) error {
+func (db *LocalStore) DeleteCharacter(characterID int) error {
 	panic("not implemented") // TODO: Implement
 }
 
 // CreateAccount creates an account with SRP6 encoded password (salt, verifier).
-func (repo *LocalStore) CreateAccount(name string, salt string, verifier string) (*store.Account, error) {
+func (db *LocalStore) CreateAccount(acc *store.Account) error {
 	a := &Account{
-		ID:       xid.New().String(),
-		Name:     name,
-		Salt:     salt,
-		Verifier: verifier,
+		ID:        xid.New().String(),
+		Name:      acc.Name,
+		Email:     acc.Email,
+		Salt:      acc.Salt.Text(16),
+		Verifier:  acc.Verifier.Text(16),
+		CreatedAt: acc.CreatedAt,
+		LastLogin: acc.LastLogin,
+		Activated: acc.Activated,
+		BanInfo:   acc.Ban,
 	}
 
-	repo.Accounts = append(repo.Accounts, a)
+	acc.ID = a.ID
 
-	sa, _ := store.NewAccount(name, salt, verifier)
+	db.Accounts = append(db.Accounts, a)
 
-	return sa, nil
+	return nil
 }
