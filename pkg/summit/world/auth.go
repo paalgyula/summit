@@ -4,8 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"strings"
 
-	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/paalgyula/summit/pkg/wow/wotlk"
@@ -101,6 +102,10 @@ type BillingDetails struct {
 	BillingTimeRested    uint32
 }
 
+// AuthSessionHandler handling auth session, exchanging session token from
+// logon server and checks for auth proof, then initializes the wowcrypt
+// two way packet header encryption.
+//
 //nolint:godox,errcheck
 func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	reader := wow.NewPacketReader(data)
@@ -108,30 +113,33 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 
 	pkt.ReadPacket(reader)
 
-	// TODO: rewrite back from singleton to instance based DB
-	acc := db.GetInstance().FindAccount(pkt.AccountName)
-	if acc != nil {
-		gc.acc = acc
+	// Call back to logon server to retrive the session key
+	authSession := gc.ws.GetAuthSession(pkt.AccountName)
+	if authSession != nil {
+		gc.AccountName = strings.ToLower(authSession.AccountName)
+		gc.sessionKey, _ = new(big.Int).SetString(authSession.SessionKey, 16)
 	}
 
 	// TODO: implement auth proof calculation
 	// proof := crypt.AuthSessionProof(acc.Name, gc.serverSeed, pkt.ClientSeed, []byte(acc.Session))
 
 	gc.log.Error().Msg("digest calculation not implemented yet, allowing all clients!!!")
-	// gc.log.Warn().Msgf("%s ServerSeed: 0x%x SKey: %s", pkt.String(), gc.serverSeed, acc.Session)
-	gc.log.Warn().Msgf("%s ServerSeed: 0x%x SKey: %s", pkt.String(), 0x00, acc.Session)
+	gc.log.Trace().Msgf("%s ServerSeed: 0x%x SKey: %s",
+		pkt.String(), gc.serverSeed, authSession.SessionKey)
 
-	gc.log = gc.log.With().Str("acc", gc.acc.Name).Logger()
+	gc.log = gc.log.With().Str("acc", gc.AccountName).Logger()
 
 	var err error
 
-	gc.crypt, err = crypt.NewWowcrypt(acc.SessionKey(), 1024)
+	gc.crypt, err = crypt.NewWowcrypt(gc.sessionKey, 1024)
 	if err != nil {
 		panic(err)
 	}
 
 	//nolint:varnamelen
 	p := wow.NewPacket(wow.ServerAuthResponse)
+
+	// TODO: Implement server queuing
 
 	queued := false
 

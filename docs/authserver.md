@@ -32,7 +32,6 @@ import (
 	"syscall"
 
 	"github.com/paalgyula/summit/docs"
-	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/rs/zerolog"
@@ -80,7 +79,6 @@ func main() {
 	<-done
 
 	log.Info().Msg("Shutting down")
-  // 	db.GetInstance().SaveAll()
 }
 ```
 

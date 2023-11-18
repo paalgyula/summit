@@ -10,9 +10,9 @@ import (
 )
 
 func (gc *GameClient) ListCharacters() {
-	var players []*player.Player
+	var players player.Players
 
-	if err := gc.acc.Characters(&players); err != nil {
+	if err := gc.ws.GetCharacters(gc.AccountName, &players); err != nil {
 		log.Error().Err(err).Msg("cannot get players from database")
 	}
 
@@ -94,12 +94,8 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 
 	p.InitInventory(pci.Inventory)
 
-	var players player.Players
-
-	_ = gc.acc.Characters(&players)
-	players.Add(&p)
-
-	gc.acc.UpdateCharacters(players)
+	// TODO: error check
+	_ = gc.ws.CreateCharacter(gc.AccountName, &p)
 
 	res := []byte{0x00} // OK :)
 

@@ -50,7 +50,7 @@ func TestReadOutfitData(t *testing.T) {
 	assert.EqualValues(t, 1, hw.RaceID)
 	assert.EqualValues(t, 0, hw.Gender)
 
-	assert.Equal(t, []int32{38, 39, 40}, hw.DisplayItemID)
+	assert.Equal(t, []int32{9891, 9892, 10141, -1, 2380, -1, -1, 6418}, hw.DisplayItemID[:8])
 
 	// for i, csoe := range data {
 	// 	fmt.Printf("%04d. %+v\n", i, csoe)

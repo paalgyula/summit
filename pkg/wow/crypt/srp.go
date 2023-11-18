@@ -32,6 +32,14 @@ type SRP6 struct {
 	B, b *big.Int
 }
 
+// NewWoWSRP6 initialize wow's SRP6 pre-filled variables.
+func NewWoWSRP6() *SRP6 {
+	n := new(big.Int)
+	n.SetString("62100066509156017342069496140902949863249758336000796928566441170293728648119", 10)
+
+	return NewSRP6(int64(7), int64(3), n)
+}
+
 // NewSRP6 initializes a new SRP6 instance.
 func NewSRP6(g, k int64, N *big.Int) *SRP6 {
 	//nolint:exhaustruct
@@ -242,6 +250,17 @@ func (s *SRP6) CalculateClientSessionKey(salt, B *big.Int, I, P string) (*big.In
 
 // CalculateServerSessionKey takes as input the client's proof and calculates the
 // persistent session key.
+// The function parameters are:
+//
+//   - A: Client's public key
+//   - v: user's verifier
+//   - salt: user's generated salt
+//   - accountName: user's accout name or email
+//
+// The two return values are:
+//
+//	K - Caclulated session key
+//	M - Proof verification
 func (s *SRP6) CalculateServerSessionKey(A, v, salt *big.Int, accountName string) (*big.Int, *big.Int) {
 	u := s.RandomScrambling(A, s.B)
 

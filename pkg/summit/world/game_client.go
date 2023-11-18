@@ -4,12 +4,12 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"runtime/debug"
 	"sync"
 	"time"
 
-	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
@@ -19,11 +19,6 @@ import (
 )
 
 var ErrCannotReadHeader = errors.New("cannot read opcode")
-
-type SessionManager interface {
-	AddClient(gc *GameClient)
-	Disconnected(reason string)
-}
 
 type GameClient struct {
 	ID  string
@@ -39,7 +34,10 @@ type GameClient struct {
 	writeLock sync.Mutex
 
 	crypt *crypt.WowCrypt
-	acc   *db.Account
+
+	// These is comes from the login (auth) server
+	AccountName string
+	sessionKey  *big.Int
 
 	ws SessionManager
 
@@ -228,17 +226,9 @@ func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 }
 
 func (gc *GameClient) SessionKey() []byte {
-	return gc.acc.SessionKey().Bytes()
+	return gc.sessionKey.Bytes()
 }
 
 func (gc *GameClient) Close() error {
 	return gc.n.Close() //nolint:wrapcheck
-}
-
-func (gc *GameClient) AccountName() string {
-	if gc.acc != nil {
-		return gc.acc.Name
-	}
-
-	return ""
 }

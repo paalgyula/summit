@@ -48,8 +48,6 @@ func (db *LocalStore) FindAccount(name string) *store.Account {
 		}
 	}
 
-	log.Info().Msgf("account %s not found", name)
-
 	return nil
 }
 

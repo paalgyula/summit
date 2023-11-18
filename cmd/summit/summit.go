@@ -4,12 +4,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/paalgyula/summit/docs"
-	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/store/localdb"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/rs/zerolog"
@@ -17,17 +18,21 @@ import (
 )
 
 func main() {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}).
+		With().
+		Caller().
+		Logger()
 
 	log.Info().
 		Str("build", docs.BuildInfo()).
 		Msg("Starting summit wow server")
-	db.InitYamlDatabase()
+
+	store := localdb.InitYamlDatabase("summit.yaml")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := world.StartServer(ctx, "0.0.0.0:5002"); err != nil {
+	if err := world.StartServer(ctx, "0.0.0.0:5002", store, store); err != nil {
 		panic(err)
 	}
 
@@ -46,7 +51,15 @@ func main() {
 		},
 	}
 
-	server, err := auth.NewServer("0.0.0.0:5000", auth.WithRealmProvider(rp))
+	l, err := net.Listen("tcp", "127.0.0.1:4999")
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot create management listener")
+	}
+
+	server, err := auth.NewServer("0.0.0.0:5000", store,
+		auth.WithRealmProvider(rp),
+		auth.WithManagement(l),
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -67,5 +80,4 @@ func main() {
 	<-done
 
 	log.Info().Msg("Shutting down")
-	db.GetInstance().SaveAll()
 }

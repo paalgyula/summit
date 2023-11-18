@@ -108,7 +108,7 @@ func (wc *WorldClient) handlePacket(oc wow.OpCode, size int) {
 
 		// * generate session proof for login
 		digest := crypt.AuthSessionProof(
-			wc.client.AccountName(),
+			wc.client.AccountName,
 			wc.serverSeed,
 			cs,
 			wc.client.SessionKey(),
@@ -118,7 +118,7 @@ func (wc *WorldClient) handlePacket(oc wow.OpCode, size int) {
 		cas := world.ClientAuthSessionPacket{
 			ClientBuild:     12340,
 			ServerID:        0x0,
-			AccountName:     wc.client.AccountName(),
+			AccountName:     wc.client.AccountName,
 			LoginServerType: 0,
 			ClientSeed:      cs,
 			RegionID:        0x00,

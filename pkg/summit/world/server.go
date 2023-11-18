@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -26,18 +26,21 @@ type Server struct {
 	clients sync.Map
 
 	ctx context.Context
-	db  *db.Database
 	l   net.Listener
 	log zerolog.Logger
+
+	// Database access
+	characterStore store.CharacterRepo
+	worldStore     store.WorldRepo
 
 	bs *babysocket.Server
 
 	data *basedata.Store
 }
 
-func StartServer(ctx context.Context, listenAddress string) error {
-	db := db.GetInstance()
-
+func StartServer(ctx context.Context, listenAddress string,
+	worldRepo store.WorldRepo, characterRepo store.CharacterRepo,
+) error {
 	data, err := basedata.LoadFromFile("summit.dat")
 	if err != nil {
 		return fmt.Errorf("world.StartServer: %w", err)
@@ -45,10 +48,12 @@ func StartServer(ctx context.Context, listenAddress string) error {
 
 	//nolint:exhaustruct
 	worldServer := &Server{
-		db:   db,
 		log:  log.With().Str("server", "world").Caller().Logger(),
 		ctx:  ctx,
 		data: data,
+
+		characterStore: characterRepo,
+		worldStore:     worldRepo,
 
 		clients: sync.Map{},
 	}
@@ -113,7 +118,7 @@ func (ws *Server) AddClient(gc *GameClient) {
 	})
 
 	ws.log.Debug().Int("clients", count).
-		Str("acc", gc.AccountName()).
+		Str("acc", gc.AccountName).
 		Msgf("client added to set with id: %s", gc.ID)
 }
 
@@ -129,16 +134,15 @@ func (ws *Server) Stats() {
 func (ws *Server) Run() {
 	ticker := time.NewTicker(time.Second * 20)
 
-	defer ws.db.SaveAll()
 	defer ws.l.Close()
-	defer log.Warn().Msg("world server stopped")
+	defer ws.log.Warn().Msg("world server stopped")
 
 	for {
 		select {
 		case <-ticker.C:
 			// log.Info().Msg("Garbage collector timer: unimplemented")
 			// ws.Stats()
-			ws.db.SaveAll()
+			// ws.SaveAll()
 		case <-ws.ctx.Done():
 			return
 		}

@@ -1,0 +1,14 @@
+version: v1
+managed:
+  enabled: true
+  go_package_prefix:
+    default: github.com/paalgyula/summit
+plugins:
+  - plugin: buf.build/grpc/go:v1.3.0
+    out: pkg/pb
+    opt:
+      - paths=source_relative
+# dependency
+  - plugin: buf.build/protocolbuffers/go:v1.31.0
+    opt: paths=source_relative
+    out: pkg/pb
