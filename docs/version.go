@@ -3,16 +3,23 @@ package docs
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"time"
 )
 
+func init() {
+	if Buildhost == "-" {
+		Buildhost, _ = os.Hostname()
+	}
+}
+
 var (
 	Version   = "dev"
-	Branch    = "master"
-	Gitsha    = "-"
+	Branch    = "development"
+	Gitsha    = ""
 	Compiled  = strconv.FormatInt(time.Now().UnixMilli()/1000, 10)
-	Buildhost = "localhost"
+	Buildhost = "-"
 )
 
 func BuildInfo() string {
@@ -25,11 +32,16 @@ func BuildInfo() string {
 		}
 	}
 
-	return fmt.Sprintf("Version: %s - Built on: %s at %s Branch: %s (%s)",
+	sha := ""
+	if Gitsha != "" {
+		sha = fmt.Sprintf(" sha(%s)", Gitsha)
+	}
+
+	return fmt.Sprintf("Version: %s - Built on: %s at %s Branch: %s%s",
 		Version,
 		Buildhost,
 		compileTime,
 		Branch,
-		Gitsha,
+		sha,
 	)
 }

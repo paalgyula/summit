@@ -2,7 +2,6 @@ package babysocket
 
 import (
 	"bytes"
-	"context"
 	"encoding/gob"
 	"fmt"
 	"net"
@@ -25,8 +24,8 @@ type Server struct {
 	cp ClientProvider
 }
 
-func NewServer(ctx context.Context, socketPath string, cp ClientProvider) (*Server, error) {
-	logger := log.With().Ctx(ctx).Str("service", "babysocket").Logger()
+func NewServer(socketPath string, cp ClientProvider) (*Server, error) {
+	logger := log.With().Str("service", "babysocket").Logger()
 
 	_ = os.Remove(socketPath)
 

@@ -6,9 +6,11 @@ import (
 	"net"
 	"os"
 
-	"github.com/paalgyula/summit/pkg/db"
+	"github.com/paalgyula/summit/pkg/store"
+	"github.com/paalgyula/summit/pkg/store/localdb"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -19,7 +21,7 @@ type ProxyServer struct {
 	config LoginServerConfig
 
 	ctx context.Context
-	db  *db.Database
+	db  store.AccountRepo
 	log zerolog.Logger
 
 	// bridge     *Bridge
@@ -35,17 +37,22 @@ type LoginServerConfig struct {
 }
 
 func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig) error {
-	db := db.GetInstance()
+	store := localdb.InitYamlDatabase("summit.yaml")
 
 	//nolint:exhaustruct
 	srv := &ProxyServer{
-		db:     db,
-		log:    log.With().Str("server", "proxy").Caller().Logger(),
+		db: store,
+		log: log.With().
+			Str("service", "proxy").
+			Caller().
+			Logger(),
 		ctx:    ctx,
 		config: config,
 	}
 
-	as, err := auth.NewServer(listenAddress, auth.WithRealmProvider(srv))
+	ms := auth.NewManagementService(store)
+
+	as, err := auth.NewServer(listenAddress, ms, auth.WithRealmProvider(srv))
 	if err != nil {
 		return fmt.Errorf("cannot start auth server: %w", err)
 	}
@@ -112,4 +119,26 @@ func (proxy *ProxyServer) Run() {
 	for range proxy.ctx.Done() {
 		return
 	}
+}
+
+// !
+// ! SessionManager methods
+// !
+
+// GetAuthSession retrives the auth session from login (auth) server.
+func (ws *ProxyServer) GetAuthSession(account string) *auth.Session {
+	panic("not implemented") // TODO: Implement
+}
+
+// GetCharacters fetches the character list (with full character info) from the store.
+func (ws *ProxyServer) GetCharacters(account string, characters *player.Players) (err error) {
+	// *characters, err = ws.characterStore.GetCharacters(account)
+	// return err
+	panic("not implemented") // TODO: Implement
+}
+
+// CreateCharacter saves a new character into the database.
+func (ws *ProxyServer) CreateCharacter(account string, character *player.Player) error {
+	// return ws.characterStore.CreateCharacter(account, character)
+	panic("not implemented") // TODO: Implement
 }

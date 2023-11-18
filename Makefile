@@ -7,9 +7,9 @@ BUILD_TIME=$(shell date '+%s')
 #VERSION ?= $(shell awk '/Release.*=/ { print $$3 }' version/version.go | sed 's/"//g')
 ARCHITECTURES=amd64
 HOST=$(shell hostname)
-
 DOC_PACKAGE=github.com/paalgyula/summit/docs
 LFLAGS ?= -X ${DOC_PACKAGE}.Gitsha=${GIT_SHA} \
+	-X ${DOC_PACKAGE}.Version=prod \
     -X ${DOC_PACKAGE}.Compiled=${BUILD_TIME} \
     -X ${DOC_PACKAGE}.Buildhost=${HOST} \
     -X ${DOC_PACKAGE}.Branch=${GIT_BRANCH}
@@ -20,12 +20,33 @@ BUILDCMD=CGO_ENABLED=0 GOOS=linux go build -a -tags ${TAGS} -ldflags "-s -w ${LF
 
 default: build
 
+## Install dependencies required for code generating
 deps:
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.31.0
 	go install golang.org/x/tools/cmd/stringer@latest
+	go install github.com/josharian/impl@latest
 
-gen: deps
-	go install cmd/datagen/datagen.go
-	go generate ./...
+## Generates interface stubs
+gen: 
+	@echo "Generating database interface stubs"
+	@cd pkg/store/localdb && impl 'db *LocalStore' store.AccountRepo >> localstore.go 
+	@cd pkg/store/localdb && impl 'db *LocalStore' store.CharacterRepo >> localstore.go  
+	@cd pkg/store/localdb && impl 'db *LocalStore' store.WorldRepo >> localstore.go  
+
+	@cd pkg/store/mysqldb && impl 'store *AccountStore' store.AccountRepo >> accountstore.go 
+	@cd pkg/store/mysqldb && impl 'store *CharacterStore' store.CharacterRepo >> characterstore.go  
+	@cd pkg/store/mysqldb && impl 'store *WorldStore' store.WorldRepo >> worldstore.go  
+
+	@echo "Generating world server interface stubs"
+	@cd pkg/summit/world && impl 'ws *Server' world.SessionManager >> sessionmanager.go
+
+	@echo "Generating auth server interface stubs"
+	@cd pkg/summit/auth && impl 'ms *ManagementServiceImpl' ManagementService >> management.go	
+	@cd pkg/summit/auth && impl 'mc *ManagementClient' ManagementService >> management_client.go	
+
+
+	@go install cmd/datagen/datagen.go
+	@go generate ./...
 
 clean:
 	rm -Rf bin/*
@@ -51,6 +72,8 @@ build-dist: clean
 	@$(BUILDCMD) -o bin/datagen cmd/datagen/datagen.go
 	@echo "Done. You can find the compiled binaries in the bin/ folder"
 
-install:
+## Installs dependencies (summit code generation tools) to go's bin folder. Usually to $HOME/go/bin
+install:	
 	@echo "Installing summit tools..."
 	@go install cmd/datagen/datagen.go
+	@go install cmd/summitctl/summitctl.go

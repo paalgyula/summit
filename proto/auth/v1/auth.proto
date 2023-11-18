@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package auth.v1;
+
+// RegistrationStatus status in the Regiester request response.
+enum RegistrationStatus {
+    SUCCESS = 0;
+    EMAIL_ALREADY_EXISTS = 1;
+    WEAK_PASSWORD = 2;
+    INVALID_USERNAME = 3;
+    OTHER_ERROR = 4;
+}
+
+// RegisterRequest request for Register RPC method.
+message RegisterRequest {
+    string username = 1;
+    string password = 2;
+    string email = 3;
+}
+
+// RegisterResponse response for Register rpc call.
+message RegisterResponse {
+    RegistrationStatus status = 1;
+    string error_message = 2;
+}
+
+message GetSessionRequest {
+    string username = 1;
+}
+
+// GetSessionResponse response of GetSession rpc call.
+message GetSessionResponse {
+    // Returns false if the session not found.
+    bool found = 1;
+    // session key encoded in hex.
+    string session_key = 2;
+}
+
+// AuthManagement is a remote management interface to manage 
+// users and realms in the auth server.
+service AuthManagement {
+    // Register try to register an account on the auth server.
+    rpc Regiester(RegisterRequest) returns (RegisterResponse);
+    
+    // GetSession requests the auth session from the auth server.
+    rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+}

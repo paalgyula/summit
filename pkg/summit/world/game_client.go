@@ -4,12 +4,12 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"runtime/debug"
 	"sync"
 	"time"
 
-	"github.com/paalgyula/summit/pkg/db"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
@@ -19,11 +19,6 @@ import (
 )
 
 var ErrCannotReadHeader = errors.New("cannot read opcode")
-
-type SessionManager interface {
-	AddClient(gc *GameClient)
-	Disconnected(reason string)
-}
 
 type GameClient struct {
 	ID  string
@@ -39,7 +34,10 @@ type GameClient struct {
 	writeLock sync.Mutex
 
 	crypt *crypt.WowCrypt
-	acc   *db.Account
+
+	// These is comes from the login (auth) server
+	AccountName string
+	sessionKey  *big.Int
 
 	ws SessionManager
 
@@ -126,10 +124,12 @@ func (gc *GameClient) SendPayload(opcode int, payload []byte) {
 
 	oc := wow.OpCode(opcode)
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%v), payload size: %d packet size: %d",
+		Str("packet", oc.String()).
+		Str("opcode", fmt.Sprintf("0x%04x", oc)).
+		Int("payloadSize", size).
+		Msgf(">> sending packet 0x%04x (%v), packet size: %d",
 			int(oc),
 			oc.String(),
-			size,
 			len(header)+len(payload))
 }
 
@@ -149,8 +149,11 @@ func (gc *GameClient) Send(packet *wow.Packet) {
 	_, err = gc.n.Write(payload)
 
 	oc := wow.OpCode(packet.OpCode())
+
 	gc.log.Trace().Err(err).
-		Msgf(">> sending packet 0x%04x (%s), payload size: %d packet size: %d", int(oc), oc.String(), size, packet.Len())
+		Str("packet", oc.String()).
+		Int("size", packet.Len()).
+		Msgf(">> sending packet 0x%04x", int(oc))
 }
 
 func (gc *GameClient) makeHeader(packetLen int, opCode int) ([]byte, error) {
@@ -188,7 +191,11 @@ func (gc *GameClient) handlePacket() error {
 		return fmt.Errorf("with opcode: %0X, %w", opCode, err)
 	}
 
-	gc.log.Trace().Msgf("<< packet received 0x%04x (%s) size: %d", int(opCode), opCode.String(), len(data))
+	gc.log.Trace().
+		Str("opcode", fmt.Sprintf("0x%04x", int(opCode))).
+		Str("packet", opCode.String()).
+		Int("pktSize", len(data)).
+		Msgf("<< packet received 0x%04x", int(opCode))
 
 	if gc.bs != nil {
 		gc.bs.SendPacketToBabies(gc.ID, int(opCode), data)
@@ -221,24 +228,16 @@ func (gc *GameClient) readHeader() (wow.OpCode, int, error) {
 		return 0, -1, fmt.Errorf("error while reading opcode: %w", err)
 	}
 
-	log.Trace().Msgf("world: decoded opcode: %02x, %v len: %d encrypted: %t\n",
-		opcode, wow.OpCode(opcode), length, gc.crypt != nil)
+	// gc.log.Trace().Msgf("world: decoded opcode: %02x, %v len: %d encrypted: %t",
+	// 	opcode, wow.OpCode(opcode), length, gc.crypt != nil)
 
 	return wow.OpCode(opcode), int(length) - 4, nil
 }
 
 func (gc *GameClient) SessionKey() []byte {
-	return gc.acc.SessionKey().Bytes()
+	return gc.sessionKey.Bytes()
 }
 
 func (gc *GameClient) Close() error {
 	return gc.n.Close() //nolint:wrapcheck
-}
-
-func (gc *GameClient) AccountName() string {
-	if gc.acc != nil {
-		return gc.acc.Name
-	}
-
-	return ""
 }

@@ -25,6 +25,7 @@ linters:
     - depguard
     - containedctx
     - gomnd
+    - godox # There are a lot of TODO messages in the code, which should not be errors
   
   # Enable presets.
   # https://golangci-lint.run/usage/linters
