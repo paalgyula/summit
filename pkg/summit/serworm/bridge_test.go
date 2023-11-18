@@ -21,7 +21,8 @@ func TestConnection(t *testing.T) {
 			Verifier: "3e3f49a5a14a43b870f8de5534e318c63394738c364a71f205a8ba277bb56ff6",
 		})
 
-	as, err := auth.NewServer("localhost:5000", store)
+	ms := auth.NewManagementService(store)
+	as, err := auth.NewServer("127.0.0.1:5000", ms)
 	assert.NoError(t, err)
 
 	defer as.Close()

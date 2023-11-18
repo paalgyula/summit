@@ -63,14 +63,9 @@ func (as *Server) Close() error {
 	return as.logonListener.Close()
 }
 
-func NewServer(listenAddress string, management ManagementService, opts ...ServerOption) (*Server, error) {
-	logonListener, err := net.Listen("tcp4", listenAddress)
-	if err != nil {
-		return nil, fmt.Errorf("logonListener: %w", err)
-	}
-
+func NewServerListener(l net.Listener, management ManagementService, opts ...ServerOption) (*Server, error) {
 	as := &Server{
-		logonListener: logonListener,
+		logonListener: l,
 		rpcListener:   nil, // initializing later
 		management:    management,
 		realmProvider: &StaticRealmProvider{
@@ -88,6 +83,15 @@ func NewServer(listenAddress string, management ManagementService, opts ...Serve
 	go as.StartManagementServer()
 
 	return as, nil
+}
+
+func NewServer(listenAddress string, management ManagementService, opts ...ServerOption) (*Server, error) {
+	logonListener, err := net.Listen("tcp", listenAddress)
+	if err != nil {
+		return nil, fmt.Errorf("logonListener: %w", err)
+	}
+
+	return NewServerListener(logonListener, management, opts...)
 }
 
 // StartManagementServer starts the RPC server if the listener is defined for.

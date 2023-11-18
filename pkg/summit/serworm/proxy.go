@@ -41,13 +41,18 @@ func StartProxy(ctx context.Context, listenAddress string, config LoginServerCon
 
 	//nolint:exhaustruct
 	srv := &ProxyServer{
-		db:     store,
-		log:    log.With().Str("server", "proxy").Caller().Logger(),
+		db: store,
+		log: log.With().
+			Str("service", "proxy").
+			Caller().
+			Logger(),
 		ctx:    ctx,
 		config: config,
 	}
 
-	as, err := auth.NewServer(listenAddress, store, auth.WithRealmProvider(srv))
+	ms := auth.NewManagementService(store)
+
+	as, err := auth.NewServer(listenAddress, ms, auth.WithRealmProvider(srv))
 	if err != nil {
 		return fmt.Errorf("cannot start auth server: %w", err)
 	}

@@ -137,7 +137,7 @@ func (wc *WorldClient) handlePacket(oc wow.OpCode, size int) {
 }
 
 func NewWorldClient(gc *world.GameClient, worldAddress string) (*WorldClient, error) {
-	conn, err := net.Dial("tcp4", worldAddress)
+	conn, err := net.Dial("tcp", worldAddress)
 	if err != nil {
 		return nil, fmt.Errorf("world client: %w", err)
 	}
