@@ -4,6 +4,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/paalgyula/summit/pkg/summit/client"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
@@ -32,7 +33,7 @@ type WorldBridge struct {
 // client: the game client sending the packet.
 // oc: the op opcode of the packet.
 // data: the data block of the packet.
-func (wb *WorldBridge) HandleProxy(_ *world.GameClient, oc wow.OpCode, data []byte) {
+func (wb *WorldBridge) HandleProxy(_ *world.WorldSession, oc wow.OpCode, data []byte) {
 	wow.GetPacketDumper().Write(oc, data)
 }
 
@@ -54,9 +55,9 @@ func (wb *WorldBridge) Start(listener net.Listener, sessionManager world.Session
 			}
 		}
 
-		gc := world.NewGameClient(conn, sessionManager, nil, handlers...)
+		gc := world.NewWorldSession(conn, sessionManager, handlers...)
 
-		_, err = NewWorldClient(gc, wb.serverAddr)
+		_, err = client.NewWorldClient(gc.AccountName, gc.SessionKey.String(), wb.serverAddr)
 		if err != nil {
 			log.Error().Err(err).Send()
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/store/localdb"
 	"github.com/paalgyula/summit/pkg/summit/auth"
+	"github.com/paalgyula/summit/pkg/summit/client"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/rs/zerolog"
@@ -16,7 +17,7 @@ import (
 )
 
 type ProxyServer struct {
-	client *world.GameClient
+	client *world.WorldSession
 
 	config LoginServerConfig
 
@@ -79,7 +80,7 @@ func (proxy *ProxyServer) InitFakeRealmClient() {
 			panic(err)
 		}
 
-		client := NewRealmClient(loginConn, 0x08)
+		client := client.NewRealmClient(loginConn, 0x08)
 
 		realms, err := client.Authenticate(proxy.config.User, proxy.config.Pass)
 		if err != nil {
@@ -103,13 +104,13 @@ func (proxy *ProxyServer) startServers(realms []*auth.Realm) {
 	}
 }
 
-func (proxy *ProxyServer) AddClient(gc *world.GameClient) {
+func (proxy *ProxyServer) AddClient(gc *world.WorldSession) {
 	proxy.client = gc
 	proxy.log.Error().Msgf("client connected, opening bridge for: %s", gc.ID)
 }
 
-func (proxy *ProxyServer) Disconnected(id string) {
-	proxy.log.Debug().Msgf("client disconnected: %s", id)
+func (proxy *ProxyServer) Disconnected(_ *world.WorldSession, reason string) {
+	proxy.log.Debug().Msgf("client disconnected: %s", reason)
 	os.Exit(0)
 }
 

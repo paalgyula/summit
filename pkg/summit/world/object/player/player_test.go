@@ -79,7 +79,7 @@ func TestParseCharEnum(t *testing.T) {
 	p.InitInventory(nil)
 
 	w := wow.NewPacket(0)
-	p.WriteToLogin(w)
+	p.ToCharacterEnum(w)
 
 	fmt.Printf("%s", hex.Dump(w.Bytes()))
 }

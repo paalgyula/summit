@@ -9,10 +9,9 @@ import (
 )
 
 type WorldLocation struct {
-	X, Y, Z     float32
-	Map         uint32
-	Zone        uint32
-	Orientation float32
+	X, Y, Z, O float32
+	Map        uint32
+	Zone       uint32
 }
 
 // Location returns the X, Y, Z coordinates and map ID of a WorldLocation.
@@ -263,7 +262,7 @@ func (p *Player) BuildCreateUpdateForPlayer(target *Player) {
 }
 
 //nolint:errcheck
-func (p *Player) WriteToLogin(w *wow.Packet) {
+func (p *Player) ToCharacterEnum(w *wow.Packet) {
 	w.Write(p.GUID())
 	w.WriteString(p.Name)
 	w.Write(p.Race)

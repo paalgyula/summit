@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func (gc *GameClient) ListCharacters() {
+func (gc *WorldSession) SendCharacterEnum() {
 	var players player.Players
 
 	if err := gc.ws.GetCharacters(gc.AccountName, &players); err != nil {
@@ -26,10 +26,10 @@ func (gc *GameClient) ListCharacters() {
 	_ = pkt.WriteOne(len(players))
 
 	for _, p := range players {
-		p.WriteToLogin(pkt)
+		p.ToCharacterEnum(pkt)
 	}
 
-	gc.Send(pkt)
+	gc.socket.Send(pkt)
 }
 
 type CharacterCreateRequest struct {
@@ -47,7 +47,7 @@ type CharacterCreateRequest struct {
 type CharacterCreateResult uint8
 
 //nolint:godox
-func (gc *GameClient) CreateCharacter(data wow.PacketData) {
+func (gc *WorldSession) CreateCharacter(data wow.PacketData) {
 	r := wow.NewPacketReader(data)
 
 	var characerName string
@@ -62,12 +62,12 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 		LookupCharacterCreateInfo(req.Race, req.Class, req.Gender)
 
 	loc := player.WorldLocation{
-		X:           pci.X,
-		Y:           pci.Y,
-		Z:           pci.Z,
-		Orientation: pci.O,
-		Map:         pci.Map,
-		Zone:        pci.Zone,
+		X:    pci.X,
+		Y:    pci.Y,
+		Z:    pci.Z,
+		O:    pci.O,
+		Map:  pci.Map,
+		Zone: pci.Zone,
 	}
 
 	//nolint:exhaustruct
@@ -97,9 +97,11 @@ func (gc *GameClient) CreateCharacter(data wow.PacketData) {
 	// TODO: error check
 	_ = gc.ws.CreateCharacter(gc.AccountName, &p)
 
-	res := []byte{0x00} // OK :)
+	status := []byte{0x00} // OK :)
 
-	gc.SendPayload(int(wow.ServerCharCreate), res)
+	pkt := wow.NewPacketWithData(wow.ServerCharCreate, status)
 
-	gc.ListCharacters()
+	// Send response, then the new character list
+	gc.socket.Send(pkt)
+	gc.SendCharacterEnum()
 }

@@ -80,10 +80,11 @@ func (ws *Server) Clients() map[string]wow.PayloadSender {
 	ret := map[string]wow.PayloadSender{}
 
 	ws.clients.Range(func(key, value any) bool {
-		v, _ := value.(*GameClient)
-		ck, _ := key.(string)
+		// ! FIXME: babysocket clients should be re-enabled
+		// v, _ := value.(*WorldSession)
+		// ck, _ := key.(string)
 
-		ret[ck] = v
+		// ret[ck] = v
 
 		return true
 	})
@@ -104,11 +105,11 @@ func (ws *Server) startListener() {
 			continue
 		}
 
-		NewGameClient(conn, ws, ws.bs)
+		NewWorldSession(conn, ws)
 	}
 }
 
-func (ws *Server) AddClient(gc *GameClient) {
+func (ws *Server) AddClient(gc *WorldSession) {
 	ws.clients.Store(gc.ID, gc)
 
 	count := 0
@@ -124,9 +125,8 @@ func (ws *Server) AddClient(gc *GameClient) {
 		Msgf("client added to set with id: %s", gc.ID)
 }
 
-func (ws *Server) Disconnected(id string) {
-	ws.clients.Delete(id)
-	ws.log.Debug().Msgf("client disconnected: %s", id)
+func (ws *Server) Disconnected(gc *WorldSession, reason string) {
+	ws.clients.Delete(gc.ID)
 }
 
 func (ws *Server) Stats() {
