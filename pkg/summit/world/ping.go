@@ -2,6 +2,14 @@ package world
 
 import "github.com/paalgyula/summit/pkg/wow"
 
-func (gc *GameClient) PingHandler() {
-	gc.SendPayload(int(wow.ServerPong), make([]byte, 2))
+// PingHandler handles player ping packets.
+func (gc *WorldSession) PingHandler(pkt *wow.Packet) {
+	pingData := pkt.Bytes()
+
+	// TODO: check for is the ping interval smaller than 27sec
+
+	pongpkt := wow.NewPacket(wow.ServerPong)
+	pongpkt.Write(pingData)
+
+	gc.socket.Send(pongpkt)
 }

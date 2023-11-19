@@ -1,8 +1,6 @@
 package crypt_test
 
 import (
-	"encoding/hex"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -10,24 +8,32 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const testString = "abcdef"
+func TestWoWCrypt(t *testing.T) {
+	testString := []byte("Macilaci Malnazik")
 
-// ! TODO: write proper tests for crypt/decrypt
-
-func TestCrypt(t *testing.T) {
 	key := new(big.Int)
 	key.SetString("218a3599d73b4b21f5c4eead810107f3c5f3eaa7801d609e3adac39239683395d42caa2c36ee79fd", 16)
 
-	encrypt, err := crypt.NewWowcrypt(key, 1024)
+	serverCrypt, err := crypt.NewServerWowcrypt(key, 1024)
 	assert.NoError(t, err)
 
-	enc := encrypt.Encrypt([]byte(testString))
-
-	err = encrypt.Reset()
+	clientCrypt, err := crypt.NewClientWoWCrypt(key, 1024)
 	assert.NoError(t, err)
 
-	encrypt.Skip(1024)
+	t.Run("TestServerToClient", func(t *testing.T) {
+		encrypted := serverCrypt.Encrypt(testString)
 
-	bb2 := encrypt.Encrypt(enc)
-	fmt.Printf("%s", hex.Dump(bb2))
+		decrypted := clientCrypt.Decrypt(encrypted)
+
+		// Server to Client encrypt-decrypt
+		assert.Equal(t, decrypted, testString)
+	})
+
+	t.Run("TestClientToServer", func(t *testing.T) {
+		enc := clientCrypt.Encrypt(testString)
+		dec := serverCrypt.Decrypt(enc)
+
+		// Client to Server encrypt-decrypt
+		assert.Equal(t, testString, dec)
+	})
 }

@@ -1,11 +1,10 @@
 //nolint:all
-package serworm
+package client
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"math/big"
 	"net"
@@ -28,11 +27,11 @@ type RealmPacket interface {
 type RealmClient struct {
 	writeMutex sync.Mutex
 
-	conn    net.Conn
-	version int
+	conn  net.Conn
+	build int
 
 	srp        *crypt.SRP6
-	sessionKey *big.Int
+	SessionKey *big.Int
 
 	log zerolog.Logger
 
@@ -45,8 +44,8 @@ type RealmClient struct {
 func NewRealmClient(conn net.Conn, version int) *RealmClient {
 	rs := &RealmClient{ //nolint:exhaustruct
 		conn:         conn,
-		version:      version,
-		log:          log.With().Str("module", "realmclient").Logger(),
+		build:        version,
+		log:          log.With().Caller().Str("service", "realmclient").Logger(),
 		realmChannel: make(chan []*auth.Realm),
 	}
 
@@ -81,8 +80,8 @@ func (pw *RealmClient) Send(pkt RealmPacket) {
 	buf.WriteByte(byte(pkt.OpCode()))
 
 	if pkt.OpCode() == auth.AuthLoginChallenge {
-		// Write version + length when sending logon challenge
-		buf.WriteByte(byte(pw.version))
+		// Write version + length when sending login challenge
+		buf.WriteByte(byte(pw.build))
 		binary.Write(buf, binary.LittleEndian, uint16(len(bb)))
 	}
 
@@ -92,7 +91,7 @@ func (pw *RealmClient) Send(pkt RealmPacket) {
 	defer pw.writeMutex.Unlock()
 
 	fmt.Println(">> Sending:", pkt.OpCode())
-	fmt.Printf("%s", hex.Dump(buf.Bytes()))
+	// fmt.Printf("%s", hex.Dump(buf.Bytes()))
 
 	buf.WriteTo(pw.conn)
 }
@@ -100,7 +99,7 @@ func (pw *RealmClient) Send(pkt RealmPacket) {
 func (pw *RealmClient) SendChallenge(user string) {
 	pw.log.Info().Msgf("logging in as user: %s", user)
 	user = strings.ToUpper(user)
-	clp := auth.NewClientLoginChallenge(user)
+	clp := auth.NewClientLoginChallenge(user, pw.build, [3]byte{3, 3, 5})
 
 	pw.Send(clp)
 }
@@ -131,10 +130,10 @@ func (pw *RealmClient) HandleLoginChallenge() {
 	pass := strings.ToUpper(pw.pass)
 	K, M := pw.srp.CalculateClientSessionKey(&slc.Salt, &slc.B, pw.user, pass)
 
-	fmt.Println("s: ", slc.Salt.Text(16))
-	fmt.Println("K: ", K.Text(16))
-	fmt.Println("B: ", slc.B.Text(16))
-	fmt.Println("M: ", M.Text(16))
+	// fmt.Println("s: ", slc.Salt.Text(16))
+	// fmt.Println("K: ", K.Text(16))
+	// fmt.Println("B: ", slc.B.Text(16))
+	// fmt.Println("M: ", M.Text(16))
 
 	proof := auth.ClientLoginProof{
 		A:             *A,
@@ -144,7 +143,7 @@ func (pw *RealmClient) HandleLoginChallenge() {
 		SecurityFlags: 0,
 	}
 
-	pw.sessionKey = K
+	pw.SessionKey = K
 	pw.Send(proof)
 }
 
@@ -152,7 +151,7 @@ func (pw *RealmClient) HandleProof() {
 	var proof auth.ServerLoginProof
 	_ = proof.ReadPacket(pw.conn)
 
-	log.Debug().Msgf("proof response received: %+v", proof)
+	log.Debug().Msgf("proof response received: 0x%02x", proof.StatusCode)
 
 	if proof.StatusCode != 0 {
 		log.Fatal().Msgf("cannot proof user: %v", auth.ChallengeStatus(proof.StatusCode))
@@ -184,7 +183,7 @@ func (pw *RealmClient) HandlePackets() {
 		case auth.RealmList:
 			pw.HandleRealmlist()
 		default:
-			pw.log.Fatal().Msgf("packet not handled: %v(0x%02x)", cmd, int(cmd))
+			pw.log.Error().Msgf("packet not handled: %v(0x%02x)", cmd, int(cmd))
 		}
 	}
 }

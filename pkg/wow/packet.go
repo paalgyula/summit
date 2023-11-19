@@ -11,6 +11,17 @@ type Packet struct {
 	opcode OpCode
 }
 
+// NewPacketWithData initializes a new packet
+func NewPacketWithData(opcode OpCode, data []byte) *Packet {
+	buf := bytes.NewBuffer(data)
+
+	return &Packet{
+		opcode: opcode,
+		buf:    buf,
+	}
+}
+
+// NewPacket initializes a new empty packet.
 func NewPacket(opCode OpCode) *Packet {
 	var buf bytes.Buffer
 
@@ -18,6 +29,11 @@ func NewPacket(opCode OpCode) *Packet {
 		opcode: opCode,
 		buf:    &buf,
 	}
+}
+
+// Opcode returns packet's opcode.
+func (w *Packet) Opcode() OpCode {
+	return w.opcode
 }
 
 func (w *Packet) OpCode() int {
@@ -97,6 +113,11 @@ func (w *Packet) Bytes() []byte {
 
 func (w *Packet) Len() int {
 	return w.buf.Len()
+}
+
+// Reader creates a reader from the packet.
+func (w *Packet) Reader() *PacketReader {
+	return NewPacketReader(w.buf.Bytes())
 }
 
 // PadBigIntBytes takes as input an array of bytes and a size and ensures that the

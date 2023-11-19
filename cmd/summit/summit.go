@@ -50,7 +50,7 @@ func main() {
 
 	ams := auth.NewManagementService(store)
 
-	server, err := auth.NewServer("0.0.0.0:5000", ams,
+	server, err := auth.NewServer("127.0.0.1:5000", ams,
 		auth.WithRealmProvider(rp),
 		auth.WithManagement(l),
 	)

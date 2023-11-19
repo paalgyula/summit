@@ -12,7 +12,7 @@ import (
 	"github.com/paalgyula/summit/pkg/wow/wotlk"
 )
 
-func (gc *GameClient) sendAuthChallenge() {
+func (gc *WorldSession) sendAuthChallenge() {
 	// 0x1ec
 	w := wow.NewPacket(wow.ServerAuthChallenge)
 
@@ -23,7 +23,7 @@ func (gc *GameClient) sendAuthChallenge() {
 	_ = w.Write(gc.serverSeed) // This is a seed
 	_ = w.Write(encryptSeed)
 
-	gc.Send(w)
+	gc.socket.Send(w)
 }
 
 type ClientAuthSessionPacket struct {
@@ -96,18 +96,12 @@ func (cas *ClientAuthSessionPacket) String() string {
 	)
 }
 
-type BillingDetails struct {
-	BillingTimeRemaining uint32
-	BillingFlags         uint8
-	BillingTimeRested    uint32
-}
-
 // AuthSessionHandler handling auth session, exchanging session token from
 // logon server and checks for auth proof, then initializes the wowcrypt
 // two way packet header encryption.
 //
 //nolint:godox,errcheck
-func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
+func (gc *WorldSession) AuthSessionHandler(data wow.PacketData) {
 	reader := wow.NewPacketReader(data)
 	pkt := new(ClientAuthSessionPacket)
 
@@ -117,7 +111,7 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 	authSession := gc.ws.GetAuthSession(pkt.AccountName)
 	if authSession != nil {
 		gc.AccountName = strings.ToLower(authSession.AccountName)
-		gc.sessionKey, _ = new(big.Int).SetString(authSession.SessionKey, 16)
+		gc.SessionKey, _ = new(big.Int).SetString(authSession.SessionKey, 16)
 	}
 
 	// TODO: implement auth proof calculation
@@ -129,12 +123,8 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 
 	gc.log = gc.log.With().Str("acc", gc.AccountName).Logger()
 
-	var err error
-
-	gc.crypt, err = crypt.NewWowcrypt(gc.sessionKey, 1024)
-	if err != nil {
-		panic(err)
-	}
+	wowcrypt, _ := crypt.NewServerWowcrypt(gc.SessionKey, 1024)
+	gc.socket.SetCrypt(wowcrypt, true)
 
 	//nolint:varnamelen
 	p := wow.NewPacket(wow.ServerAuthResponse)
@@ -151,7 +141,7 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 		p.WriteOne(wotlk.AUTH_OK)
 	}
 
-	p.Write(&BillingDetails{
+	p.Write(&wotlk.BillingDetails{
 		BillingTimeRemaining: 0,
 		BillingFlags:         0,
 		BillingTimeRested:    0,
@@ -166,5 +156,5 @@ func (gc *GameClient) AuthSessionHandler(data wow.PacketData) {
 		p.WriteOne(0x00) // ? Whats this
 	}
 
-	gc.Send(p)
+	gc.socket.Send(p)
 }

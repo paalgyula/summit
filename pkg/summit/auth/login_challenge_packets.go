@@ -3,6 +3,7 @@ package auth
 import (
 	"io"
 	"math/big"
+	"net"
 	"strings"
 
 	"github.com/paalgyula/summit/pkg/wow"
@@ -17,20 +18,23 @@ type ClientLoginChallenge struct {
 	OS              string
 	Locale          string
 	WorldRegionBias uint32
-	IP              [4]uint8
+	IP              []uint8
 	AccountName     string
 }
 
-func NewClientLoginChallenge(accName string) *ClientLoginChallenge {
+func NewClientLoginChallenge(accName string, build int, version [3]byte) *ClientLoginChallenge {
+	ip := net.ParseIP("84.224.232.176")
+	ipbytes := []uint8(ip.To4())
+
 	return &ClientLoginChallenge{
-		GameName:        "WoW\x00",
-		Version:         [3]byte{3, 3, 5},
-		Build:           12340,
-		Platform:        "68x\x00",
-		OS:              "niW\x00",
-		Locale:          "SUne",
+		GameName:        "WoW\x00", // Always WoW
+		Version:         version,
+		Build:           uint16(build), // WOTLK
+		Platform:        "68x\x00",     // x86
+		OS:              "niW\x00",     // Win
+		Locale:          "SUne",        // enUS
 		WorldRegionBias: 0,
-		IP:              [4]uint8{89, 51, 25, 12},
+		IP:              ipbytes,
 		AccountName:     strings.ToUpper(accName),
 	}
 }
@@ -49,7 +53,7 @@ func (p *ClientLoginChallenge) UnmarshalPacket(bb wow.PacketData) error {
 	r.ReadStringFixed(&p.OS, 4)
 	r.ReadStringFixed(&p.Locale, 4)
 	r.ReadL(&p.WorldRegionBias)
-	r.ReadL(&p.IP)
+	p.IP, _ = r.ReadNBytes(4)
 
 	var size uint8
 	_ = r.ReadB(&size)

@@ -7,10 +7,10 @@ import (
 
 type SessionManager interface {
 	// AddClient adds client to the connection set.
-	AddClient(gc *GameClient)
+	AddClient(gc *WorldSession)
 
 	// Removes and finalizes the connection.
-	Disconnected(reason string)
+	Disconnected(gc *WorldSession, reason string)
 
 	// GetAuthSession retrives the auth session from login (auth) server.
 	GetAuthSession(account string) *auth.Session

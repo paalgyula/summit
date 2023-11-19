@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net"
 	"strings"
 	"sync"
@@ -51,7 +50,7 @@ func NewAuthConnection(c net.Conn, rp RealmProvider,
 		mgmt: management,
 		id:   xid.New().String(),
 
-		srp: crypt.NewSRP6(7, 3, big.NewInt(0)),
+		srp: crypt.NewWoWSRP6(),
 		rp:  rp,
 
 		outLock: sync.Mutex{},
