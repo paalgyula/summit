@@ -1,6 +1,8 @@
 package world
 
 import (
+	"strings"
+
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 )
@@ -30,7 +32,9 @@ func (ws *Server) GetAuthSession(account string) *auth.Session {
 	sess := ws.authManagement.GetSession(account)
 
 	if sess != nil {
-		ws.log.Trace().Interface("authSession", sess).Msgf("session found")
+		ws.log.Trace().
+			Str("account", strings.ToLower(account)).
+			Msgf("session found")
 	}
 
 	return sess

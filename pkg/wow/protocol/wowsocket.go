@@ -17,7 +17,7 @@ const ServerPacketHeaderSize = 6
 
 // NewWoWSocket initializes a new socket reader with an easy-to-use
 // channel based packet handler.
-func NewWoWSocket(connection io.ReadWriteCloser) *WoWSocket {
+func NewWoWSocket(conn io.ReadWriteCloser) *WoWSocket {
 	ws := &WoWSocket{
 		crypt:        nil,
 		cryptEnabled: false,
@@ -26,9 +26,9 @@ func NewWoWSocket(connection io.ReadWriteCloser) *WoWSocket {
 		sendChan:    make(chan *wow.Packet),
 		receiveChan: make(chan *wow.Packet),
 
-		input: wow.NewConnectionReader(connection),
+		input: wow.NewConnectionReader(conn),
 
-		connection: connection,
+		connection: conn,
 	}
 
 	// Start send/receive
@@ -52,77 +52,77 @@ type WoWSocket struct {
 }
 
 // SetCrypt sets the WoWCrypt instance, and it can be turned on at the same time.
-func (gc *WoWSocket) SetCrypt(crypt *crypt.WowCrypt, enable bool) {
-	gc.crypt = crypt
-	gc.cryptEnabled = enable
+func (ws *WoWSocket) SetCrypt(crypt *crypt.WowCrypt, enable bool) {
+	ws.crypt = crypt
+	ws.cryptEnabled = enable
 }
 
 // EnableCrypt enables the packet header crypt.
-func (gc *WoWSocket) EnableCrypt() {
-	gc.cryptEnabled = true
+func (ws *WoWSocket) EnableCrypt() {
+	ws.cryptEnabled = true
 }
 
 // Close closes the socket, and the send/receive channels.
-func (gc *WoWSocket) Close() error {
-	gc.connection.Close()
+func (ws *WoWSocket) Close() error {
+	ws.connection.Close()
 
-	close(gc.receiveChan)
-	close(gc.sendChan)
+	close(ws.receiveChan)
+	close(ws.sendChan)
 
 	return nil
 }
 
 // Returns a receive channel of packet stream.
-func (gc *WoWSocket) Packets() <-chan *wow.Packet {
-	return gc.receiveChan
+func (ws *WoWSocket) Packets() <-chan *wow.Packet {
+	return ws.receiveChan
 }
 
 // Send sends out the packet.
-func (gc *WoWSocket) Send(pkt *wow.Packet) {
-	gc.sendChan <- pkt
+func (ws *WoWSocket) Send(pkt *wow.Packet) {
+	ws.sendChan <- pkt
 }
 
-func (gc *WoWSocket) SendPayload(pkt *wow.Packet) {
-	header, err := gc.makeHeader(pkt.Opcode(), pkt.Len())
+func (ws *WoWSocket) SendPayload(pkt *wow.Packet) {
+	header, err := ws.makeHeader(pkt.Opcode(), pkt.Len())
 	if err != nil {
-		gc.log.Error().Err(err).Msg("cannot make packet header, dropping client")
-		gc.Close()
+		ws.log.Error().Err(err).Msg("cannot make packet header, dropping client")
+		ws.Close()
 	}
 
-	gc.connection.Write(header)
-	gc.connection.Write(pkt.Bytes())
+	ws.connection.Write(header)
+	ws.connection.Write(pkt.Bytes())
 
-	gc.log.Trace().Err(err).
+	ws.log.Trace().Err(err).
 		Str("packet", pkt.Opcode().String()).
 		Str("opcode", fmt.Sprintf("0x%04x", pkt.OpCode())).
 		Int("size", pkt.Len()).
 		Msgf(">>> %s", pkt.Opcode().String())
 }
 
-// func (gc *WoWSocket) Send(packet *wow.Packet) {
+// func (ws *WoWSocket) Send(packet *wow.Packet) {
 // 	size := packet.Len()
 
-// 	payload, err := gc.makeHeader(size, packet.OpCode())
+// 	payload, err := ws.makeHeader(size, packet.OpCode())
 // 	if err != nil {
-// 		gc.log.Error().Err(err).Msg("cannot make packet header, dropping client")
-// 		gc.Close()
+// 	 ws.log.Error().Err(err).Msg("cannot make packet header, dropping client")
+// 	 ws.Close()
 // 	}
 
-// 	gc.writeLock.Lock()
-// 	defer gc.writeLock.Unlock()
+//  ws.writeLock.Lock()
+// 	defer ws.writeLock.Unlock()
 
 // 	payload = append(payload, packet.Bytes()...)
-// 	_, err = gc.n.Write(payload)
+// 	_, err = ws.n.Write(payload)
 
 // 	oc := wow.OpCode(packet.OpCode())
 
-// 	gc.log.Trace().Err(err).
+//  ws.log.Trace().Err(err).
 // 		Str("packet", oc.String()).
 // 		Int("size", packet.Len()).
 // 		Msgf(">> sending packet 0x%04x", int(oc))
 // }
 
-func (gc *WoWSocket) makeHeader(opcode wow.OpCode, dataSize int) ([]byte, error) {
+func (ws *WoWSocket) makeHeader(opcode wow.OpCode, dataSize int) ([]byte, error) {
 	w := wow.NewPacket(opcode)
 
 	_ = w.Write(uint16(dataSize+2), binary.BigEndian) // Packet length
@@ -130,64 +130,64 @@ func (gc *WoWSocket) makeHeader(opcode wow.OpCode, dataSize int) ([]byte, error)
 
 	header := w.Bytes()
 
-	if gc.crypt != nil && gc.cryptEnabled {
-		header = gc.crypt.Encrypt(header)
+	if ws.crypt != nil && ws.cryptEnabled {
+		header = ws.crypt.Encrypt(header)
 	}
 
 	return header, nil
 }
 
 // goroutine for sending out the packets from the receive channel.
-func (gc *WoWSocket) connectionWriter() {
-	for p := range gc.sendChan {
-		gc.SendPayload(p)
+func (ws *WoWSocket) connectionWriter() {
+	for p := range ws.sendChan {
+		ws.SendPayload(p)
 	}
 }
 
 // goroutine for reading packets and send it to the
 // receiveChan channel for processing.
-func (gc *WoWSocket) connectionReader() {
+func (ws *WoWSocket) connectionReader() {
 	for {
 		// Read the incoming packet data and
 		// decode the header when crypt is enabled
-		opCode, data, err := gc.readPacket()
+		opCode, data, err := ws.readPacket()
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-				log.Error().Msg("connection closed")
+				ws.log.Error().Msg("connection closed")
 
-				_ = gc.Close()
+				_ = ws.Close()
 
 				return
 			}
 
-			log.Error().Err(err).Msg("packet read error occured")
+			ws.log.Error().Err(err).Msg("packet read error occured")
 
 			continue
 		}
 
-		gc.log.Trace().
+		ws.log.Trace().
 			Str("opcode", fmt.Sprintf("0x%04x", int(opCode))).
 			Str("packet", opCode.String()).
 			Int("size", len(data)).
 			Msgf("<<< %s", opCode.String())
 
 		// TODO: re-implement babysockets
-		// if gc.bs != nil {
-		// 	gc.bs.SendPacketToBabies(gc.ID, int(opCode), data)
+		// if ws.bs != nil {
+		//  ws.bs.SendPacketToBabies(gc.ID, int(opCode), data)
 		// }
 
-		gc.receiveChan <- wow.NewPacketWithData(opCode, data)
+		ws.receiveChan <- wow.NewPacketWithData(opCode, data)
 	}
 }
 
-func (gc *WoWSocket) readPacket() (wow.OpCode, []byte, error) {
-	header, err := gc.input.ReadNBytes(ServerPacketHeaderSize)
+func (ws *WoWSocket) readPacket() (wow.OpCode, []byte, error) {
+	header, err := ws.input.ReadNBytes(ServerPacketHeaderSize)
 	if err != nil {
 		return 0, nil, fmt.Errorf("wowsocket.readPacket: %w", err)
 	}
 
-	if gc.crypt != nil {
-		header = gc.crypt.Decrypt(header)
+	if ws.crypt != nil {
+		header = ws.crypt.Decrypt(header)
 	}
 
 	r := wow.NewPacketReader(header)
@@ -204,13 +204,13 @@ func (gc *WoWSocket) readPacket() (wow.OpCode, []byte, error) {
 		return 0, nil, fmt.Errorf("reading opcode: %w", err)
 	}
 
-	// gc.log.Trace().Msgf("world: decoded opcode: %02x, %v len: %d encrypted: %t",
-	// 	opcode, wow.OpCode(opcode), length, gc.crypt != nil)
+	// ws.log.Trace().Msgf("world: decoded opcode: %02x, %v len: %d encrypted: %t",
+	// 	opcode, wow.OpCode(opcode), length, ws.crypt != nil)
 
 	dataSize := int(length) + 2 - ServerPacketHeaderSize
 	content := make([]byte, dataSize)
 
-	if err := gc.input.Read(content); err != nil {
+	if err := ws.input.Read(content); err != nil {
 		return 0, nil, fmt.Errorf(
 			"readPacket: content is too small: %w", err)
 	}
