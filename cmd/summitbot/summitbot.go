@@ -30,7 +30,7 @@ func main() {
 
 	flag.Parse()
 
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: ""})
 
 	conn, err := net.Dial("tcp", logonServer)
 	if err != nil {

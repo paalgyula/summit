@@ -45,7 +45,7 @@ func NewRealmClient(conn net.Conn, version int) *RealmClient {
 	rs := &RealmClient{ //nolint:exhaustruct
 		conn:         conn,
 		build:        version,
-		log:          log.With().Caller().Str("service", "realmclient").Logger(),
+		log:          log.With().Str("service", "realmclient").Logger(),
 		realmChannel: make(chan []*auth.Realm),
 	}
 
@@ -90,7 +90,7 @@ func (pw *RealmClient) Send(pkt RealmPacket) {
 	pw.writeMutex.Lock()
 	defer pw.writeMutex.Unlock()
 
-	fmt.Println(">> Sending:", pkt.OpCode())
+	pw.log.Info().Msgf(">> %s", pkt.OpCode().String())
 	// fmt.Printf("%s", hex.Dump(buf.Bytes()))
 
 	buf.WriteTo(pw.conn)
