@@ -1,9 +1,9 @@
-//nolint:testpackage
 package dbc_test
 
 import (
 	"fmt"
 	"os"
+	"path"
 	"testing"
 
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc"
@@ -11,10 +11,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+const dbcBasePath = "../../../../dbc"
+
 func TestGenerate(t *testing.T) {
 	t.Skip("used for local development only")
 
-	f, err := os.Open("../../../../dbc/ChrClasses.dbc")
+	f, err := os.Open(path.Join(dbcBasePath, "ChrClasses.dbc"))
 	assert.NoError(t, err)
 
 	dr, err := dbc.NewReader[wotlk.ChrClassesEntry](f)
@@ -26,10 +28,8 @@ func TestGenerate(t *testing.T) {
 	fmt.Println(dr.Records[1].Name.Value())
 
 	t.Run("CharacterLoad", func(t *testing.T) {
-		base := "../../../../dbc"
-
 		t.Run("CharStartOutfit.dbc", func(t *testing.T) {
-			data, err := dbc.Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", base)
+			data, err := dbc.Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcBasePath)
 			assert.NoError(t, err)
 			assert.Lenf(t, data, 126, "Expected 126 records in CharStartOutfit.dbc")
 		})
@@ -39,9 +39,9 @@ func TestGenerate(t *testing.T) {
 }
 
 func TestReadOutfitData(t *testing.T) {
-	base := "../../../../dbc"
+	t.Skip("used for local development only")
 
-	data, err := dbc.Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", base)
+	data, err := dbc.Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcBasePath)
 	assert.NoError(t, err)
 	assert.Lenf(t, data, 126, "Expected 126 records in CharStartOutfit.dbc")
 
