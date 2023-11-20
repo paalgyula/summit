@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/paalgyula/summit/pkg/store/localdb"
+	"github.com/paalgyula/summit/internal/store/localdb"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/serworm"
 	"github.com/stretchr/testify/assert"

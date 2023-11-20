@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/paalgyula/summit/docs"
-	"github.com/paalgyula/summit/pkg/store/localdb"
+	"github.com/paalgyula/summit/internal/store/localdb"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/rs/zerolog"
