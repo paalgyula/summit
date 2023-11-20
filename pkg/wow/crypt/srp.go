@@ -1,6 +1,3 @@
-// The Secure Remote Password protocol (SRP) is an augmented password-authenticated key exchange (PAKE) protocol,
-// specifically designed to work around existing patents.
-//
 //nolint:all
 package crypt
 
@@ -11,6 +8,8 @@ import (
 	"math/big"
 )
 
+// The Secure Remote Password protocol (SRP) is an augmented password-authenticated key exchange (PAKE) protocol,
+// specifically designed to work around existing patents.
 type SRP6 struct {
 	// G is the SRP Generator; the base of many mathematical expressions.
 	g int64
