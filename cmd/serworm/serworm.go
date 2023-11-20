@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -46,12 +45,11 @@ func main() {
 	go func() {
 		sig := <-sigCh
 
-		fmt.Println()
-		fmt.Println(sig)
+		log.Info().Msgf("signal received: %s", sig)
 		done <- true
 	}()
 
 	<-done
 
-	log.Info().Msg("Shutting down")
+	log.Info().Msg("shutting down serworm")
 }
