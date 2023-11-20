@@ -82,7 +82,7 @@ func NewServerListener(l net.Listener, management ManagementService, opts ...Ser
 	go as.Run()
 	go as.StartManagementServer()
 
-	as.log.Info().Msgf("world server is listening on: %s", l.Addr().String())
+	as.log.Info().Msgf("auth server is listening on: %s", l.Addr().String())
 
 	return as, nil
 }

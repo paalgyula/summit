@@ -10,6 +10,7 @@ dist/
 summit.dat
 
 # Configs
-summitbot.yaml
+summit-bot.yaml
 summit-world.yaml
 summit-auth.yaml
+summit-client.yaml
