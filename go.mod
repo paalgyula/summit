@@ -1,7 +1,7 @@
 module github.com/paalgyula/summit
 
 go 1.21
-toolchain go1.22.5
+toolchain go1.23.7
 
 require (
 	github.com/rs/xid v1.6.0
@@ -9,7 +9,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.19.0
 	github.com/stretchr/testify v1.10.0
-	golang.org/x/text v0.21.0
+	golang.org/x/text v0.23.0
 	google.golang.org/grpc v1.70.0
 	google.golang.org/protobuf v1.36.4
 	gopkg.in/yaml.v3 v3.0.1
