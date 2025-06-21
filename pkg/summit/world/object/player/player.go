@@ -33,8 +33,12 @@ func (l *WorldLocation) Distance(point *WorldLocation) float64 {
 
 func NewPlayer() *Player {
 	//nolint:exhaustruct
-	p := &Player{}
-
+	p := &Player{
+		Object: object.NewObject(), // Initialize embedded Object
+		Unit:   object.NewUnit(),   // Initialize embedded Unit
+	}
+	// Further default initialization for Player specific fields can go here if needed.
+	// For example, p.Object.SetType(object.TypePlayer) if such a method and type exist.
 	return p
 }
 
@@ -166,6 +170,50 @@ type Player struct {
 	FirstLogin uint8 // Boolean, but uint8 :D
 
 	Pet Pet
+
+	// Movement related fields
+	movementInfo wow.MovementInfo // Stores the last known movement state from client or server update
+	// We can also store pitch separately if it's not always part of Orientation (O) in all contexts
+	// CurrentPitch float32
+}
+
+// UpdatePosition updates the player's core location and orientation.
+// It might also update the internal MovementInfo.
+func (p *Player) UpdatePosition(x, y, z, o, pitch float32) {
+	p.Location.X = x
+	p.Location.Y = y
+	p.Location.Z = z
+	p.Location.O = o
+	// p.CurrentPitch = pitch // If storing pitch separately
+
+	// Update internal movementInfo for consistency if needed
+	p.movementInfo.X = x
+	p.movementInfo.Y = y
+	p.movementInfo.Z = z
+	p.movementInfo.O = o
+	p.movementInfo.Pitch = pitch // Store pitch in movementInfo
+}
+
+// SetMovementFlags updates the player's movement flags.
+func (p *Player) SetMovementFlags(flags wow.MovementFlag) {
+	p.movementInfo.Flags = flags
+	// Potentially update p.Object.MovementFlags() as well if they are distinct
+}
+
+// GetCurrentMovementInfo returns a copy of the player's current movement state.
+// This is used for broadcasting or other server-side logic.
+func (p *Player) GetCurrentMovementInfo() wow.MovementInfo {
+	// Ensure it's populated from Player's authoritative state if not already
+	// For now, assume p.movementInfo is the authoritative one after updates.
+	// We might need to construct it from p.Location, p.MovementFlags, p.CurrentPitch etc.
+	// if p.movementInfo is only for temporary client data.
+	// Let's assume p.movementInfo is kept up-to-date for now.
+	return p.movementInfo
+}
+
+// SetTimestamp sets the timestamp for the current movement info.
+func (p *Player) SetTimestamp(timestamp uint32) {
+	p.movementInfo.Timestamp = timestamp
 }
 
 // Initializes the inventory. The slots can be nul, in this case it will be initialized as

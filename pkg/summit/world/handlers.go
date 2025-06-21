@@ -49,7 +49,34 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	packets.OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
 	packets.OpcodeTable.Handle(wow.ClientCharEnum, gc.SendCharacterEnum)
 	packets.OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
+	packets.OpcodeTable.Handle(wow.ClientPlayerLogin, gc.HandlePlayerLogin) // Added handler for PlayerLogin
 	packets.OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
+
+	// Movement Packet Handlers
+	packets.OpcodeTable.Handle(wow.MsgMoveStartForward, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartBackward, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStop, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartStrafeLeft, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartStrafeRight, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStopStrafe, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveJump, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartTurnLeft, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartTurnRight, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStopTurn, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartPitchUp, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartPitchDown, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStopPitch, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveSetRunMode, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveSetWalkMode, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveFallLand, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStartSwim, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveStopSwim, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveSetFacing, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveSetPitch, gc.HandleMovement)
+	packets.OpcodeTable.Handle(wow.MsgMoveHeartbeat, gc.HandleMovement)
+	// Add more MSG_MOVE_* opcodes as they are tested/needed (e.g., flight, hover, spline acks)
+
+	packets.OpcodeTable.Handle(wow.ClientTimeSyncResp, gc.HandleTimeSyncResp)
 }
 
 func (gc *WorldSession) Handle(pkt *wow.Packet) {

@@ -13,10 +13,62 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+// MockCharacterRepo is a temporary mock implementation of store.CharacterRepo for development.
+type MockCharacterRepo struct{}
+
+func (m *MockCharacterRepo) GetCharacters(account string) (player.Players, error) {
+	// Return a fixed list of characters for testing, or an empty list.
+	// This should be replaced by actual database calls.
+	log.Warn().Str("account", account).Msg("MockCharacterRepo.GetCharacters called, returning empty list")
+	return player.Players{}, nil
+}
+
+func (m *MockCharacterRepo) CreateCharacter(account string, character *player.Player) error {
+	log.Warn().Str("account", account).Str("charName", character.Name).Msg("MockCharacterRepo.CreateCharacter called")
+	return nil
+}
+
+func (m *MockCharacterRepo) DeleteCharacter(characterID int) error {
+	log.Warn().Int("charId", characterID).Msg("MockCharacterRepo.DeleteCharacter called")
+	return nil
+}
+
+func (m *MockCharacterRepo) GetCharacterForLogin(characterGUID wow.GUID, accountName string) (*store.PlayerDataForLogin, error) {
+	log.Warn().Hex("guid", characterGUID[:]).Str("account", accountName).Msg("MockCharacterRepo.GetCharacterForLogin called, returning mock data")
+
+	// For now, let's return a mock player.
+	// In a real scenario, this would query the DB and check if characterGUID belongs to accountName.
+	// If not, it should return an error (e.g., sql.ErrNoRows or a custom error).
+
+	// Example: Check if the GUID matches a known test GUID
+	// testGUIDBytes, _ := hex.DecodeString("0100000000000000") // Example GUID
+	// if !bytes.Equal(characterGUID[:], testGUIDBytes) {
+	//	 return nil, fmt.Errorf("character %s not found for account %s (mock)", characterGUID.String(), accountName)
+	// }
+
+	return &store.PlayerDataForLogin{
+		GUID:   characterGUID, // Echo back the GUID for now
+		Name:   "MockPlayer",
+		Race:   wow.RaceHuman,
+		Class:  wow.ClassWarrior,
+		Gender: wow.GenderMale,
+		Level:  1,
+		Location: player.WorldLocation{ // Starting location for Human
+			X:    -8949.950195,
+			Y:    -132.492996,
+			Z:    83.531197,
+			O:    0,
+			Map:  0, // Eastern Kingdoms
+			Zone: 12, // Elwynn Forest
+		},
+	}, nil
+}
 
 type Server struct {
 	clients sync.Map
@@ -127,6 +179,21 @@ func (ws *Server) AddClient(gc *WorldSession) {
 
 func (ws *Server) Disconnected(gc *WorldSession, reason string) {
 	ws.clients.Delete(gc.ID)
+}
+
+// GetCharacterStore returns the character repository.
+func (ws *Server) GetCharacterStore() store.CharacterRepo {
+	// If ws.charStore is nil (e.g., not properly initialized or using mock for tests without full server setup)
+	// it might panic. Consider returning an error or a default mock if that's a possible state.
+	// For now, assume it's always initialized by StartServer.
+	if ws.charStore == nil {
+		// This is a fallback to prevent panics if charStore isn't set.
+		// In a real application, charStore should always be initialized.
+		// consider logging a warning or error here.
+		log.Error().Msg("Character store is nil in GetCharacterStore, returning a new mock. This should not happen in production.")
+		return &MockCharacterRepo{}
+	}
+	return ws.charStore
 }
 
 func (ws *Server) Stats() {

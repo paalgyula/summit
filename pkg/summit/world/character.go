@@ -25,8 +25,11 @@ func (gc *WorldSession) SendCharacterEnum() {
 	// Character list size, this should be replaced
 	_ = pkt.WriteOne(len(players))
 
+	// Store the GUIDs of characters being sent for later validation during player login.
+	gc.KnownCharacterGUIDs = make([]wow.GUID, 0, len(players))
 	for _, p := range players {
 		p.ToCharacterEnum(pkt)
+		gc.KnownCharacterGUIDs = append(gc.KnownCharacterGUIDs, p.GUID())
 	}
 
 	gc.socket.Send(pkt)

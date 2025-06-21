@@ -69,7 +69,7 @@ const (
 	ServerNewWorld                                 OpCode = 0x03E
 	ServerTransferPending                          OpCode = 0x03F
 	ServerTransferAborted                          OpCode = 0x040
-	ServerCharacterLoginFailed                     OpCode = 0x041
+	// ServerCharacterLoginFailed                     OpCode = 0x041 // Already exists
 	ServerLoginSettimespeed                        OpCode = 0x042
 	ServerGametimeUpdate                           OpCode = 0x043
 	ClientGametimeSet                              OpCode = 0x044
@@ -570,7 +570,7 @@ const (
 	ClientGuildDelRank                             OpCode = 0x233
 	ClientGuildSetPublicNote                       OpCode = 0x234
 	ClientGuildSetOfficerNote                      OpCode = 0x235
-	ServerLoginVerifyWorld                         OpCode = 0x236
+	// ServerLoginVerifyWorld                         OpCode = 0x236 // Already exists
 	ClientClearExploration                         OpCode = 0x237
 	ClientSendMail                                 OpCode = 0x238
 	ServerSendMailResult                           OpCode = 0x239
