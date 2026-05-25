@@ -1,9 +1,8 @@
 package wotlk
 
-import (
-	"bytes"
-	"encoding/binary"
-)
+import "encoding/binary"
+
+const numLocales = 16
 
 type StringRef struct {
 	Location uint32
@@ -11,7 +10,6 @@ type StringRef struct {
 }
 
 type LocalizedString struct {
-	// Always 15 len in wotlk?
 	Locales      []*StringRef
 	Flags        uint32
 	ClientLocale uint32
@@ -27,25 +25,17 @@ func (ls LocalizedString) Value() string {
 	return ""
 }
 
+//nolint:exhaustruct
 func CreatesLocalizedString(data []byte) LocalizedString {
 	ls := LocalizedString{
-		Locales:      make([]*StringRef, 16),
-		Flags:        0,
-		ClientLocale: 0,
+		Locales: make([]*StringRef, numLocales),
 	}
 
-	br := bytes.NewReader(data)
-
-	for i := 0; i < len(ls.Locales); i++ {
-		var location uint32
-
-		_ = binary.Read(br, binary.LittleEndian, &location)
-
+	for i := range ls.Locales {
+		location := binary.LittleEndian.Uint32(data[i*4:])
 		if location != 0 {
 			//nolint:exhaustruct
-			ls.Locales[i] = &StringRef{
-				Location: location,
-			}
+			ls.Locales[i] = &StringRef{Location: location}
 		}
 	}
 
