@@ -27,7 +27,7 @@ func (e *CharStartOutfitEntry) GetSlot(id int) *InventorySlot {
 	return &InventorySlot{
 		ItemID:        e.ItemID[id],
 		DisplayItemID: e.DisplayItemID[id],
-		InventoryType: wow.InventoryType(e.InventoryType[id]),
+		InventoryType: wow.InventoryType(e.InventoryType[id]), //nolint:gosec
 	}
 }
 

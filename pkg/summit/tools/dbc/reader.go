@@ -1,56 +1,52 @@
 package dbc
 
 import (
-	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
+	"github.com/rs/zerolog/log"
 )
 
-// DataHeader is the header of a DBC file with the following fields:
-// Magic: always 'WDBC'
-// RecordCount: records per file
-// FieldCount: fields per record
+var (
+	ErrInvalidMagic     = errors.New("invalid DBC magic, expected WDBC")
+	ErrShortStringBlock = errors.New("string block size mismatch")
+)
+
 type DataHeader struct {
-	Magic [4]byte // always 'WDBC'
-	// records per file
-	RecordCount uint32
-	// fields per record. The field disze is always 4bytes long (uint32)
-	FieldCount uint32
-	// RecordSize is the size of a record in bytes
-	RecordSize uint32
-	// StringBlockSize size of the string block at the end of file in bytes
+	Magic           [4]byte
+	RecordCount     uint32
+	FieldCount      uint32
+	RecordSize      uint32
 	StringBlockSize uint32
 }
 
 type Reader[C any] struct {
-	r      io.Reader
-	Header DataHeader
-
-	current int
-
+	r       io.Reader
+	Header  DataHeader
 	Records []C
 }
 
-// NewReader creates a new Reader instance for the given io.Reader to read DBC files.
-//
-//	r: the io.Reader to read DBC files from.
-//	(*Reader[C], error): a pointer to a Reader instance and a possible error that might occur.
 func NewReader[C any](r io.Reader) (*Reader[C], error) {
+	//nolint:exhaustruct
 	dbcReader := &Reader[C]{
-		r:      r,
-		Header: DataHeader{},
+		r: r,
 	}
 
-	err := binary.Read(r, binary.LittleEndian, &dbcReader.Header)
-	if err != nil {
+	if err := binary.Read(r, binary.LittleEndian, &dbcReader.Header); err != nil {
 		return nil, fmt.Errorf("cannot read DBC header: %w", err)
 	}
 
-	fmt.Printf("Header: records: %d, record size: %d, string block size: %d\n",
+	if string(dbcReader.Header.Magic[:]) != "WDBC" {
+		return nil, fmt.Errorf("%w: got %q", ErrInvalidMagic, dbcReader.Header.Magic)
+	}
+
+	log.Debug().Msgf("Header: records: %d, record size: %d, string block size: %d",
 		dbcReader.Header.RecordCount,
 		dbcReader.Header.RecordSize,
 		dbcReader.Header.StringBlockSize,
@@ -59,204 +55,206 @@ func NewReader[C any](r io.Reader) (*Reader[C], error) {
 	return dbcReader, nil
 }
 
-// ReadAll reads all records from a Reader and stores them in its Records
-// field, as well as parses the strings from the string block. Returns an error
-// if the expected number of bytes for the string block is not present.
-// Returns nil if no errors occurred.
-func (dr *Reader[C]) ReadAll() error {
-	row := make([]byte, dr.Header.RecordSize)
+type fieldInfo struct {
+	idx      int
+	byteOff  int
+	byteSize int
+	kind     reflect.Kind
+	elemKind reflect.Kind
+}
 
+func (dr *Reader[C]) ReadAll() error {
+	fields := cachedFields[C]()
+
+	row := make([]byte, dr.Header.RecordSize)
 	dr.Records = make([]C, dr.Header.RecordCount)
 
-	for ; dr.current < int(dr.Header.RecordCount); dr.current++ {
-		_, _ = dr.r.Read(row)
-		// data, err := dr.ParseRow(row)
-		// fmt.Printf(">> %s", hex.Dump(row))
-		var data C
+	for i := range dr.Records {
+		if _, err := io.ReadFull(dr.r, row); err != nil {
+			return fmt.Errorf("reading record %d: %w", i, err)
+		}
 
-		parseByteArray(row, &data)
-		dr.Records[dr.current] = data
+		dr.Records[i] = parseRow[C](row, fields)
 	}
 
-	strings, _ := io.ReadAll(dr.r)
+	strings, err := io.ReadAll(dr.r)
+	if err != nil {
+		return fmt.Errorf("reading string block: %w", err)
+	}
+
 	if len(strings) != int(dr.Header.StringBlockSize) {
-		return fmt.Errorf("expected %d bytes, got %d", dr.Header.StringBlockSize, len(strings))
+		return fmt.Errorf("%w: expected %d bytes, got %d",
+			ErrShortStringBlock, dr.Header.StringBlockSize, len(strings))
 	}
 
-	// fmt.Printf(">> %s", hex.Dump(strings))
-
-	dr.parseStrings(strings)
-
-	// fmt.Printf("%+v", dr.Records)
+	resolveStrings(dr.Records, fields, strings)
 
 	return nil
 }
 
-// parseStrings parses a byte slice containing strings and populates the Records
-// field of the Reader with the parsed data.
-//
-// strings: a byte slice containing strings.
-// error: an error is returned if there was an error parsing the data.
-func (dr *Reader[C]) parseStrings(strings []byte) error {
-	r := bytes.NewReader(strings)
+//nolint:cyclop,gosec,ireturn
+func parseRow[C any](row []byte, fields []fieldInfo) C {
+	v := reflect.ValueOf(new(C)).Elem()
 
-	for i := 0; i < len(dr.Records); i++ {
-		v := reflect.ValueOf(&dr.Records[i]).Elem()
+	for _, f := range fields {
+		off := f.byteOff
 
-		for i := 0; i < v.NumField(); i++ {
-			field := v.Field(i)
+		//nolint:exhaustive
+		switch f.kind {
+		case reflect.Uint8:
+			v.Field(f.idx).SetUint(uint64(row[off]))
+		case reflect.Int8:
+			v.Field(f.idx).SetInt(int64(int8(row[off])))
+		case reflect.Uint16:
+			v.Field(f.idx).SetUint(uint64(binary.LittleEndian.Uint16(row[off:])))
+		case reflect.Int16:
+			v.Field(f.idx).SetInt(int64(int16(binary.LittleEndian.Uint16(row[off:]))))
+		case reflect.Uint32:
+			v.Field(f.idx).SetUint(uint64(binary.LittleEndian.Uint32(row[off:])))
+		case reflect.Int32:
+			v.Field(f.idx).SetInt(int64(int32(binary.LittleEndian.Uint32(row[off:]))))
+		case reflect.Uint64:
+			v.Field(f.idx).SetUint(binary.LittleEndian.Uint64(row[off:]))
+		case reflect.Int64:
+			v.Field(f.idx).SetInt(int64(binary.LittleEndian.Uint64(row[off:])))
+		case reflect.String:
+			v.Field(f.idx).SetString(string(row[off : off+f.byteSize]))
+		case reflect.Slice:
+			if f.elemKind == reflect.Uint8 {
+				dst := make([]byte, f.byteSize)
+				copy(dst, row[off:off+f.byteSize])
+				v.Field(f.idx).SetBytes(dst)
+			} else if f.elemKind == reflect.Uint32 {
+				count := f.byteSize / fieldSize
+				dst := make([]uint32, count)
 
-			// LocalizedString
-			if field.Type() == reflect.TypeOf(wotlk.LocalizedString{}) {
-				val := reflect.Value(field).Interface().(wotlk.LocalizedString)
-				for _, l := range val.Locales {
+				for j := range dst {
+					dst[j] = binary.LittleEndian.Uint32(row[off+j*fieldSize:])
+				}
+
+				v.Field(f.idx).Set(reflect.ValueOf(dst))
+			}
+		case reflect.Pointer:
+			location := binary.LittleEndian.Uint32(row[off:])
+			//nolint:exhaustruct
+			v.Field(f.idx).Set(reflect.ValueOf(&wotlk.StringRef{Location: location}))
+		case reflect.Struct:
+			ls := wotlk.CreatesLocalizedString(row[off : off+f.byteSize])
+			v.Field(f.idx).Set(reflect.ValueOf(ls))
+		}
+	}
+
+	//nolint:forcetypeassert
+	return v.Interface().(C)
+}
+
+//nolint:exhaustive
+func resolveStrings[C any](records []C, fields []fieldInfo, strings []byte) {
+	for i := range records {
+		v := reflect.ValueOf(&records[i]).Elem()
+
+		for _, f := range fields {
+			//nolint:exhaustive
+			switch f.kind {
+			case reflect.Pointer:
+				//nolint:forcetypeassert
+				sr := v.Field(f.idx).Interface().(*wotlk.StringRef)
+				if sr != nil {
+					sr.Value = readCstringAt(strings, int(sr.Location))
+				}
+			case reflect.Struct:
+				//nolint:forcetypeassert
+				ls := v.Field(f.idx).Interface().(wotlk.LocalizedString)
+				for _, l := range ls.Locales {
 					if l != nil {
-						r.Seek(int64(l.Location), io.SeekStart)
-						s := readCstring(r)
-
-						l.Value = s
+						l.Value = readCstringAt(strings, int(l.Location))
 					}
 				}
 			}
-
-			// String reference
-			if field.Type() == reflect.TypeOf((*wotlk.StringRef)(nil)) {
-				sr := reflect.Value(field).Interface().(*wotlk.StringRef)
-				r.Seek(int64(sr.Location), io.SeekStart)
-				s := readCstring(r)
-
-				sr.Value = s
-			}
 		}
 	}
-
-	return nil
 }
 
-// readCstring reads bytes from an io.Reader until a null byte is found and
-// returns the resulting string. It takes a single parameter, an io.Reader, and
-// returns a string.
-func readCstring(r io.Reader) string {
-	s := bytes.NewBufferString("")
-	for {
-		bb := make([]byte, 1)
-		_, err := r.Read(bb)
-		if err != nil {
-			return s.String()
-		}
-
-		if bb[0] == '\x00' {
-			break
-		}
-
-		s.Write(bb)
+func readCstringAt(data []byte, off int) string {
+	end := off
+	for end < len(data) && data[end] != 0 {
+		end++
 	}
 
-	return s.String()
+	return string(data[off:end])
 }
 
-func parseByteArray(data []byte, obj interface{}) error {
-	v := reflect.ValueOf(obj).Elem()
+const fieldSize = 4
 
-	offset := 0
+func cachedFields[C any]() []fieldInfo {
+	var zero C
+	t := reflect.TypeOf(zero)
 
-	for i := 0; i < v.NumField(); i++ {
-		field := v.Field(i)
-		dbcTag := v.Type().Field(i).Tag.Get("dbc")
-		if dbcTag == "" {
+	n := t.NumField()
+	fields := make([]fieldInfo, 0, n)
+
+	for i := 0; i < n; i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("dbc")
+
+		if tag == "" {
 			continue
 		}
 
-		size := 0
-		b := 0
+		colOff, byteOff, count := parseTag(tag)
 
-		fmt.Sscanf(dbcTag, "offset=%d", &offset)
-		fmt.Sscanf(dbcTag, "offset=%d,byte=%d", &offset, &b)
-		fmt.Sscanf(dbcTag, "offset=%d,len=%d", &offset, &size)
+		//nolint:exhaustruct
+		fi := fieldInfo{
+			idx:     i,
+			byteOff: colOff*fieldSize + byteOff,
+			kind:    f.Type.Kind(),
+		}
 
-		offset *= 4 + b // Bytes to columns + byte
-		size *= 4
-
-		var value any
-
-		switch field.Kind() {
-		case reflect.Int8:
-			value = int8(data[offset])
-		case reflect.Uint8:
-			value = data[offset]
+		//nolint:exhaustive
+		switch f.Type.Kind() {
 		case reflect.String:
-			value = string(data[offset : offset+size])
+			fi.byteSize = count * fieldSize
 		case reflect.Slice:
-			if field.Type().Elem().Kind() == reflect.Uint8 {
-				value = data[offset : offset+size]
-			} else if field.Type().Elem().Kind() == reflect.Uint32 {
-				value := make([]uint32, size/4)
-				br := bytes.NewReader(data[offset : offset+size])
-				err := binary.Read(br, binary.LittleEndian, &value)
-				if err != nil {
-					return err
-				}
-
-				field.Set(reflect.ValueOf(value))
-
-				continue
-				// fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
-			} else {
-				fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
-			}
-		case reflect.Int16:
-			value = int16(binary.LittleEndian.Uint16(data[offset:]))
-		case reflect.Uint16:
-			value = binary.LittleEndian.Uint16(data[offset:])
-		case reflect.Int32:
-			value = int32(binary.LittleEndian.Uint32(data[offset:]))
-		case reflect.Uint32:
-			value = binary.LittleEndian.Uint32(data[offset:])
-		case reflect.Int64:
-			value = int64(binary.LittleEndian.Uint64(data[offset:]))
-		case reflect.Uint64:
-			value = binary.LittleEndian.Uint64(data[offset:])
+			fi.elemKind = f.Type.Elem().Kind()
+			fi.byteSize = count * fieldSize
+		case reflect.Struct:
+			fi.byteSize = numLocales * fieldSize
 		case reflect.Pointer:
-			value = parsePointer(field, data, offset)
-		default:
-			value = parseStruct(field, data, offset)
-			if value == nil {
-				fmt.Printf("unsupported type %+v %v\n", field.Kind(), field.Type())
-			}
+			fi.byteSize = fieldSize
 		}
 
-		if value != nil {
-			field.Set(reflect.ValueOf(value))
-		}
+		fields = append(fields, fi)
 	}
 
-	return nil
+	return fields
 }
 
-func parsePointer(field reflect.Value, data []byte, offset int) any {
-	// field := reflect.TypeOf((*wotlk.StringRef)(nil)).Elem()
-	fieldType := field.Type()
+const numLocales = 16
 
-	switch fieldType {
-	case reflect.TypeOf((*wotlk.StringRef)(nil)):
-		var location uint32 = binary.LittleEndian.Uint32(data[offset:])
-		// binary.Read(br, binary.LittleEndian, &location)
+const tagParts = 2
 
-		return &wotlk.StringRef{
-			Location: location,
+//nolint:nonamedreturns
+func parseTag(tag string) (offset int, byteOff int, size int) {
+	for _, part := range strings.Split(tag, ",") {
+		kv := strings.SplitN(part, "=", tagParts)
+		if len(kv) != tagParts {
+			continue
 		}
-	default:
-		return nil
-	}
-}
 
-func parseStruct(field reflect.Value, data []byte, offset int) any {
-	var value any
-	if field.Type() == reflect.TypeOf(wotlk.LocalizedString{}) {
-		value = wotlk.CreatesLocalizedString(data[offset:])
-	} else if field.Type() == reflect.TypeOf(wotlk.StringRef{}) {
-		panic("StringRef should be a pointer type")
+		val, err := strconv.Atoi(kv[1])
+		if err != nil {
+			continue
+		}
+
+		switch kv[0] {
+		case "offset":
+			offset = val
+		case "byte":
+			byteOff = val
+		case "len":
+			size = val
+		}
 	}
 
-	return value
+	return
 }
