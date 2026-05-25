@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
-
-	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -21,10 +18,6 @@ const (
 	VersionBFA         = 274
 	VersionShadowlands = 274
 )
-
-type M2 struct {
-	Name string
-}
 
 type M2Header struct {
 	Version                            uint32
@@ -76,145 +69,192 @@ type M2Header struct {
 
 type M2Reader struct {
 	header *M2Header
+	Name   string
 
-	// Is the M2 file chunked
 	chunked bool
 
 	r io.ReadSeeker
-
-	readerPosition int64
 }
 
-var ErrInvalidM2Header = errors.New("invalid M2 header")
+const magicSize = 4
 
-func NewM2Reader(r *os.File) (*M2Reader, error) {
+var (
+	ErrInvalidM2Header         = errors.New("invalid M2 header")
+	ErrChunkedM2NotImplemented = errors.New("chunked M2 file is not implemented")
+)
+
+func NewM2Reader(r io.ReadSeeker) (*M2Reader, error) {
 	reader := &M2Reader{
 		header:  new(M2Header),
 		chunked: false,
+		Name:    "",
 		r:       r,
-
-		readerPosition: 0,
 	}
 
-	magic := make([]byte, 4)
+	magic := make([]byte, magicSize)
 	if _, err := r.Read(magic); err != nil {
 		return nil, fmt.Errorf("error while reading magic: %w", err)
 	}
 
-	fh := string(magic)
-
-	switch fh {
+	switch fh := string(magic); fh {
 	case "MD20":
-		// Set some variables
-		reader.chunked = false
 	case "MD21":
 		reader.chunked = true
 
-		panic("chunked M2 file is not implemented")
+		return nil, ErrChunkedM2NotImplemented
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrInvalidM2Header, fh)
 	}
 
-	reader.readHeader()
+	if err := reader.readHeader(); err != nil {
+		return nil, fmt.Errorf("reading header: %w", err)
+	}
 
-	reader.readData()
+	if err := reader.readData(); err != nil {
+		return nil, fmt.Errorf("reading data: %w", err)
+	}
 
 	return reader, nil
 }
 
-// Refactored function to take a parameter to readValue value into.
-func (mr *M2Reader) readValue(out any) {
+func (mr *M2Reader) readValue(out any) error {
 	if err := binary.Read(mr.r, binary.LittleEndian, out); err != nil {
-		log.Fatal().Err(err).Caller().Msgf("cannot read %T from reader", out)
+		return fmt.Errorf("reading %T: %w", out, err)
 	}
-}
-
-func (mr *M2Reader) readData() error {
-	// This should not result an error.
-	mr.readerPosition, _ = mr.r.Seek(0, io.SeekCurrent)
-
-	_, err := mr.r.Seek(int64(mr.header.NameOffset), io.SeekStart)
-	if err != nil {
-		return fmt.Errorf("cannot seek to name offset: %w", err)
-	}
-
-	model := new(M2)
-
-	name := make([]byte, mr.header.NameLength)
-	_, _ = mr.r.Read(name)
-
-	model.Name = string(name)
 
 	return nil
 }
 
-// readHeader reads the header from the M2 file.
-//
-//nolint:funlen
-func (mr *M2Reader) readHeader() {
-	mr.readValue(&mr.header.Version)
-	mr.readValue(&mr.header.NameLength)
-	mr.readValue(&mr.header.NameOffset)
-	mr.readValue(&mr.header.GlobalFlags)
-	mr.readValue(&mr.header.GlobalLoopsLength)
-	mr.readValue(&mr.header.GlobalLoopsOffset)
-	mr.readValue(&mr.header.SequencesLength)
-	mr.readValue(&mr.header.SequencesOffset)
-	mr.readValue(&mr.header.SequenceIdxHashByIDLength)
-	mr.readValue(&mr.header.SequenceIdxHashByOffset)
-
-	if mr.header.Version <= VersionBC {
-		mr.readValue(&mr.header.PlayableAnimationLookupLength)
-		mr.readValue(&mr.header.PlayableAnimationLookupOffset)
+func (mr *M2Reader) readData() error {
+	pos, err := mr.r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return fmt.Errorf("saving current position: %w", err)
 	}
 
-	mr.readValue(&mr.header.BonesLength)
-	mr.readValue(&mr.header.BonesOffset)
-	mr.readValue(&mr.header.BoneIndicesByIDLength)
-	mr.readValue(&mr.header.BoneIndicesByIDOffset)
-	mr.readValue(&mr.header.VerticesLength)
-	mr.readValue(&mr.header.VerticesOffset)
-
-	if mr.header.Version <= VersionBC {
-		mr.readValue(&mr.header.SkinProfilesLength)
-		mr.readValue(&mr.header.SkinProfilesOffset)
-	} else {
-		mr.readValue(&mr.header.NumSkinProfiles)
+	if _, err := mr.r.Seek(int64(mr.header.NameOffset), io.SeekStart); err != nil {
+		return fmt.Errorf("cannot seek to name offset: %w", err)
 	}
 
-	mr.readValue(&mr.header.ColorsLength)
-	mr.readValue(&mr.header.ColorsOffset)
-	mr.readValue(&mr.header.TexturesLength)
-	mr.readValue(&mr.header.TexturesOffset)
-	mr.readValue(&mr.header.TextureWeightsLength)
-	mr.readValue(&mr.header.TextureWeightsOffset)
-
-	if mr.header.Version <= VersionBC {
-		mr.readValue(&mr.header.TextureFlipbooksLength)
-		mr.readValue(&mr.header.TextureFlipbooksOffset)
+	name := make([]byte, mr.header.NameLength)
+	if _, err := io.ReadFull(mr.r, name); err != nil {
+		return fmt.Errorf("reading model name: %w", err)
 	}
 
-	mr.readValue(&mr.header.TextureTransformsLength)
-	mr.readValue(&mr.header.TextureTransformsOffset)
-	mr.readValue(&mr.header.TextureIndicesByIDLength)
-	mr.readValue(&mr.header.TextureIndicesByIDOffset)
-	mr.readValue(&mr.header.MaterialsLength)
-	mr.readValue(&mr.header.MaterialsOffset)
-	mr.readValue(&mr.header.BoneLookupTableLength)
-	mr.readValue(&mr.header.BoneLookupTableOffset)
-	mr.readValue(&mr.header.TextureLookupTableLength)
-	mr.readValue(&mr.header.TextureLookupTableOffset)
-	mr.readValue(&mr.header.TextureUnitLookupTableLength)
-	mr.readValue(&mr.header.TextureUnitLookupTableOffset)
-	mr.readValue(&mr.header.TransparencyLookupTableLength)
-	mr.readValue(&mr.header.TransparencyLookupTableOffset)
-	mr.readValue(&mr.header.TextureTransformsLookupTableLength)
-	mr.readValue(&mr.header.TextureTransformsLookupTableOffset)
+	mr.Name = string(name)
 
-	fmt.Println(mr.header.ToString())
+	if _, err := mr.r.Seek(pos, io.SeekStart); err != nil {
+		return fmt.Errorf("restoring position: %w", err)
+	}
+
+	return nil
 }
 
-// ToString generates a string representation of the M2Header with all fields.
-func (h *M2Header) ToString() string {
-	return fmt.Sprintf("%+v", h)
+//nolint:funlen,gocognit,cyclop
+func (mr *M2Reader) readHeader() error {
+	fields := []any{
+		&mr.header.Version,
+		&mr.header.NameLength,
+		&mr.header.NameOffset,
+		&mr.header.GlobalFlags,
+		&mr.header.GlobalLoopsLength,
+		&mr.header.GlobalLoopsOffset,
+		&mr.header.SequencesLength,
+		&mr.header.SequencesOffset,
+		&mr.header.SequenceIdxHashByIDLength,
+		&mr.header.SequenceIdxHashByOffset,
+	}
+
+	for _, f := range fields {
+		if err := mr.readValue(f); err != nil {
+			return err
+		}
+	}
+
+	if mr.header.Version <= VersionBC {
+		for _, f := range []any{
+			&mr.header.PlayableAnimationLookupLength,
+			&mr.header.PlayableAnimationLookupOffset,
+		} {
+			if err := mr.readValue(f); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, f := range []any{
+		&mr.header.BonesLength,
+		&mr.header.BonesOffset,
+		&mr.header.BoneIndicesByIDLength,
+		&mr.header.BoneIndicesByIDOffset,
+		&mr.header.VerticesLength,
+		&mr.header.VerticesOffset,
+	} {
+		if err := mr.readValue(f); err != nil {
+			return err
+		}
+	}
+
+	if mr.header.Version <= VersionBC {
+		for _, f := range []any{
+			&mr.header.SkinProfilesLength,
+			&mr.header.SkinProfilesOffset,
+		} {
+			if err := mr.readValue(f); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := mr.readValue(&mr.header.NumSkinProfiles); err != nil {
+			return err
+		}
+	}
+
+	for _, f := range []any{
+		&mr.header.ColorsLength,
+		&mr.header.ColorsOffset,
+		&mr.header.TexturesLength,
+		&mr.header.TexturesOffset,
+		&mr.header.TextureWeightsLength,
+		&mr.header.TextureWeightsOffset,
+	} {
+		if err := mr.readValue(f); err != nil {
+			return err
+		}
+	}
+
+	if mr.header.Version <= VersionBC {
+		for _, f := range []any{
+			&mr.header.TextureFlipbooksLength,
+			&mr.header.TextureFlipbooksOffset,
+		} {
+			if err := mr.readValue(f); err != nil {
+				return err
+			}
+		}
+	}
+
+	for _, f := range []any{
+		&mr.header.TextureTransformsLength,
+		&mr.header.TextureTransformsOffset,
+		&mr.header.TextureIndicesByIDLength,
+		&mr.header.TextureIndicesByIDOffset,
+		&mr.header.MaterialsLength,
+		&mr.header.MaterialsOffset,
+		&mr.header.BoneLookupTableLength,
+		&mr.header.BoneLookupTableOffset,
+		&mr.header.TextureLookupTableLength,
+		&mr.header.TextureLookupTableOffset,
+		&mr.header.TextureUnitLookupTableLength,
+		&mr.header.TextureUnitLookupTableOffset,
+		&mr.header.TransparencyLookupTableLength,
+		&mr.header.TransparencyLookupTableOffset,
+		&mr.header.TextureTransformsLookupTableLength,
+		&mr.header.TextureTransformsLookupTableOffset,
+	} {
+		if err := mr.readValue(f); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
