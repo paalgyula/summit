@@ -61,3 +61,18 @@ func (o *Object) GameObjectType() wow.GameObjectType {
 func (o *Object) GUID() wow.GUID {
 	return o.guid
 }
+
+// SetGUID sets the object's GUID.
+func (o *Object) SetGUID(g wow.GUID) {
+	o.guid = g
+}
+
+// SetObjectType sets the object type mask.
+func (o *Object) SetObjectType(mask wow.TypeMask) {
+	o.objectType = mask
+}
+
+// ObjectType returns the object type mask.
+func (o *Object) ObjectType() wow.TypeMask {
+	return o.objectType
+}

@@ -155,8 +155,14 @@ func TestAssertBytes(t *testing.T) {
 
 	p.InitInventory(nil)
 
-	for _, is := range p.Inventory.InventorySlots {
-		r.Read(is)
+	for i := 0; i < player.EquipmentSlotEnd; i++ {
+		var displayID uint32
+		var invType wow.InventoryType
+		var enchantSlot uint32
+
+		r.Read(&displayID)
+		r.Read(&invType)
+		r.Read(&enchantSlot)
 	}
 
 	r.ResetCounter()

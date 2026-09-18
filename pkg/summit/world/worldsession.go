@@ -126,3 +126,14 @@ func (gc *WorldSession) Close() error {
 
 	return gc.n.Close() //nolint:wrapcheck
 }
+
+// updatePeriodic runs periodic updates for the player (regen, saves, etc).
+func (gc *WorldSession) updatePeriodic(now time.Time) {
+	if gc.player == nil || !gc.player.IsInWorld {
+		return
+	}
+
+	// TODO: Implement health/mana regeneration
+	// TODO: Implement aura tick
+	// TODO: Implement save timer
+}

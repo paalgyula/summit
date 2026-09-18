@@ -1,6 +1,7 @@
 package world
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -109,17 +110,37 @@ func (gc *WorldSession) AuthSessionHandler(data wow.PacketData) {
 
 	// Call back to logon server to retrive the session key
 	authSession := gc.ws.GetAuthSession(pkt.AccountName)
-	if authSession != nil {
-		gc.AccountName = strings.ToLower(authSession.AccountName)
-		gc.SessionKey, _ = new(big.Int).SetString(authSession.SessionKey, 16)
+	if authSession == nil {
+		gc.log.Error().Str("account", pkt.AccountName).Msg("auth session not found, rejecting client")
+		gc.Close()
+
+		return
 	}
 
-	// TODO: implement auth proof calculation
-	// proof := crypt.AuthSessionProof(acc.Name, gc.serverSeed, pkt.ClientSeed, []byte(acc.Session))
+	gc.AccountName = strings.ToLower(authSession.AccountName)
+	gc.SessionKey, _ = new(big.Int).SetString(authSession.SessionKey, 16)
 
-	gc.log.Error().Msg("digest calculation not implemented yet, allowing all clients!!!")
-	// gc.log.Trace().Msgf("%s ServerSeed: 0x%x SKey: %s",
-	// 	pkt.String(), gc.serverSeed, authSession.SessionKey)
+	// Verify the client's digest to ensure it knows the session key
+	// Digest = SHA1(AccountName + zeros(4) + ClientSeed + ServerSeed + SessionKey)
+	expectedDigest := crypt.AuthSessionProof(
+		pkt.AccountName,
+		gc.serverSeed,
+		pkt.ClientSeed,
+		gc.SessionKey.Bytes(),
+	)
+
+	if !bytes.Equal(pkt.Digest, expectedDigest) {
+		gc.log.Error().
+			Str("account", gc.AccountName).
+			Msg("auth session digest verification failed, rejecting client")
+		gc.Close()
+
+		return
+	}
+
+	gc.log.Trace().
+		Str("account", gc.AccountName).
+		Msg("auth session digest verified successfully")
 
 	gc.log = gc.log.With().Str("acc", gc.AccountName).Logger()
 

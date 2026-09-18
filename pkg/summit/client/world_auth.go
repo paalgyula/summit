@@ -83,17 +83,22 @@ func readCharEnum(r *wow.PacketReader) *CharEnum {
 	r.Read(&c.Pet.PetLevel)
 	r.Read(&c.Pet.PetFamilly)
 
-	c.Inventory = &player.Inventory{
-		InventorySlots: make([]*player.InventoryItem, player.InventorySlotBagEnd),
-	}
+	c.Inventory = player.NewInventory()
 
-	for i := range c.Inventory.InventorySlots {
-		var slot player.InventoryItem
-		r.Read(&slot.DisplayInfoID)
-		r.Read(&slot.InventoryType)
-		r.Read(&slot.EnchantSlot)
+	for i := 0; i < player.EquipmentSlotEnd; i++ {
+		var displayID uint32
+		var invType wow.InventoryType
+		var enchantSlot uint32
 
-		c.Inventory.InventorySlots[i] = &slot
+		r.Read(&displayID)
+		r.Read(&invType)
+		r.Read(&enchantSlot)
+
+		if displayID != 0 {
+			item := player.NewItem(displayID, c.guid)
+			item.SetEnchant(0, enchantSlot)
+			c.Inventory.SetEquipment(i, item)
+		}
 	}
 
 	return &c
@@ -110,7 +115,7 @@ func (wc *WorldClient) handleCharEnum(msg *ServerMessage) {
 		chars[i] = readCharEnum(r)
 	}
 
-	fmt.Println("readed %d characters", len(chars))
+	fmt.Printf("read %d characters\n", len(chars))
 }
 
 func (wc *WorldClient) handleAuthResponse(msg *ServerMessage) {
