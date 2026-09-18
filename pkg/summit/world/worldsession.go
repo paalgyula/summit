@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/protocol"
@@ -148,16 +149,197 @@ func (gc *WorldSession) sendDestroyObject(guid wow.GUID) {
 	gc.socket.Send(pkt)
 }
 
+// Regen interval in milliseconds.
+const RegenIntervalMS = 2000
+
+// processRegen handles health and mana regeneration.
+func (gc *WorldSession) processRegen(now time.Time) {
+	if gc.player == nil {
+		return
+	}
+
+	if now.UnixMilli() < gc.player.NextRegenTime {
+		return
+	}
+
+	// Don't regen while in combat (TODO: track combat state properly)
+	// For now, always regen
+
+	regened := false
+
+	// Health regen (1% of max health per tick, simplified)
+	if gc.player.Health < gc.player.MaxHealth {
+		healthGain := gc.player.MaxHealth / 100
+		if healthGain < 1 {
+			healthGain = 1
+		}
+
+		newHealth := gc.player.Health + healthGain
+		if newHealth > gc.player.MaxHealth {
+			newHealth = gc.player.MaxHealth
+		}
+
+		gc.player.SetHealth(newHealth)
+		regened = true
+	}
+
+	// Mana regen (1% of max mana per tick for mana users)
+	powerType := gc.player.GetPrimaryPowerType()
+	if powerType == wow.PowerTypeMana && gc.player.GetPower(powerType) < gc.player.GetMaxPower(powerType) {
+		manaGain := gc.player.GetMaxPower(powerType) / 100
+		if manaGain < 1 {
+			manaGain = 1
+		}
+
+		newMana := gc.player.GetPower(powerType) + manaGain
+		if newMana > gc.player.GetMaxPower(powerType) {
+			newMana = gc.player.GetMaxPower(powerType)
+		}
+
+		gc.player.SetPower(powerType, newMana)
+		regened = true
+	}
+
+	// Energy regen (1 energy per tick for rogues/feral druids)
+	if powerType == wow.PowerTypeEnergy && gc.player.GetPower(powerType) < gc.player.GetMaxPower(powerType) {
+		newEnergy := gc.player.GetPower(powerType) + 1
+		if newEnergy > gc.player.GetMaxPower(powerType) {
+			newEnergy = gc.player.GetMaxPower(powerType)
+		}
+
+		gc.player.SetPower(powerType, newEnergy)
+		regened = true
+	}
+
+	// Rage does not regen out of combat (handled separately)
+
+	if regened {
+		gc.broadcastPlayerStats()
+	}
+
+	// Set next regen time
+	gc.player.NextRegenTime = now.UnixMilli() + RegenIntervalMS
+}
+
+// broadcastPlayerStats sends health/mana updates to all nearby players.
+func (gc *WorldSession) broadcastPlayerStats() {
+	server, ok := gc.ws.(*Server)
+	if !ok {
+		return
+	}
+
+	// Build update mask with health and power
+	mask := &object.UpdateMask{}
+	mask.SetCount(uint32(gc.player.Object.ValuesCount()))
+
+	powerType := gc.player.GetPrimaryPowerType()
+
+	// Always update health
+	mask.SetBit(uint32(object.UnitFieldHealth))
+
+	// Update primary power
+	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
+		mask.SetBit(uint32(object.UpdateField(int(object.UnitFieldPower1)+int(powerType))))
+	}
+
+	// Build values block
+	blockCount := mask.GetUpdateBlockCount()
+
+	// Create values update packet
+	pkt := wow.NewPacket(wow.ServerUpdateObject)
+
+	_ = pkt.WriteUint32(1) // block count
+	_ = pkt.WriteOne(0)    // has transport
+
+	// Update type
+	_ = pkt.WriteOne(wow.UpdateTypeValues)
+	_ = pkt.Write(gc.player.GUID())
+
+	// Write mask
+	for i := uint32(0); i < blockCount; i++ {
+		val := uint32(0)
+		for b := uint32(0); b < 32; b++ {
+			idx := i*32 + b
+			if mask.GetBit(idx) {
+				val |= 1 << b
+			}
+		}
+		_ = pkt.Write(val)
+	}
+
+	// Write values
+	for i := uint32(0); i < blockCount*32; i++ {
+		if mask.GetBit(i) && int(i) < gc.player.Object.ValuesCount() {
+			_ = pkt.Write(gc.player.Object.GetUInt32Value(object.UpdateField(i)))
+		}
+	}
+
+	// Send to all
+	for _, other := range server.GetOnlineSessions() {
+		if other.player != nil && other.player.IsInWorld {
+			other.socket.Send(pkt)
+		}
+	}
+}
+
+// sendLevelUpInfo sends SMSG_LEVELUP_INFO when the player gains a level.
+func (gc *WorldSession) sendLevelUpInfo(levelsGained uint32) {
+	pkt := wow.NewPacket(wow.ServerLevelupInfo)
+
+	_ = pkt.Write(uint32(levelsGained)) // levels gained
+	_ = pkt.Write(uint32(gc.player.Level))
+	_ = pkt.Write(uint32(0)) // bonus health
+	_ = pkt.Write(uint32(0)) // bonus mana
+	_ = pkt.Write(uint32(0)) // bonus talent points
+
+	// Stat gains (str, agi, sta, int, spi)
+	_ = pkt.Write(uint32(0)) // str
+	_ = pkt.Write(uint32(0)) // agi
+	_ = pkt.Write(uint32(0)) // sta
+	_ = pkt.Write(uint32(0)) // int
+	_ = pkt.Write(uint32(0)) // spi
+
+	gc.socket.Send(pkt)
+}
+
+// sendDeath sends death notification to the client.
+func (gc *WorldSession) sendDeath() {
+	// Send release spirit dialog
+	pkt := wow.NewPacket(wow.ServerDeathReleaseLoc)
+
+	_ = pkt.Write(uint32(0)) // release location map
+	_ = pkt.Write(float32(0)) // release location x
+	_ = pkt.Write(float32(0)) // release location y
+	_ = pkt.Write(float32(0)) // release location z
+
+	gc.socket.Send(pkt)
+}
+
+// sendResurrectRequest sends SMSG_RESURRECT_REQUEST to the client.
+func (gc *WorldSession) sendResurrectRequest() {
+	pkt := wow.NewPacket(wow.ServerResurrectRequest)
+
+	_ = pkt.Write(uint64(0)) // resurrecter GUID (spirit healer)
+	pkt.WriteString("Spirit Healer")
+	_ = pkt.Write(uint32(0)) // hierarchy
+
+	gc.socket.Send(pkt)
+}
+
 // updatePeriodic runs periodic updates for the player (regen, saves, etc).
 func (gc *WorldSession) updatePeriodic(now time.Time) {
 	if gc.player == nil || !gc.player.IsInWorld {
 		return
 	}
 
+	// Don't regen while dead/ghost
+	if gc.player.IsGhost {
+		return
+	}
+
 	// Process combat (auto-attack swings)
 	gc.ProcessCombatTick(now)
 
-	// TODO: Implement health/mana regeneration
-	// TODO: Implement aura tick
-	// TODO: Implement save timer
+	// Process health/mana regen
+	gc.processRegen(now)
 }

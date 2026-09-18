@@ -202,6 +202,13 @@ type Player struct {
 	AttackState    int    // 0 = idle, 1 = swinging
 	NextAttackTime int64  // when next swing happens (Unix ms)
 	BaseDamage     float32
+
+	// Regen state
+	NextRegenTime int64 // when next regen tick happens (Unix ms)
+
+	// Death state
+	IsGhost   bool
+	DeathTime int64 // when player died (Unix ms)
 }
 
 // Initializes the inventory. The slots can be nil, in this case it will be initialized as
@@ -603,4 +610,143 @@ func (p *Player) IsAlive() bool {
 // IsDead returns true if the player has 0 health.
 func (p *Player) IsDead() bool {
 	return p.Health == 0
+}
+
+// XpToNextLevel returns the XP required for the next level.
+// Uses the standard WotLK formula: (level * 1000) + (level^2 * 100)
+func (p *Player) XpToNextLevel() uint32 {
+	lvl := uint32(p.Level)
+	return lvl*1000 + lvl*lvl*100
+}
+
+// GainXP grants experience points and checks for level up.
+func (p *Player) GainXP(amount uint32) uint32 {
+	if p.Level >= 80 {
+		return 0 // max level
+	}
+
+	p.XP += amount
+
+	// Check for level up
+	levelsGained := uint32(0)
+	for p.XP >= p.XpToNextLevel() && p.Level < 80 {
+		p.XP -= p.XpToNextLevel()
+		p.Level++
+		levelsGained++
+
+		// Apply stat gains per level
+		p.applyLevelUpGains()
+	}
+
+	return levelsGained
+}
+
+// applyLevelUpGains applies stat increases when leveling up.
+func (p *Player) applyLevelUpGains() {
+	// Health gain per level (varies by class, simplified)
+	var healthGain uint32
+	switch p.Class {
+	case wow.ClassWarior:
+		healthGain = 20
+	case wow.ClassPaladin, wow.ClassDruid:
+		healthGain = 18
+	case wow.ClassHunter, wow.ClassShaman:
+		healthGain = 16
+	case wow.ClassRogue, wow.ClassDeathKnight:
+		healthGain = 14
+	case wow.ClassPriest, wow.ClassMage, wow.ClassWarlock:
+		healthGain = 12
+	default:
+		healthGain = 14
+	}
+
+	p.MaxHealth += healthGain
+	p.Health = p.MaxHealth // Full heal on level up
+
+	// Power gain per level (for mana users)
+	powerType := p.primaryPowerType()
+	if powerType == wow.PowerTypeMana {
+		p.MaxPower[powerType] += 12
+		p.Power[powerType] = p.MaxPower[powerType]
+	}
+
+	// Update update fields
+	p.Object.SetUInt32Value(object.UnitFieldLevel, uint32(p.Level))
+	p.Object.SetUInt32Value(object.UnitFieldMaxhealth, p.MaxHealth)
+	p.Object.SetUInt32Value(object.UnitFieldHealth, p.Health)
+
+	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
+		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldPower1)+int(powerType)), p.Power[powerType])
+		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldMaxpower1)+int(powerType)), p.MaxPower[powerType])
+	}
+}
+
+// Kill grants XP for killing a creature based on level difference.
+func (p *Player) Kill(creatureLevel uint8) uint32 {
+	// Base XP from creature level
+	baseXP := uint32(creatureLevel) * 10
+
+	// Level difference modifier
+	diff := int32(p.Level) - int32(creatureLevel)
+	var modifier float32
+	switch {
+	case diff <= -5:
+		modifier = 2.0 // much higher level creature
+	case diff <= -2:
+		modifier = 1.5
+	case diff <= 2:
+		modifier = 1.0 // same level
+	case diff <= 5:
+		modifier = 0.8
+	default:
+		modifier = 0.5 // much lower level creature
+	}
+
+	xp := uint32(float32(baseXP) * modifier)
+	if xp < 1 {
+		xp = 1
+	}
+
+	return p.GainXP(xp)
+}
+
+// Die kills the player and sets ghost state.
+func (p *Player) Die() {
+	p.Health = 0
+	p.IsGhost = true
+
+	// Clear attack state
+	p.AttackState = 0
+	p.AttackTarget = 0
+
+	// Update health in update fields
+	p.Object.SetUInt32Value(object.UnitFieldHealth, 0)
+
+	// Set ghost flag in CharFlags
+	// CHAR_FLAG_GHOST = 0x00000010
+	p.CharFlags |= 0x10
+}
+
+// Resurrect复活 the player with a percentage of health/mana.
+func (p *Player) Resurrect() {
+	p.IsGhost = false
+
+	// Resurrect with 100% health
+	p.Health = p.MaxHealth
+
+	// Restore some power
+	powerType := p.primaryPowerType()
+	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
+		p.Power[powerType] = p.MaxPower[powerType]
+	}
+
+	// Clear ghost flag
+	p.CharFlags &^= 0x10
+
+	// Update update fields
+	p.Object.SetUInt32Value(object.UnitFieldHealth, p.Health)
+
+	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
+		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldPower1)+int(powerType)), p.Power[powerType])
+	}
 }

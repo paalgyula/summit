@@ -268,16 +268,26 @@ func (gc *WorldSession) broadcastHealthUpdate(target *player.Player) {
 	}
 }
 
-// onTargetDied handles when a target dies.
+// onTargetDied handles when a player target dies.
 func (gc *WorldSession) onTargetDied(target *player.Player) {
 	// Stop attacking
 	gc.player.AttackState = AttackStateIdle
 	gc.player.AttackTarget = 0
 
-	// Send kill credit (for quest objectives)
-	// TODO: implement quest system
+	// Kill the target player
+	target.Die()
 
-	gc.log.Debug().Msg("target killed")
+	// Send death packet to the dead player
+	server, ok := gc.ws.(*Server)
+	if ok {
+		for _, other := range server.GetOnlineSessions() {
+			if other.player != nil && other.player.IsInWorld {
+				other.broadcastPlayerStats()
+			}
+		}
+	}
+
+	gc.log.Debug().Str("target", target.Name).Msg("player killed")
 }
 
 // onNPCDied handles when an NPC dies.
@@ -285,6 +295,17 @@ func (gc *WorldSession) onNPCDied(npc *NPC) {
 	// Stop attacking
 	gc.player.AttackState = AttackStateIdle
 	gc.player.AttackTarget = 0
+
+	// Grant XP for the kill
+	levelsGained := gc.player.Kill(npc.Level)
+
+	// Send XP/level up packets
+	if levelsGained > 0 {
+		gc.sendLevelUpInfo(levelsGained)
+	}
+
+	// Broadcast updated stats (level, health, etc)
+	gc.broadcastPlayerStats()
 
 	// Send destroy object to all players
 	server, ok := gc.ws.(*Server)
@@ -296,7 +317,11 @@ func (gc *WorldSession) onNPCDied(npc *NPC) {
 		}
 	}
 
-	gc.log.Debug().Str("npc", npc.Name).Msg("NPC killed")
+	gc.log.Debug().
+		Str("npc", npc.Name).
+		Uint32("xp", gc.player.XP).
+		Uint8("level", gc.player.Level).
+		Msg("NPC killed")
 }
 
 // broadcastNPCHealthUpdate sends health update for an NPC to all nearby players.
