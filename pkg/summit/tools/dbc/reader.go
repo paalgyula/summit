@@ -253,6 +253,12 @@ func parseByteArray(data []byte, obj interface{}) error {
 			if value == nil {
 				fmt.Printf("unsupported type %+v %v\n", field.Kind(), field.Type())
 			}
+
+			// LocalizedString occupies 16 columns (16 × 4 = 64 bytes)
+			// in the DBC record. Advance offset past the full struct.
+			if field.Type() == reflect.TypeOf(wotlk.LocalizedString{}) {
+				offset += 16 * 4
+			}
 		}
 
 		if value != nil {

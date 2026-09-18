@@ -19,10 +19,16 @@ type PlayerRace uint8
 
 const (
 	RaceHuman    PlayerRace = 0x01
+	RaceOrc      PlayerRace = 0x02
 	RaceDwarf    PlayerRace = 0x03
 	RaceNightElf PlayerRace = 0x04
+	RaceUndead   PlayerRace = 0x05
+	RaceTauren   PlayerRace = 0x06
 	RaceGnome    PlayerRace = 0x07
-	RaceDraenei  PlayerRace = 0x0b
+	RaceTroll    PlayerRace = 0x08
+	RaceGoblin   PlayerRace = 0x09
+	RaceBloodElf PlayerRace = 0x0A
+	RaceDraenei  PlayerRace = 0x0B
 )
 
 type PlayerGender uint8

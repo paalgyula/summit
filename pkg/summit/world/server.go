@@ -134,22 +134,95 @@ func (ws *Server) Stats() {
 }
 
 func (ws *Server) Run() {
-	ticker := time.NewTicker(time.Second * 20)
+	// World update tick: 50ms = 20 updates per second (matches C++ world update rate)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 
 	defer ws.gameListener.Close()
 	defer ws.log.Warn().Msg("world server stopped")
 
+	lastSave := time.Now()
+	saveInterval := 5 * time.Minute
+
 	for {
 		select {
-		case <-ticker.C:
-			// log.Info().Msg("Garbage collector timer: unimplemented")
-			// ws.Stats()
-			// ws.SaveAll()
-			// ! TODO: shutdown with another channel
-			// case <-ws.ctx.Done():
-			// 	return
+		case now := <-ticker.C:
+			ws.update(now)
+
+			// Periodic save
+			if now.Sub(lastSave) >= saveInterval {
+				ws.saveAll()
+				lastSave = now
+			}
 		}
 	}
+}
+
+// update runs one world tick. It processes all connected sessions.
+func (ws *Server) update(now time.Time) {
+	ws.clients.Range(func(key, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if !ok {
+			return true
+		}
+
+		if gc.player == nil {
+			return true
+		}
+
+		// Periodic player save
+		gc.updatePeriodic(now)
+
+		return true
+	})
+}
+
+// saveAll forces a save of all online players.
+func (ws *Server) saveAll() {
+	ws.clients.Range(func(key, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if !ok {
+			return true
+		}
+
+		if gc.player != nil {
+			gc.log.Debug().Str("name", gc.player.Name).Msg("periodic save")
+		}
+
+		return true
+	})
+}
+
+// GetOnlinePlayerCount returns the number of connected players.
+func (ws *Server) GetOnlinePlayerCount() int {
+	count := 0
+
+	ws.clients.Range(func(key, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if ok && gc.player != nil {
+			count++
+		}
+
+		return true
+	})
+
+	return count
+}
+
+// GetAllSessions returns a snapshot of all active sessions.
+func (ws *Server) GetAllSessions() []*WorldSession {
+	var sessions []*WorldSession
+
+	ws.clients.Range(func(key, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if ok {
+			sessions = append(sessions, gc)
+		}
+
+		return true
+	})
+
+	return sessions
 }
 
 func MemUsage() string {

@@ -32,8 +32,10 @@ func (l *WorldLocation) Distance(point *WorldLocation) float64 {
 }
 
 func NewPlayer() *Player {
-	//nolint:exhaustruct
-	p := &Player{}
+	p := &Player{
+		Object: object.NewObject(),
+		Unit:   object.NewUnit(),
+	}
 
 	return p
 }
@@ -151,7 +153,18 @@ type Player struct {
 	Location     WorldLocation
 	BindLocation WorldLocation
 
-	Level uint8
+	Level  uint8
+	XP     uint32
+	Money  uint32
+
+	Health    uint32
+	MaxHealth uint32
+	Power     [wow.MaxPowerTypes]uint32
+	MaxPower  [wow.MaxPowerTypes]uint32
+
+	DisplayID        uint32
+	NativeDisplayID  uint32
+	MountDisplayID   uint32
 
 	Inventory *Inventory
 	GuildID   uint32
@@ -159,11 +172,13 @@ type Player struct {
 	// CharFlags for example dead, and display ghost
 	CharFlags uint32
 
+	// PlayerFlags (AFK, DND, ghost, resting, etc)
+	PlayerFlags wow.PlayerFlag
+
 	// Recustomization flags (change name, look, etc)
-	// Needs some research
 	Recustomization uint32
 
-	FirstLogin uint8 // Boolean, but uint8 :D
+	FirstLogin uint8
 
 	Pet Pet
 
@@ -175,43 +190,40 @@ type Player struct {
 
 	// MoveFlags stores the current movement flags for the player
 	MoveFlags wow.MovementFlag
+
+	// Castable spells (spell IDs known by the player)
+	KnownSpells []uint32
+
+	// Action bar (12 buttons per bar, 3 bars + stance bar)
+	Actions [48]uint32
 }
 
-// Initializes the inventory. The slots can be nul, in this case it will be initialized as
+// Initializes the inventory. The slots can be nil, in this case it will be initialized as
 // an empty inventory.
 func (p *Player) InitInventory(slots []*basedata.InventorySlot) {
 	if p.Inventory != nil {
 		return
 	}
 
-	p.Inventory = &Inventory{
-		InventorySlots: []*InventoryItem{},
-	}
+	p.Inventory = NewInventory()
 
 	if slots == nil {
-		for i := 0; i < InventorySlotBagEnd; i++ {
-			p.Inventory.AddEmpty()
-		}
-	} else {
-		for i, slot := range slots {
-			if i >= InventorySlotBagEnd {
-				continue
-			}
-
-			if slot.ItemID == -1 {
-				p.Inventory.AddEmpty()
-			} else {
-				p.Inventory.InventorySlots = append(p.Inventory.InventorySlots, &InventoryItem{
-					DisplayInfoID: uint32(slot.DisplayItemID),
-					InventoryType: slot.InventoryType,
-					EnchantSlot:   0,
-				})
-			}
-		}
+		return
 	}
-}
 
-func (p *Player) SetFloatValue() {
+	for i, slot := range slots {
+		if i >= EquipmentSlotEnd {
+			continue
+		}
+
+		if slot.ItemID <= 0 {
+			continue
+		}
+
+		item := NewItem(uint32(slot.ItemID), p.GUID())
+		item.SetEnchant(0, 0)
+		p.Inventory.SetEquipment(i, item)
+	}
 }
 
 func (p *Player) GUID() wow.GUID {
@@ -219,7 +231,120 @@ func (p *Player) GUID() wow.GUID {
 }
 
 func (p *Player) Init() {
-	p.InitInventory(nil)
+	// Set default health/mana based on class
+	p.MaxHealth = 100
+	p.Health = 100
+
+	// Default power type by class
+	powerType := p.primaryPowerType()
+	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
+		p.MaxPower[powerType] = 100
+		p.Power[powerType] = 100
+	}
+
+	// Default display ID based on race/gender (creature display ID)
+	if p.DisplayID == 0 {
+		p.DisplayID = p.defaultDisplayID()
+	}
+
+	if p.NativeDisplayID == 0 {
+		p.NativeDisplayID = p.DisplayID
+	}
+
+	// Set default movement speeds
+	p.Unit.Speed[wow.MoveTypeWalk] = 2.5
+	p.Unit.Speed[wow.MoveTypeRun] = 7.0
+	p.Unit.Speed[wow.MoveTypeRunBack] = 4.5
+	p.Unit.Speed[wow.MoveTypeSwim] = 4.722222
+	p.Unit.Speed[wow.MoveTypeSwimBack] = 2.5
+	p.Unit.Speed[wow.MoveTypeFlight] = 7.0
+	p.Unit.Speed[wow.MoveTypeFlightBack] = 4.5
+	p.Unit.Speed[wow.MoveTypeTurnRate] = 7.0
+
+	if p.Inventory == nil {
+		p.Inventory = NewInventory()
+	}
+}
+
+// primaryPowerType returns the primary power type for this class.
+func (p *Player) primaryPowerType() wow.PowerType {
+	switch p.Class {
+	case wow.ClassWarior:
+		return wow.PowerTypeRage
+	case wow.ClassPaladin, wow.ClassPriest, wow.ClassShaman,
+		wow.ClassMage, wow.ClassWarlock, wow.ClassDruid:
+		return wow.PowerTypeMana
+	case wow.ClassHunter:
+		return wow.PowerTypeFocus
+	case wow.ClassRogue, wow.ClassDeathKnight:
+		return wow.PowerTypeEnergy
+	default:
+		return wow.PowerTypeMana
+	}
+}
+
+// defaultDisplayID returns a default creature display ID for the race/gender combo.
+// These are placeholder values — real data should come from CreatureDisplayInfo.dbc.
+func (p *Player) defaultDisplayID() uint32 {
+	switch p.Race {
+	case wow.RaceHuman:
+		if p.Gender == wow.GenderMale {
+			return 49
+		}
+		return 50
+	case wow.RaceOrc:
+		if p.Gender == wow.GenderMale {
+			return 51
+		}
+		return 52
+	case wow.RaceDwarf:
+		if p.Gender == wow.GenderMale {
+			return 53
+		}
+		return 54
+	case wow.RaceNightElf:
+		if p.Gender == wow.GenderMale {
+			return 55
+		}
+		return 56
+	case wow.RaceUndead:
+		if p.Gender == wow.GenderMale {
+			return 57
+		}
+		return 58
+	case wow.RaceTauren:
+		if p.Gender == wow.GenderMale {
+			return 59
+		}
+		return 60
+	case wow.RaceGnome:
+		if p.Gender == wow.GenderMale {
+			return 1563
+		}
+		return 1564
+	case wow.RaceTroll:
+		if p.Gender == wow.GenderMale {
+			return 1478
+		}
+		return 1479
+	case wow.RaceGoblin:
+		if p.Gender == wow.GenderMale {
+			return 1563
+		}
+		return 1564
+	case wow.RaceBloodElf:
+		if p.Gender == wow.GenderMale {
+			return 15553
+		}
+		return 15554
+	case wow.RaceDraenei:
+		if p.Gender == wow.GenderMale {
+			return 16125
+		}
+		return 16126
+	default:
+		return 49
+	}
 }
 
 func (p *Player) Transport() *object.Transport {
@@ -308,9 +433,93 @@ func (p *Player) ToCharacterEnum(w *wow.Packet) {
 	w.Write(p.Pet.PetLevel)
 	w.Write(p.Pet.PetFamilly)
 
-	for _, slot := range p.Inventory.InventorySlots {
-		w.Write(slot.DisplayInfoID)
-		w.Write(slot.InventoryType)
-		w.Write(slot.EnchantSlot)
+	// Inventory display items
+	p.Inventory.ToCharacterEnum(w)
+}
+
+// GetHealth returns the current health of the player.
+func (p *Player) GetHealth() uint32 {
+	return p.Health
+}
+
+// SetHealth sets the current health, clamping to [0, MaxHealth].
+func (p *Player) SetHealth(v uint32) {
+	if v > p.MaxHealth {
+		v = p.MaxHealth
 	}
+
+	p.Health = v
+}
+
+// GetMaxHealth returns the maximum health of the player.
+func (p *Player) GetMaxHealth() uint32 {
+	return p.MaxHealth
+}
+
+// SetMaxHealth sets the maximum health and clamps current health.
+func (p *Player) SetMaxHealth(v uint32) {
+	p.MaxHealth = v
+
+	if p.Health > v {
+		p.Health = v
+	}
+}
+
+// GetPower returns the current power for the given power type.
+func (p *Player) GetPower(pt wow.PowerType) uint32 {
+	if int(pt) < 0 || int(pt) >= wow.MaxPowerTypes {
+		return 0
+	}
+
+	return p.Power[pt]
+}
+
+// SetPower sets the current power for the given power type, clamping to max.
+func (p *Player) SetPower(pt wow.PowerType, v uint32) {
+	if int(pt) < 0 || int(pt) >= wow.MaxPowerTypes {
+		return
+	}
+
+	if v > p.MaxPower[pt] {
+		v = p.MaxPower[pt]
+	}
+
+	p.Power[pt] = v
+}
+
+// GetMaxPower returns the maximum power for the given power type.
+func (p *Player) GetMaxPower(pt wow.PowerType) uint32 {
+	if int(pt) < 0 || int(pt) >= wow.MaxPowerTypes {
+		return 0
+	}
+
+	return p.MaxPower[pt]
+}
+
+// SetMaxPower sets the maximum power for the given power type and clamps current.
+func (p *Player) SetMaxPower(pt wow.PowerType, v uint32) {
+	if int(pt) < 0 || int(pt) >= wow.MaxPowerTypes {
+		return
+	}
+
+	p.MaxPower[pt] = v
+
+	if p.Power[pt] > v {
+		p.Power[pt] = v
+	}
+}
+
+// GetPrimaryPowerType returns the primary power type for this player's class.
+func (p *Player) GetPrimaryPowerType() wow.PowerType {
+	return p.primaryPowerType()
+}
+
+// IsAlive returns true if the player has more than 0 health.
+func (p *Player) IsAlive() bool {
+	return p.Health > 0
+}
+
+// IsDead returns true if the player has 0 health.
+func (p *Player) IsDead() bool {
+	return p.Health == 0
 }
