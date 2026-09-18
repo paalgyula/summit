@@ -59,6 +59,9 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	packets.OpcodeTable.Handle(wow.ClientAttackswing, gc.HandleAttackSwing)
 	packets.OpcodeTable.Handle(wow.ClientAttackstop, gc.HandleAttackStop)
 
+	// Spell handler
+	packets.OpcodeTable.Handle(wow.ClientCastSpell, gc.HandleCastSpell)
+
 	// Movement handlers - all use the same handler function
 	movementOpcodes := []wow.OpCode{
 		wow.MsgMoveStartForward,

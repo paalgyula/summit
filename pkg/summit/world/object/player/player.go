@@ -194,6 +194,15 @@ type Player struct {
 	// Castable spells (spell IDs known by the player)
 	KnownSpells []uint32
 
+	// Active spell being cast (interface to avoid circular import)
+	ActiveSpell interface{}
+
+	// Active auras (buffs/debuffs) - interface to avoid circular import
+	Auras []interface{}
+
+	// Spell cooldowns (spell ID -> expiry time in Unix ms)
+	SpellCooldowns map[uint32]int64
+
 	// Action bar (12 buttons per bar, 3 bars + stance bar)
 	Actions [48]uint32
 
@@ -610,6 +619,100 @@ func (p *Player) IsAlive() bool {
 // IsDead returns true if the player has 0 health.
 func (p *Player) IsDead() bool {
 	return p.Health == 0
+}
+
+// KnowsSpell returns true if the player knows the given spell.
+func (p *Player) KnowsSpell(spellID uint32) bool {
+	for _, id := range p.KnownSpells {
+		if id == spellID {
+			return true
+		}
+	}
+
+	return false
+}
+
+// LearnSpell adds a spell to the player's known spells.
+func (p *Player) LearnSpell(spellID uint32) {
+	if !p.KnowsSpell(spellID) {
+		p.KnownSpells = append(p.KnownSpells, spellID)
+	}
+}
+
+// ForgetSpell removes a spell from the player's known spells.
+func (p *Player) ForgetSpell(spellID uint32) {
+	for i, id := range p.KnownSpells {
+		if id == spellID {
+			p.KnownSpells = append(p.KnownSpells[:i], p.KnownSpells[i+1:]...)
+
+			return
+		}
+	}
+}
+
+// HasPowerForSpell checks if the player has enough power for a spell.
+// powerType: 0=mana, 1=rage, 2=focus, 3=energy
+// powerCost: amount of power needed
+func (p *Player) HasPowerForSpell(powerType int, powerCost uint32) bool {
+	if powerType < 0 || powerType >= wow.MaxPowerTypes {
+		return false
+	}
+
+	return p.Power[powerType] >= powerCost
+}
+
+// ConsumePowerForSpell reduces power for a spell cast.
+func (p *Player) ConsumePowerForSpell(powerType int, powerCost uint32) {
+	if powerType < 0 || powerType >= wow.MaxPowerTypes {
+		return
+	}
+
+	if p.Power[powerType] >= powerCost {
+		p.Power[powerType] -= powerCost
+	} else {
+		p.Power[powerType] = 0
+	}
+}
+
+// IsSpellOnCooldown checks if a spell is on cooldown.
+func (p *Player) IsSpellOnCooldown(spellID uint32) bool {
+	if p.SpellCooldowns == nil {
+		return false
+	}
+
+	expiry, ok := p.SpellCooldowns[spellID]
+	if !ok {
+		return false
+	}
+
+	// Check if cooldown has expired (using a placeholder time)
+	// In real code, this would use time.Now().UnixMilli()
+	return expiry > 0
+}
+
+// AddCooldown sets a cooldown for a spell.
+func (p *Player) AddCooldown(spellID uint32, durationMs int64) {
+	if p.SpellCooldowns == nil {
+		p.SpellCooldowns = make(map[uint32]int64)
+	}
+
+	// Store as absolute time (placeholder - would use time.Now().UnixMilli() + durationMs)
+	p.SpellCooldowns[spellID] = durationMs
+}
+
+// IsWithinRange checks if the player is within range of a target.
+func (p *Player) IsWithinRange(target *Player, maxRange float32) bool {
+	if maxRange <= 0 {
+		return true // melee or self
+	}
+
+	dx := p.Location.X - target.Location.X
+	dy := p.Location.Y - target.Location.Y
+	dz := p.Location.Z - target.Location.Z
+
+	dist := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
+
+	return dist <= maxRange
 }
 
 // XpToNextLevel returns the XP required for the next level.

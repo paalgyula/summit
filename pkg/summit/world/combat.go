@@ -107,6 +107,9 @@ func (gc *WorldSession) processPlayerAttack(target *player.Player, now time.Time
 	newHealth -= uint32(damage)
 	target.SetHealth(newHealth)
 
+	// Grant rage for warriors/feral druids dealing damage
+	gc.grantRageOnDamageDealt(uint32(damage))
+
 	gc.sendAttackerStateUpdate(gc.player, target, uint32(damage))
 	gc.broadcastHealthUpdate(target)
 
@@ -128,6 +131,9 @@ func (gc *WorldSession) processNPCAttack(npc *NPC, now time.Time) {
 
 	newHealth -= uint32(damage)
 	npc.SetHealth(newHealth)
+
+	// Grant rage for warriors/feral druids dealing damage
+	gc.grantRageOnDamageDealt(uint32(damage))
 
 	// Send health update for NPC
 	gc.broadcastNPCHealthUpdate(npc)
@@ -368,4 +374,54 @@ func (gc *WorldSession) broadcastNPCHealthUpdate(npc *NPC) {
 			other.socket.Send(pkt)
 		}
 	}
+}
+
+// grantRageOnDamageDealt grants rage when a warrior/feral druid deals damage.
+// In WoW, rage is gained from dealing damage (5 rage per melee hit, more for crits).
+func (gc *WorldSession) grantRageOnDamageDealt(damage uint32) {
+	// Only grant rage for rage-using classes (warrior, feral druid)
+	powerType := gc.player.GetPrimaryPowerType()
+	if powerType != wow.PowerTypeRage {
+		return
+	}
+
+	// Rage gain: 1 rage per 10 damage dealt, minimum 5 rage per hit
+	rageGain := damage / 10
+	if rageGain < 5 {
+		rageGain = 5
+	}
+
+	// Cap rage at 100
+	maxRage := uint32(100)
+	newRage := gc.player.GetPower(powerType) + rageGain
+	if newRage > maxRage {
+		newRage = maxRage
+	}
+
+	gc.player.SetPower(powerType, newRage)
+}
+
+// grantRageOnDamageTaken grants rage when a warrior takes damage.
+// In WoW, warriors gain rage from damage taken.
+func (gc *WorldSession) grantRageOnDamageTaken(damage uint32) {
+	// Only grant rage for rage-using classes
+	powerType := gc.player.GetPrimaryPowerType()
+	if powerType != wow.PowerTypeRage {
+		return
+	}
+
+	// Rage gain from damage taken: 1 rage per 60 damage taken
+	rageGain := damage / 60
+	if rageGain < 1 && damage > 0 {
+		rageGain = 1
+	}
+
+	// Cap rage at 100
+	maxRage := uint32(100)
+	newRage := gc.player.GetPower(powerType) + rageGain
+	if newRage > maxRage {
+		newRage = maxRage
+	}
+
+	gc.player.SetPower(powerType, newRage)
 }

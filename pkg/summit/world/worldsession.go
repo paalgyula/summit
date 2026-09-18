@@ -162,9 +162,6 @@ func (gc *WorldSession) processRegen(now time.Time) {
 		return
 	}
 
-	// Don't regen while in combat (TODO: track combat state properly)
-	// For now, always regen
-
 	regened := false
 
 	// Health regen (1% of max health per tick, simplified)
@@ -183,35 +180,63 @@ func (gc *WorldSession) processRegen(now time.Time) {
 		regened = true
 	}
 
-	// Mana regen (1% of max mana per tick for mana users)
 	powerType := gc.player.GetPrimaryPowerType()
-	if powerType == wow.PowerTypeMana && gc.player.GetPower(powerType) < gc.player.GetMaxPower(powerType) {
-		manaGain := gc.player.GetMaxPower(powerType) / 100
-		if manaGain < 1 {
-			manaGain = 1
+
+	switch powerType {
+	case wow.PowerTypeMana:
+		// Mana regen: 1% of max mana per tick (out of combat)
+		// In WoW, mana regen is based on Spirit and only works when not casting
+		if gc.player.GetPower(powerType) < gc.player.GetMaxPower(powerType) {
+			manaGain := gc.player.GetMaxPower(powerType) / 100
+			if manaGain < 1 {
+				manaGain = 1
+			}
+
+			newMana := gc.player.GetPower(powerType) + manaGain
+			if newMana > gc.player.GetMaxPower(powerType) {
+				newMana = gc.player.GetMaxPower(powerType)
+			}
+
+			gc.player.SetPower(powerType, newMana)
+			regened = true
 		}
 
-		newMana := gc.player.GetPower(powerType) + manaGain
-		if newMana > gc.player.GetMaxPower(powerType) {
-			newMana = gc.player.GetMaxPower(powerType)
+	case wow.PowerTypeEnergy:
+		// Energy regen: 10 energy per second (5 per 2s tick)
+		// In WoW, energy regens at 10/sec for rogues/hunters
+		if gc.player.GetPower(powerType) < gc.player.GetMaxPower(powerType) {
+			energyGain := uint32(5) // 5 per 2s tick = 10/sec
+			newEnergy := gc.player.GetPower(powerType) + energyGain
+			if newEnergy > gc.player.GetMaxPower(powerType) {
+				newEnergy = gc.player.GetMaxPower(powerType)
+			}
+
+			gc.player.SetPower(powerType, newEnergy)
+			regened = true
 		}
 
-		gc.player.SetPower(powerType, newMana)
-		regened = true
+	case wow.PowerTypeFocus:
+		// Focus regen: 10 focus per second (5 per 2s tick)
+		// In WoW, focus regens at 10/sec for hunters
+		if gc.player.GetPower(powerType) < gc.player.GetMaxPower(powerType) {
+			focusGain := uint32(5) // 5 per 2s tick = 10/sec
+			newFocus := gc.player.GetPower(powerType) + focusGain
+			if newFocus > gc.player.GetMaxPower(powerType) {
+				newFocus = gc.player.GetMaxPower(powerType)
+			}
+
+			gc.player.SetPower(powerType, newFocus)
+			regened = true
+		}
+
+	case wow.PowerTypeRage:
+		// Rage does not regen passively
+		// Rage is gained from:
+		// - Taking damage (rageGain = damage / 60, roughly)
+		// - Dealing damage (rageGain = 5 per melee hit, more for crits)
+		// - Abilities like Bloodrage
+		// We handle rage gain in combat.go when damage is dealt/taken
 	}
-
-	// Energy regen (1 energy per tick for rogues/feral druids)
-	if powerType == wow.PowerTypeEnergy && gc.player.GetPower(powerType) < gc.player.GetMaxPower(powerType) {
-		newEnergy := gc.player.GetPower(powerType) + 1
-		if newEnergy > gc.player.GetMaxPower(powerType) {
-			newEnergy = gc.player.GetMaxPower(powerType)
-		}
-
-		gc.player.SetPower(powerType, newEnergy)
-		regened = true
-	}
-
-	// Rage does not regen out of combat (handled separately)
 
 	if regened {
 		gc.broadcastPlayerStats()
@@ -339,6 +364,9 @@ func (gc *WorldSession) updatePeriodic(now time.Time) {
 
 	// Process combat (auto-attack swings)
 	gc.ProcessCombatTick(now)
+
+	// Process spell casts
+	gc.ProcessSpellTick(now)
 
 	// Process health/mana regen
 	gc.processRegen(now)

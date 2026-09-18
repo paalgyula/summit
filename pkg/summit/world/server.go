@@ -40,6 +40,9 @@ type Server struct {
 
 	// Game object manager
 	gameObjects *GameObjectManager
+
+	// Spell manager
+	spellManager *SpellManager
 }
 
 func NewServer(opts ...ServerOption) (*Server, error) {
@@ -51,6 +54,7 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 	worldServer.clients = sync.Map{}
 	worldServer.spawns = NewSpawnManager()
 	worldServer.gameObjects = NewGameObjectManager()
+	worldServer.spellManager = NewSpellManager()
 
 	// Apply options
 	for _, so := range opts {
