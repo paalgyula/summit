@@ -37,6 +37,9 @@ type Server struct {
 
 	// NPC spawn manager
 	spawns *SpawnManager
+
+	// Game object manager
+	gameObjects *GameObjectManager
 }
 
 func NewServer(opts ...ServerOption) (*Server, error) {
@@ -47,6 +50,7 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 		Caller().Logger()
 	worldServer.clients = sync.Map{}
 	worldServer.spawns = NewSpawnManager()
+	worldServer.gameObjects = NewGameObjectManager()
 
 	// Apply options
 	for _, so := range opts {

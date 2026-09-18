@@ -228,6 +228,11 @@ func (gc *WorldSession) sendVisiblePlayers(p *player.Player) {
 	for _, npc := range server.spawns.GetNPCsInMap(p.Location.Map) {
 		gc.sendCreateObjectForNPC(npc)
 	}
+
+	// Send all game objects to the new player
+	for _, gobj := range server.gameObjects.GetObjectsInMap(p.Location.Map) {
+		gc.sendCreateObjectForGameObject(gobj)
+	}
 }
 
 // sendCreateObjectForPlayer sends SMSG_UPDATE_OBJECT with a create block
@@ -437,6 +442,71 @@ func (gc *WorldSession) sendPlayerCreate(p *player.Player) {
 
 	// Build update object
 	pkt := upd.BuildUpdateObject(p)
+
+	gc.socket.Send(pkt)
+}
+
+// sendCreateObjectForGameObject sends SMSG_UPDATE_OBJECT with a create block for a game object.
+func (gc *WorldSession) sendCreateObjectForGameObject(gobj *GameObject) {
+	pkt := wow.NewPacket(wow.ServerUpdateObject)
+
+	_ = pkt.WriteUint32(1) // block count
+	_ = pkt.WriteOne(0)    // has transport
+
+	// Update type
+	_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
+
+	// GUID
+	_ = pkt.Write(gobj.GetGUID())
+
+	// Object type ID
+	_ = pkt.WriteOne(int(wow.TypeIDGameObject))
+
+	// Update flags for game object
+	flags := uint8(wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagHasPosition)
+	_ = pkt.Write(flags)
+
+	// Stationary position (game objects don't move)
+	_ = pkt.Write(float32(gobj.X))
+	_ = pkt.Write(float32(gobj.Y))
+	_ = pkt.Write(float32(gobj.Z))
+	_ = pkt.Write(float32(gobj.O))
+
+	// Rotation quaternion (0, 0, 0, 1 = no rotation)
+	_ = pkt.Write(float32(0))
+	_ = pkt.Write(float32(0))
+	_ = pkt.Write(float32(0))
+	_ = pkt.Write(float32(1))
+
+	// Low GUID
+	_ = pkt.WriteUint32(0x0B) // unk for game objects
+
+	// High GUID
+	_ = pkt.WriteUint32(0x00) // unk
+
+	// Values update
+	mask := gobj.Object.BuildFullUpdateMask()
+	blockCount := mask.GetUpdateBlockCount()
+
+	// Write mask
+	for i := uint32(0); i < blockCount; i++ {
+		val := uint32(0)
+		for b := uint32(0); b < 32; b++ {
+			idx := i*32 + b
+			if mask.GetBit(idx) {
+				val |= 1 << b
+			}
+		}
+
+		_ = pkt.Write(val)
+	}
+
+	// Write values
+	for i := uint32(0); i < blockCount*32; i++ {
+		if mask.GetBit(i) && int(i) < gobj.Object.ValuesCount() {
+			_ = pkt.Write(gobj.Object.GetUInt32Value(object.UpdateField(i)))
+		}
+	}
 
 	gc.socket.Send(pkt)
 }
