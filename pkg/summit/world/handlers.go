@@ -51,6 +51,59 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	packets.OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
 	packets.OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
 	packets.OpcodeTable.Handle(wow.ClientPlayerLogin, gc.HandlePlayerLogin)
+
+	// Movement handlers - all use the same handler function
+	movementOpcodes := []wow.OpCode{
+		wow.MsgMoveStartForward,
+		wow.MsgMoveStartBackward,
+		wow.MsgMoveStop,
+		wow.MsgMoveStartStrafeLeft,
+		wow.MsgMoveStartStrafeRight,
+		wow.MsgMoveStopStrafe,
+		wow.MsgMoveStartTurnLeft,
+		wow.MsgMoveStartTurnRight,
+		wow.MsgMoveStopTurn,
+		wow.MsgMoveStartPitchUp,
+		wow.MsgMoveStartPitchDown,
+		wow.MsgMoveStopPitch,
+		wow.MsgMoveFallLand,
+		wow.MsgMoveStartSwim,
+		wow.MsgMoveStopSwim,
+		wow.MsgMoveHeartbeat,
+		wow.MsgMoveStartAscend,
+		wow.MsgMoveStopAscend,
+		wow.MsgMoveStartDescend,
+	}
+
+	for _, op := range movementOpcodes {
+		packets.OpcodeTable.Handle(op, handlePacket(func(data wow.PacketData) {
+			gc.HandleMovementOpcodes(op, data)
+		}))
+	}
+
+	// Speed change handlers
+	speedOpcodes := []wow.OpCode{
+		wow.MsgMoveSetRunSpeed,
+		wow.MsgMoveSetRunBackSpeed,
+		wow.MsgMoveSetWalkSpeed,
+		wow.MsgMoveSetSwimSpeed,
+		wow.MsgMoveSetSwimBackSpeed,
+		wow.MsgMoveSetTurnRate,
+		wow.MsgMoveSetFlightSpeed,
+		wow.MsgMoveSetFlightBackSpeed,
+	}
+
+	for _, op := range speedOpcodes {
+		packets.OpcodeTable.Handle(op, handlePacket(func(data wow.PacketData) {
+			gc.HandleMovementSpeed(op, data)
+		}))
+	}
+
+	// Special movement handlers
+	packets.OpcodeTable.Handle(wow.ClientMoveFallReset, handlePacket(func(data wow.PacketData) {
+		gc.HandleMovementOpcodes(wow.ClientMoveFallReset, data)
+	}))
+	packets.OpcodeTable.Handle(wow.ClientMoveTimeSkipped, gc.HandleMoveTimeSkipped)
 }
 
 func (gc *WorldSession) Handle(pkt *wow.Packet) {

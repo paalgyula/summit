@@ -172,6 +172,9 @@ type Player struct {
 
 	// GroupID is the ID of the group the player is in (0 if not in a group)
 	GroupID uint32
+
+	// MoveFlags stores the current movement flags for the player
+	MoveFlags wow.MovementFlag
 }
 
 // Initializes the inventory. The slots can be nul, in this case it will be initialized as
