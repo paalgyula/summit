@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/paalgyula/summit/internal/store/localdb"
 	"github.com/paalgyula/summit/pkg/store"
@@ -25,8 +26,13 @@ type ProxyServer struct {
 	db  store.AccountRepo
 	log zerolog.Logger
 
-	// bridge     *Bridge
-	authServer *auth.Server
+	authServer     *auth.Server
+	authManagement auth.ManagementService
+	charStore      store.CharacterRepo
+
+	// Proxy credentials for upstream auth
+	accountName string
+	sessionKey  string
 
 	realms []*auth.Realm
 }
@@ -38,20 +44,21 @@ type LoginServerConfig struct {
 }
 
 func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig) error {
-	store := localdb.InitYamlDatabase("summit.yaml")
+	db := localdb.InitYamlDatabase("summit.yaml")
+	ms := auth.NewManagementService(db)
 
 	//nolint:exhaustruct
 	srv := &ProxyServer{
-		db: store,
+		db: db,
 		log: log.With().
 			Str("service", "proxy").
 			Caller().
 			Logger(),
-		ctx:    ctx,
-		config: config,
+		ctx:            ctx,
+		config:         config,
+		charStore:      db,
+		authManagement: ms,
 	}
-
-	ms := auth.NewManagementService(store)
 
 	as, err := auth.NewServer(listenAddress, ms, auth.WithRealmProvider(srv))
 	if err != nil {
@@ -74,22 +81,31 @@ func (proxy *ProxyServer) Realms(string) ([]*auth.Realm, error) {
 }
 
 func (proxy *ProxyServer) InitFakeRealmClient() {
-	if proxy.realms == nil {
-		loginConn, err := net.Dial("tcp4", proxy.config.ServerAddress)
-		if err != nil {
-			panic(err)
-		}
-
-		client := client.NewRealmClient(loginConn, 0x08)
-
-		realms, err := client.Authenticate(proxy.config.User, proxy.config.Pass)
-		if err != nil {
-			proxy.log.Fatal().Msg("cannot authenticate client")
-		}
-
-		proxy.log.Debug().Msgf("starting %d bridge realms", len(realms))
-		proxy.startServers(realms)
+	if proxy.realms != nil {
+		return
 	}
+
+	loginConn, err := net.Dial("tcp4", proxy.config.ServerAddress)
+	if err != nil {
+		panic(err)
+	}
+
+	rc := client.NewRealmClient(loginConn, 0x08)
+
+	realms, err := rc.Authenticate(proxy.config.User, proxy.config.Pass)
+	if err != nil {
+		proxy.log.Fatal().Msg("cannot authenticate client")
+	}
+
+	// Store session key and account name for world bridges
+	proxy.sessionKey = rc.SessionKey.Text(16)
+	proxy.accountName = strings.ToUpper(proxy.config.User)
+
+	proxy.log.Info().
+		Str("account", proxy.accountName).
+		Msgf("proxy authenticated with upstream, starting %d bridge realms", len(realms))
+
+	proxy.startServers(realms)
 }
 
 func (proxy *ProxyServer) startServers(realms []*auth.Realm) {
@@ -97,7 +113,7 @@ func (proxy *ProxyServer) startServers(realms []*auth.Realm) {
 
 	portBase := 5983
 	for i, realm := range realms {
-		_ = NewWorldBridge(portBase+i, realm.Address, realm.Name, proxy)
+		_ = NewWorldBridge(portBase+i, realm.Address, realm.Name, proxy, proxy.accountName, proxy.sessionKey)
 		realm.Address = fmt.Sprintf("127.0.0.1:%d", portBase+i)
 
 		proxy.realms[i] = realm
@@ -106,7 +122,7 @@ func (proxy *ProxyServer) startServers(realms []*auth.Realm) {
 
 func (proxy *ProxyServer) AddClient(gc *world.WorldSession) {
 	proxy.client = gc
-	proxy.log.Error().Msgf("client connected, opening bridge for: %s", gc.ID)
+	proxy.log.Info().Msgf("client connected: %s", gc.ID)
 }
 
 func (proxy *ProxyServer) Disconnected(_ *world.WorldSession, reason string) {
@@ -122,29 +138,39 @@ func (proxy *ProxyServer) Run() {
 	}
 }
 
-// !
-// ! SessionManager methods
-// !
+// SessionManager interface implementation
 
-// GetAuthSession retrives the auth session from login (auth) server.
-func (ws *ProxyServer) GetAuthSession(account string) *auth.Session {
-	panic("not implemented") // TODO: Implement
+func (proxy *ProxyServer) GetAuthSession(account string) *auth.Session {
+	proxy.log.Trace().Msgf("requesting auth session for account: %s", account)
+
+	sess := proxy.authManagement.GetSession(account)
+
+	if sess != nil {
+		proxy.log.Trace().
+			Str("account", strings.ToLower(account)).
+			Msg("session found")
+	}
+
+	return sess
 }
 
-// GetCharacters fetches the character list (with full character info) from the store.
-func (ws *ProxyServer) GetCharacters(account string, characters *player.Players) (err error) {
-	// *characters, err = ws.characterStore.GetCharacters(account)
-	// return err
-	panic("not implemented") // TODO: Implement
+func (proxy *ProxyServer) GetCharacters(account string, characters *player.Players) error {
+	chars, err := proxy.charStore.GetCharacters(account)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range chars {
+		characters.Add(c)
+	}
+
+	return nil
 }
 
-// GetCharacter retrieves a single character by GUID.
-func (ws *ProxyServer) GetCharacter(guid uint32) (*player.Player, error) {
-	panic("not implemented") // TODO: Implement
+func (proxy *ProxyServer) GetCharacter(guid uint32) (*player.Player, error) {
+	return proxy.charStore.GetCharacter(guid)
 }
 
-// CreateCharacter saves a new character into the database.
-func (ws *ProxyServer) CreateCharacter(account string, character *player.Player) error {
-	// return ws.characterStore.CreateCharacter(account, character)
-	panic("not implemented") // TODO: Implement
+func (proxy *ProxyServer) CreateCharacter(account string, character *player.Player) error {
+	return proxy.charStore.CreateCharacter(account, character)
 }

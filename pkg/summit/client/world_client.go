@@ -34,6 +34,10 @@ type WorldClient struct {
 
 	clientMessages chan *wow.Packet
 	serverMessages chan ServerMessage
+
+	// ForwardHandler is called for all packets from upstream when set.
+	// This enables proxy mode where packets are forwarded instead of handled locally.
+	forwardHandler func(opcode wow.OpCode, data []byte)
 }
 
 func NewWorldClient(accountName, sessionKey, worldAddress string) (*WorldClient, error) {
@@ -81,6 +85,12 @@ func (wc *WorldClient) Disconnect() error {
 	close(wc.serverMessages)
 
 	return wc.conn.Close()
+}
+
+// SetForwardHandler sets a callback function that will be called for all packets
+// from the upstream server. When set, packets are forwarded instead of handled locally.
+func (wc *WorldClient) SetForwardHandler(handler func(opcode wow.OpCode, data []byte)) {
+	wc.forwardHandler = handler
 }
 
 type ServerMessage struct {

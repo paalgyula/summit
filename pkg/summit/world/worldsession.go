@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/protocol"
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
@@ -125,6 +126,19 @@ func (gc *WorldSession) Close() error {
 	gc.ws.Disconnected(gc, "closing GameClient")
 
 	return gc.n.Close() //nolint:wrapcheck
+}
+
+// Send sends a packet to the game client.
+func (gc *WorldSession) Send(pkt *wow.Packet) {
+	gc.socket.Send(pkt)
+}
+
+// sendDestroyObject sends SMSG_DESTROY_OBJECT to remove an object from the client.
+func (gc *WorldSession) sendDestroyObject(guid wow.GUID) {
+	pkt := wow.NewPacket(wow.ServerDestroyObject)
+	_ = pkt.Write(guid)
+	_ = pkt.WriteOne(0) // not despawn animation
+	gc.socket.Send(pkt)
 }
 
 // updatePeriodic runs periodic updates for the player (regen, saves, etc).

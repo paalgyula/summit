@@ -11,33 +11,16 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-//nolint:unused
+// WorldBridge proxies packets between a game client and an upstream world server.
 type WorldBridge struct {
 	serverAddr string
-	user       string
-	pass       string
+	log        zerolog.Logger
 
-	// client *world.GameClient
-
-	// socket    *RealmClient
-	// worldConn net.Conn
-
-	// crypt *crypt.WowCrypt
-
-	log zerolog.Logger
+	// Proxy credentials for upstream authentication
+	accountName string
+	sessionKey  string
 }
 
-// HandleProxy handles an external packet received from the client by writing
-// it to the packet dumper and sending the packet to the upstream.
-//
-// client: the game client sending the packet.
-// oc: the op opcode of the packet.
-// data: the data block of the packet.
-func (wb *WorldBridge) HandleProxy(_ *world.WorldSession, oc wow.OpCode, data []byte) {
-	wow.GetPacketDumper().Write(oc, data)
-}
-
-//nolint:godox,wsl
 func (wb *WorldBridge) Start(listener net.Listener, sessionManager world.SessionManager) {
 	for {
 		conn, err := listener.Accept()
@@ -47,30 +30,49 @@ func (wb *WorldBridge) Start(listener net.Listener, sessionManager world.Session
 			continue
 		}
 
+		gc := world.NewWorldSession(conn, sessionManager)
+
+		wc, err := client.NewWorldClient(wb.accountName, wb.sessionKey, wb.serverAddr)
+		if err != nil {
+			wb.log.Error().Err(err).Msg("cannot connect to upstream world server")
+			gc.Close()
+
+			continue
+		}
+
+		wb.log.Info().
+			Str("account", wb.accountName).
+			Str("upstream", wb.serverAddr).
+			Msg("bridge connection established")
+
+		// Forward all upstream packets to the game client
+		wc.SetForwardHandler(func(opcode wow.OpCode, data []byte) {
+			wow.GetPacketDumper().Write(opcode, data)
+			gc.Send(wow.NewPacketWithData(opcode, data))
+		})
+
+		// Forward all client packets to upstream
 		handlers := make([]world.PacketHandler, wow.NumMsgTypes)
 		for i := 0; i < int(wow.NumMsgTypes); i++ {
 			handlers[i] = world.PacketHandler{
-				Opcode:  wow.OpCode(i),
-				Handler: wb.HandleProxy,
+				Opcode: wow.OpCode(i),
+				Handler: world.ExternalPacketFunc(func(_ *world.WorldSession, oc wow.OpCode, data []byte) {
+					wow.GetPacketDumper().Write(oc, data)
+					wc.Send(wow.NewPacketWithData(oc, data))
+				}),
 			}
 		}
 
-		gc := world.NewWorldSession(conn, sessionManager, handlers...)
-
-		_, err = client.NewWorldClient(gc.AccountName, gc.SessionKey.String(), wb.serverAddr)
-		if err != nil {
-			log.Error().Err(err).Send()
-		}
-
-		// TODO: re-activate AuthSessionHandler
-		// packets.OpcodeTable.Handle(wow.ClientAuthSession, wb.client.AuthSessionHandler)
+		gc.RegisterHandlers(handlers...)
 	}
 }
 
-func NewWorldBridge(listenPort int, serverAddr string, serverName string, ws world.SessionManager) *WorldBridge {
+func NewWorldBridge(listenPort int, serverAddr string, serverName string, ws world.SessionManager, accountName, sessionKey string) *WorldBridge {
 	//nolint:exhaustruct
 	b := &WorldBridge{
-		serverAddr: serverAddr,
+		serverAddr:  serverAddr,
+		accountName: accountName,
+		sessionKey:  sessionKey,
 		log: log.With().
 			Str("name", serverName).
 			Str("service", "bridge").Logger(),

@@ -9,6 +9,13 @@ import (
 
 // ! Packet handler definitions
 func (wc *WorldClient) handleMessage(msg *ServerMessage) {
+	// If forward handler is set, forward all packets instead of handling locally
+	if wc.forwardHandler != nil {
+		wc.forwardHandler(msg.Opcode, msg.Data)
+
+		return
+	}
+
 	switch msg.Opcode {
 	case wow.ServerAuthChallenge:
 		wc.handleAuthChallenge(msg)
