@@ -54,11 +54,16 @@ func (pkt *ClientLoginProof) UnmarshalPacket(bb wow.PacketData) error {
 // ServerLoginProof is the server's response to a client's challenge. It contains
 // some SRP information used for handshaking.
 type ServerLoginProof struct {
-	StatusCode uint8
-	Proof      big.Int
+	StatusCode    uint8
+	Proof         big.Int
+	AccountFlags  uint32
+	SurveyID      uint32
+	LoginFlags    uint16
 }
 
 // Bytes writes out the packet to an array of bytes.
+//
+//nolint:errcheck
 func (pkt *ServerLoginProof) MarshalPacket() []byte {
 	w := wow.NewPacket(wow.OpCode(AuthLoginProof))
 
@@ -66,6 +71,11 @@ func (pkt *ServerLoginProof) MarshalPacket() []byte {
 
 	if pkt.StatusCode == 0 {
 		_, _ = w.WriteZeroPadded(wow.ReverseBytes(pkt.Proof.Bytes()), 30)
+
+		// BC+ extended fields
+		w.Write(pkt.AccountFlags) // Account flags
+		w.Write(pkt.SurveyID)     // Survey ID
+		w.Write(pkt.LoginFlags)   // Login flags (0x1 = has account message)
 	}
 
 	return w.Bytes()

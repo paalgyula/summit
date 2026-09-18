@@ -171,11 +171,13 @@ func (gc *WorldSession) AuthSessionHandler(data wow.PacketData) {
 	// TODO: get the expansion from account (database)
 	p.Write(uint8(2)) // Expansion
 
-	// Queue info
 	if queued {
-		p.Write(uint32(4))
-		p.WriteOne(0x00) // ? Whats this
+		// Queue info
+		p.Write(uint32(4)) // Queue position
 	}
+
+	// Free character migration available
+	p.WriteOne(0x00)
 
 	gc.socket.Send(p)
 }

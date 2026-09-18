@@ -77,7 +77,7 @@ func (pkt *ServerRealmlistPacket) MarshalPacket() []byte {
 	realmPkt := wow.NewPacket(0)
 	realmPkt.Write(uint32(0)) // unk
 
-	realmPkt.Write(uint16(len(pkt.Realms))) // Size placeholder
+	realmPkt.Write(uint16(len(pkt.Realms))) // Realm count
 
 	for _, realm := range pkt.Realms {
 		realmPkt.Write(realm.Icon)
@@ -88,10 +88,8 @@ func (pkt *ServerRealmlistPacket) MarshalPacket() []byte {
 		realmPkt.Write(realm.Population)
 		realmPkt.Write(realm.NumCharacters)
 		realmPkt.Write(realm.Timezone)
-		realmPkt.Write(uint8(0x2c)) // Find what is this. Maybe a realm ID?
+		realmPkt.Write(uint8(0x2c)) // Realm ID
 	}
-
-	realmPkt.Write(uint16(0x0010)) // Terminator
 
 	// Make the real buffer, which has the length at the start.
 	w.Write(uint16(len(realmPkt.Bytes()))) // Size of the full packet

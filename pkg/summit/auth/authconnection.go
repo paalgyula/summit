@@ -2,7 +2,9 @@
 package auth
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +27,17 @@ var (
 	ErrNoHandler = errors.New("no handler implemented")
 )
 
+// AuthState represents the state of an auth connection.
+type AuthState uint8
+
+const (
+	AuthStateChallenge       AuthState = iota // Waiting for login/reconnect challenge
+	AuthStateLogonProof                       // Waiting for login proof
+	AuthStateReconnectProof                   // Waiting for reconnect proof
+	AuthStateAuthed                           // Authenticated, can handle realm list
+	AuthStateClosed                           // Connection closed
+)
+
 type AuthConnection struct {
 	c net.Conn
 
@@ -39,6 +52,13 @@ type AuthConnection struct {
 	mgmt    ManagementService
 
 	srp *crypt.SRP6
+
+	// Auth state machine
+	state AuthState
+
+	// Reconnect state
+	reconnectProof [16]byte  // Random proof sent to client during reconnect challenge
+	sessionKey     string    // Session key from previous login (for reconnect verification)
 }
 
 func NewAuthConnection(c net.Conn, rp RealmProvider,
@@ -50,8 +70,9 @@ func NewAuthConnection(c net.Conn, rp RealmProvider,
 		mgmt: management,
 		id:   xid.New().String(),
 
-		srp: crypt.NewWoWSRP6(),
-		rp:  rp,
+		srp:   crypt.NewWoWSRP6(),
+		rp:    rp,
+		state: AuthStateChallenge,
 
 		outLock: sync.Mutex{},
 	}
@@ -93,6 +114,8 @@ func (rc *AuthConnection) HandleLogin(pkt *ClientLoginChallenge) error {
 
 		res.G = uint8(rc.srp.GValue())
 		res.N = *rc.srp.N()
+
+		rc.state = AuthStateLogonProof
 	}
 
 	// Send out the packet
@@ -119,6 +142,9 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 	response.StatusCode = 0
 	response.Proof.
 		Set(crypt.CalculateServerProof(&pkt.A, M, K))
+	response.AccountFlags = 0 // Normal account
+	response.SurveyID = 0
+	response.LoginFlags = 0 // 0x1 = has account message
 
 	rc.log = rc.log.With().
 		Str("account", rc.account.Name).
@@ -130,7 +156,83 @@ func (rc *AuthConnection) HandleProof(pkt *ClientLoginProof) error {
 		CreatedAt:   time.Now(),
 	})
 
+	rc.state = AuthStateAuthed
+
 	return rc.Send(AuthLoginProof, response.MarshalPacket())
+}
+
+//nolint:godox
+func (rc *AuthConnection) HandleReconnectChallenge(pkt *ClientReconnectChallenge) error {
+	rc.log.Info().Str("account", pkt.AccountName).Msg("reconnect challenge received")
+
+	// Look up the account
+	rc.account = rc.mgmt.FindAccount(pkt.AccountName)
+	if rc.account == nil {
+		res := &ServerReconnectChallenge{
+			StatusCode: 6, // ChallengeStatusFailUnknownAccount
+		}
+
+		return rc.Send(AuthReconnectChallenge, res.MarshalPacket())
+	}
+
+	// Retrieve existing session key for this account
+	sess := rc.mgmt.GetSession(pkt.AccountName)
+	if sess == nil {
+		res := &ServerReconnectChallenge{
+			StatusCode: 6, // ChallengeStatusFailUnknownAccount
+		}
+
+		return rc.Send(AuthReconnectChallenge, res.MarshalPacket())
+	}
+
+	// Store session key for reconnect proof verification
+	rc.sessionKey = sess.SessionKey
+
+	// Generate random 16-byte reconnect proof
+	challenge := NewServerReconnectChallenge()
+	rc.reconnectProof = challenge.R1
+
+	rc.state = AuthStateReconnectProof
+
+	return rc.Send(AuthReconnectChallenge, challenge.MarshalPacket())
+}
+
+func (rc *AuthConnection) HandleReconnectProof(pkt *ClientReconnectProof) error {
+	rc.log.Info().Msg("reconnect proof received")
+
+	// Verify: SHA1(login + R1 + serverReconnectProof + sessionKey) == R2
+	sessionKeyBytes := hexToBytes(rc.sessionKey)
+
+	expectedProof := GenerateReconnectProof(
+		rc.account.Name,
+		pkt.R1[:],
+		rc.reconnectProof[:],
+		sessionKeyBytes,
+	)
+
+	// Compare the proofs
+	if !bytes.Equal(pkt.R2[:], expectedProof) {
+		rc.log.Error().
+			Str("account", rc.account.Name).
+			Msg("reconnect proof verification failed")
+
+		response := &ServerReconnectProof{
+			StatusCode: 4, // auth failed
+		}
+
+		return rc.Send(AuthReconnectProof, response.MarshalPacket())
+	}
+
+	rc.log.Info().Str("account", rc.account.Name).Msg("reconnect proof verified successfully")
+
+	rc.state = AuthStateAuthed
+
+	response := &ServerReconnectProof{
+		StatusCode: 0, // success
+		LoginFlags: 0,
+	}
+
+	return rc.Send(AuthReconnectProof, response.MarshalPacket())
 }
 
 //nolint:godox
@@ -203,15 +305,42 @@ func (rc *AuthConnection) listen() {
 		}
 
 		switch RealmCommand(pkt.Command) {
-		case AuthLoginChallenge:
-			var clc ClientLoginChallenge
+		case AuthLoginChallenge, AuthReconnectChallenge:
+			// Both challenge types are valid in the Challenge state
+			if rc.state != AuthStateChallenge {
+				rc.log.Warn().
+					Str("state", fmt.Sprintf("%d", rc.state)).
+					Msg("unexpected challenge in current state")
 
-			pkt.Unmarshal(&clc)
+				continue
+			}
 
-			rc.log.Trace().Msgf(">> WoW -> Auth ClientLoginChallenge")
+			if RealmCommand(pkt.Command) == AuthLoginChallenge {
+				var clc ClientLoginChallenge
 
-			_ = rc.HandleLogin(&clc)
+				pkt.Unmarshal(&clc)
+
+				rc.log.Trace().Msgf(">> WoW -> Auth ClientLoginChallenge")
+
+				_ = rc.HandleLogin(&clc)
+			} else {
+				var rcc ClientReconnectChallenge
+
+				pkt.Unmarshal(&rcc)
+
+				rc.log.Trace().Msgf(">> WoW -> Auth ClientReconnectChallenge")
+
+				_ = rc.HandleReconnectChallenge(&rcc)
+			}
 		case AuthLoginProof:
+			if rc.state != AuthStateLogonProof {
+				rc.log.Warn().
+					Str("state", fmt.Sprintf("%d", rc.state)).
+					Msg("unexpected login proof in current state")
+
+				continue
+			}
+
 			var clp ClientLoginProof
 
 			pkt.Unmarshal(&clp)
@@ -219,7 +348,31 @@ func (rc *AuthConnection) listen() {
 			rc.log.Trace().Msgf(">> WoW -> Auth ClientLoginProof")
 
 			_ = rc.HandleProof(&clp)
+		case AuthReconnectProof:
+			if rc.state != AuthStateReconnectProof {
+				rc.log.Warn().
+					Str("state", fmt.Sprintf("%d", rc.state)).
+					Msg("unexpected reconnect proof in current state")
+
+				continue
+			}
+
+			var rcp ClientReconnectProof
+
+			pkt.Unmarshal(&rcp)
+
+			rc.log.Trace().Msgf(">> WoW -> Auth ClientReconnectProof")
+
+			_ = rc.HandleReconnectProof(&rcp)
 		case RealmList:
+			if rc.state != AuthStateAuthed {
+				rc.log.Warn().
+					Str("state", fmt.Sprintf("%d", rc.state)).
+					Msg("unexpected realm list request in current state")
+
+				continue
+			}
+
 			var rlp ClientRealmlistPacket
 
 			pkt.Unmarshal(&rlp)
@@ -227,10 +380,6 @@ func (rc *AuthConnection) listen() {
 			log.Trace().Msgf(">> WoW -> Auth ClientRealmlistPacket")
 
 			_ = rc.HandleRealmList()
-		case AuthReconnectChallenge:
-			fallthrough
-		case AuthReconnectProof:
-			rc.log.Fatal().Msgf("unhandled command: %T(0x%02x)", pkt.Command, pkt.Command)
 		}
 	}
 }
@@ -261,16 +410,21 @@ func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 		}
 
 		length = int(binary.LittleEndian.Uint16(lenData[1:]))
+	case AuthReconnectChallenge:
+		// Reconnect challenge has the same format as login challenge
+		lenData, err := ReadBytes(r, 3)
+		if err != nil {
+			return nil, fmt.Errorf("error while reading header length: %w", err)
+		}
+
+		length = int(binary.LittleEndian.Uint16(lenData[1:]))
 	case AuthLoginProof:
 		length = 74
+	case AuthReconnectProof:
+		// R1(16) + R2(20) + R3(20) + numberOfKeys(1) = 57
+		length = 57
 	case RealmList:
 		length = 4
-	case AuthReconnectChallenge, AuthReconnectProof:
-		rc.log.Error().
-			Hex("packet", opCodeData).
-			Msg("packet is not handled yet")
-
-		return nil, fmt.Errorf("%w: %v", ErrNoHandler, opCode)
 	}
 
 	bb, err := ReadBytes(r, length)
@@ -284,4 +438,14 @@ func (rc *AuthConnection) read(r io.Reader) (*RData, error) {
 	}
 
 	return &ret, nil
+}
+
+// hexToBytes converts a hex string to a byte slice.
+func hexToBytes(s string) []byte {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return nil
+	}
+
+	return b
 }
