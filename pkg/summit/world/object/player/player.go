@@ -166,6 +166,12 @@ type Player struct {
 	FirstLogin uint8 // Boolean, but uint8 :D
 
 	Pet Pet
+
+	// IsInWorld indicates if the player is currently in the world
+	IsInWorld bool
+
+	// GroupID is the ID of the group the player is in (0 if not in a group)
+	GroupID uint32
 }
 
 // Initializes the inventory. The slots can be nul, in this case it will be initialized as

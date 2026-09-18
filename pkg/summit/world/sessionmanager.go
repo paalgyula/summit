@@ -20,6 +20,9 @@ type SessionManager interface {
 	// GetCharacters fetches the character list (with full character info) from the store.
 	GetCharacters(account string, characters *player.Players) error
 
+	// GetCharacter retrieves a single character by GUID.
+	GetCharacter(guid uint32) (*player.Player, error)
+
 	// CreateCharacter saves a new character into the database.
 	CreateCharacter(account string, character *player.Player) error
 }
@@ -52,6 +55,11 @@ func (ws *Server) GetCharacters(account string, characters *player.Players) erro
 	}
 
 	return err
+}
+
+// GetCharacter retrieves a single character by GUID.
+func (ws *Server) GetCharacter(guid uint32) (*player.Player, error) {
+	return ws.charStore.GetCharacter(guid)
 }
 
 // CreateCharacter saves a new character into the database.

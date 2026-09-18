@@ -50,6 +50,7 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	packets.OpcodeTable.Handle(wow.ClientCharEnum, gc.SendCharacterEnum)
 	packets.OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
 	packets.OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
+	packets.OpcodeTable.Handle(wow.ClientPlayerLogin, gc.HandlePlayerLogin)
 }
 
 func (gc *WorldSession) Handle(pkt *wow.Packet) {

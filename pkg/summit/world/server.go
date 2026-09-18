@@ -130,7 +130,7 @@ func (ws *Server) Disconnected(gc *WorldSession, reason string) {
 }
 
 func (ws *Server) Stats() {
-	ws.log.Debug().Msgf(MemUsage())
+	ws.log.Debug().Msg(MemUsage())
 }
 
 func (ws *Server) Run() {

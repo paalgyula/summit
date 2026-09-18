@@ -13,6 +13,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow/protocol"
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
@@ -46,6 +47,12 @@ type WorldSession struct {
 	// bs *babysocket.Server
 
 	socket *protocol.WoWSocket
+
+	// Player currently logged in through this session
+	player *player.Player
+
+	// Time sync counter
+	timeSyncCounter uint32
 }
 
 func NewWorldSession(n net.Conn, ws SessionManager, handlers ...PacketHandler) *WorldSession {

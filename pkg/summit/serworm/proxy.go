@@ -138,6 +138,11 @@ func (ws *ProxyServer) GetCharacters(account string, characters *player.Players)
 	panic("not implemented") // TODO: Implement
 }
 
+// GetCharacter retrieves a single character by GUID.
+func (ws *ProxyServer) GetCharacter(guid uint32) (*player.Player, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 // CreateCharacter saves a new character into the database.
 func (ws *ProxyServer) CreateCharacter(account string, character *player.Player) error {
 	// return ws.characterStore.CreateCharacter(account, character)

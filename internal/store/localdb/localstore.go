@@ -96,6 +96,24 @@ func (db *LocalStore) GetCharacters(account string) (player.Players, error) {
 	return pp, nil
 }
 
+// GetCharacter retrieves a single character by GUID.
+func (db *LocalStore) GetCharacter(guid uint32) (*player.Player, error) {
+	for _, a := range db.Accounts {
+		var pp player.Players
+		if err := a.Characters(&pp); err != nil {
+			continue
+		}
+
+		for _, p := range pp {
+			if p.ID == guid {
+				return p, nil
+			}
+		}
+	}
+
+	return nil, nil
+}
+
 // CreateCharacter persists the character in the store.
 func (db *LocalStore) CreateCharacter(account string, character *player.Player) error {
 	panic("not implemented") // TODO: Implement

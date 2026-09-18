@@ -14,6 +14,9 @@ type CharacterRepo interface {
 	// Retrives characters from the store for the specified account.
 	GetCharacters(account string) (player.Players, error)
 
+	// GetCharacter retrieves a single character by GUID.
+	GetCharacter(guid uint32) (*player.Player, error)
+
 	// CreateCharacter persists the character in the store.
 	CreateCharacter(account string, character *player.Player) error
 
