@@ -196,6 +196,12 @@ type Player struct {
 
 	// Action bar (12 buttons per bar, 3 bars + stance bar)
 	Actions [48]uint32
+
+	// Attack state
+	AttackTarget   uint64 // GUID of current attack target
+	AttackState    int    // 0 = idle, 1 = swinging
+	NextAttackTime int64  // when next swing happens (Unix ms)
+	BaseDamage     float32
 }
 
 // Initializes the inventory. The slots can be nil, in this case it will be initialized as
@@ -264,6 +270,81 @@ func (p *Player) Init() {
 	if p.Inventory == nil {
 		p.Inventory = NewInventory()
 	}
+
+	// Initialize update field values array
+	p.Object.InitValues(int(object.PlayerEnd))
+
+	// Set Object fields
+	p.Object.SetUInt32Value(object.ObjectFieldGuid, uint32(p.GUID()))
+	p.Object.SetUInt32Value(object.ObjectFieldGuid+1, uint32(uint64(p.GUID())>>32))
+	p.Object.SetUInt32Value(object.ObjectFieldType, uint32(wow.TypeIDPlayer))
+	p.Object.SetFloatValue(object.ObjectFieldScaleX, 1.0)
+
+	// Set Unit fields
+	// UNIT_FIELD_BYTES_0: race | (class << 8) | (gender << 16) | (powerType << 24)
+	raceClassGender := uint32(p.Race) | (uint32(p.Class) << 8) | (uint32(p.Gender) << 16)
+	powerTypeVal := uint32(powerType) << 24
+	p.Object.SetUInt32Value(object.UnitFieldBytes_0, raceClassGender|powerTypeVal)
+
+	// Health / MaxHealth
+	p.Object.SetUInt32Value(object.UnitFieldHealth, p.Health)
+	p.Object.SetUInt32Value(object.UnitFieldMaxhealth, p.MaxHealth)
+
+	// Power / MaxPower (only primary power type for now)
+	for i := 0; i < wow.MaxPowerTypes; i++ {
+		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldPower1)+i), p.Power[i])
+		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldMaxpower1)+i), p.MaxPower[i])
+	}
+
+	// Level
+	p.Object.SetUInt32Value(object.UnitFieldLevel, uint32(p.Level))
+
+	// Faction template (12 for human, 1 for generic hostile — use 1 for now)
+	p.Object.SetUInt32Value(object.UnitFieldFactiontemplate, 1)
+
+	// Display ID
+	p.Object.SetUInt32Value(object.UnitFieldDisplayid, p.DisplayID)
+	p.Object.SetUInt32Value(object.UnitFieldNativedisplayid, p.NativeDisplayID)
+
+	// Mount display (0 = not mounted)
+	p.Object.SetUInt32Value(object.UnitFieldMountdisplayid, 0)
+
+	// Unit flags: UNIT_FLAG_PVP_ATTACKABLE (0x08)
+	p.Object.SetUInt32Value(object.UnitFieldFlags, 0x08)
+
+	// Bounding radius / combat reach
+	p.Object.SetFloatValue(object.UnitFieldBoundingradius, 0.388999998569489)
+	p.Object.SetFloatValue(object.UnitFieldCombatreach, 1.5)
+
+	// Base attack time (2000ms)
+	p.Object.SetUInt32Value(object.UnitFieldBaseattacktime, 2000)
+	p.Object.SetUInt32Value(object.UnitFieldBaseattacktime+1, 0)
+
+	// Mod cast speed (1.0)
+	p.Object.SetFloatValue(object.UnitModCastSpeed, 1.0)
+
+	// UNIT_FIELD_BYTES_2: (0x02 << 24) = sanctuary flag
+	p.Object.SetUInt32Value(object.UnitFieldBytes_2, 0x02000000)
+
+	// Player fields
+	p.Object.SetUInt32Value(object.PlayerBytes,
+		uint32(p.Skin)|(uint32(p.Face)<<8)|(uint32(p.HairStyle)<<16)|(uint32(p.HairColor)<<24))
+	p.Object.SetUInt32Value(object.PlayerBytes_2,
+		uint32(p.FacialHair)|(0x00<<8)|(0x00<<16)|(0x02<<24))
+	p.Object.SetUInt32Value(object.PlayerBytes_3, uint32(p.Gender))
+
+	// Guild
+	p.Object.SetUInt32Value(object.PlayerGuildid, 0)
+	p.Object.SetUInt32Value(object.PlayerGuildrank, 0)
+
+	// Money
+	p.Object.SetUInt32Value(object.PlayerFieldCoinage, p.Money)
+
+	// Watched faction index (-1 = none)
+	p.Object.SetInt32Value(object.PlayerFieldWatchedFactionIndex, -1)
+
+	// Base auto-attack damage (placeholder)
+	p.BaseDamage = 5.0
 }
 
 // primaryPowerType returns the primary power type for this class.

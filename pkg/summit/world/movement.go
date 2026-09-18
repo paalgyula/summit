@@ -197,17 +197,20 @@ func (gc *WorldSession) updatePlayerPosition(info *MovementInfo) {
 func (gc *WorldSession) broadcastMovement(opcode wow.OpCode, info *MovementInfo) {
 	// Create the movement packet
 	pkt := wow.NewPacket(opcode)
+	_ = pkt.Write(info.GUID)
 	WriteMovementInfo(pkt, info)
 
-	// TODO: Implement SendMessageToSet - broadcast to nearby players
-	// For now, just log the movement
-	gc.log.Trace().
-		Str("opcode", opcode.String()).
-		Float32("x", info.Position.X).
-		Float32("y", info.Position.Y).
-		Float32("z", info.Position.Z).
-		Uint32("flags", info.Flags).
-		Msg("movement received")
+	// Send to all other sessions
+	server, ok := gc.ws.(*Server)
+	if !ok {
+		return
+	}
+
+	for _, other := range server.GetOtherSessions(gc) {
+		if other.player != nil && other.player.IsInWorld {
+			other.socket.Send(pkt)
+		}
+	}
 }
 
 // HandleMovementSpeed handles MSG_MOVE_SET_RUN_SPEED and similar speed change packets.
@@ -246,7 +249,14 @@ func (gc *WorldSession) HandleMovementSpeed(opcode wow.OpCode, data wow.PacketDa
 	WriteMovementInfo(pkt, movementInfo)
 	_ = pkt.Write(speed)
 
-	// TODO: SendMessageToSet
+	server, ok := gc.ws.(*Server)
+	if ok {
+		for _, other := range server.GetOtherSessions(gc) {
+			if other.player != nil && other.player.IsInWorld {
+				other.socket.Send(pkt)
+			}
+		}
+	}
 }
 
 // HandleMoveFallReset handles CMSG_MOVE_FALL_RESET.

@@ -229,23 +229,62 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 func (upd *Updater) BuildUpdateObject(player *player.Player) *wow.Packet {
 	p := wow.NewPacket(wow.ServerUpdateObject)
 
-	_ = p.WriteUint32(len(upd.UpdateData))
-	_ = p.WriteOne(0) // Has transport
+	_ = p.WriteUint32(1) // block count (1 object)
+	_ = p.WriteOne(0)    // Has transport
 
-	// if (!m_outOfRangeGUIDs.empty())
-	// {
-	//     buf << (uint8) UPDATETYPE_OUT_OF_RANGE_OBJECTS;
-	//     buf << (uint32) m_outOfRangeGUIDs.size();
-
-	//     for (std::set<uint64>::const_iterator i = m_outOfRangeGUIDs.begin(); i != m_outOfRangeGUIDs.end(); ++i)
-	//     {
-	//         // buf << i->WriteAsPacked();
-	//         buf << (uint8)0xFF;
-	//         buf << *i;
-	//     }
-	// }
-
-	upd.buildMovementUpdate(player, p)
+	// Write the create object block
+	upd.buildCreateObjectBlock(player, p)
 
 	return p
+}
+
+// buildCreateObjectBlock writes a single UPDATETYPE_CREATE_OBJECT(2) block.
+func (upd *Updater) buildCreateObjectBlock(p *player.Player, pkt *wow.Packet) {
+	// Update type
+	if upd.updateFlags&wow.UpdateFlagSelf != 0 {
+		_ = pkt.WriteOne(wow.UpdateTypeCreateObject2)
+	} else {
+		_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
+	}
+
+	// GUID
+	_ = pkt.Write(p.GUID())
+
+	// Object type ID
+	_ = pkt.WriteOne(int(wow.TypeIDPlayer))
+
+	// Update flags
+	_ = pkt.Write(upd.updateFlags)
+
+	// Movement update (flag, position, speeds, etc.)
+	upd.buildMovementUpdate(p, pkt)
+
+	// Values update (update mask + values block)
+	upd.buildValuesUpdate(p, pkt)
+}
+
+// buildValuesUpdate writes the update mask and values for the player.
+func (upd *Updater) buildValuesUpdate(p *player.Player, pkt *wow.Packet) {
+	mask := p.Object.BuildFullUpdateMask()
+	blockCount := mask.GetUpdateBlockCount()
+
+	// Write update mask (4 bytes per block)
+	for i := uint32(0); i < blockCount; i++ {
+		val := uint32(0)
+		for b := uint32(0); b < 32; b++ {
+			idx := i*32 + b
+			if mask.GetBit(idx) {
+				val |= 1 << b
+			}
+		}
+
+		_ = pkt.Write(val)
+	}
+
+	// Write values (only the fields that are set in the mask)
+	for i := uint32(0); i < blockCount*32; i++ {
+		if mask.GetBit(i) && int(i) < p.Object.ValuesCount() {
+			_ = pkt.Write(p.Object.GetUInt32Value(object.UpdateField(i)))
+		}
+	}
 }

@@ -133,6 +133,13 @@ func (gc *WorldSession) Send(pkt *wow.Packet) {
 	gc.socket.Send(pkt)
 }
 
+// SendPayload sends a packet with the given opcode and payload to the game client.
+// This satisfies the wow.PayloadSender interface for babysocket integration.
+func (gc *WorldSession) SendPayload(opcode int, payload []byte) {
+	pkt := wow.NewPacketWithData(wow.OpCode(opcode), payload)
+	gc.socket.SendPayload(pkt)
+}
+
 // sendDestroyObject sends SMSG_DESTROY_OBJECT to remove an object from the client.
 func (gc *WorldSession) sendDestroyObject(guid wow.GUID) {
 	pkt := wow.NewPacket(wow.ServerDestroyObject)
@@ -146,6 +153,9 @@ func (gc *WorldSession) updatePeriodic(now time.Time) {
 	if gc.player == nil || !gc.player.IsInWorld {
 		return
 	}
+
+	// Process combat (auto-attack swings)
+	gc.ProcessCombatTick(now)
 
 	// TODO: Implement health/mana regeneration
 	// TODO: Implement aura tick

@@ -116,12 +116,51 @@ func (db *LocalStore) GetCharacter(guid uint32) (*player.Player, error) {
 
 // CreateCharacter persists the character in the store.
 func (db *LocalStore) CreateCharacter(account string, character *player.Player) error {
-	panic("not implemented") // TODO: Implement
+	for _, a := range db.Accounts {
+		if a.Name == strings.ToUpper(account) {
+			var pp player.Players
+			if err := a.Characters(&pp); err != nil {
+				return fmt.Errorf("CreateCharacter: %w", err)
+			}
+
+			// Assign next available ID
+			maxID := uint32(0)
+			for _, p := range pp {
+				if p.ID > maxID {
+					maxID = p.ID
+				}
+			}
+
+			character.ID = maxID + 1
+			pp = append(pp, character)
+			a.UpdateCharacters(pp)
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("account %s not found", account)
 }
 
 // DeleteCharacter removes character from db.
 func (db *LocalStore) DeleteCharacter(characterID int) error {
-	panic("not implemented") // TODO: Implement
+	for _, a := range db.Accounts {
+		var pp player.Players
+		if err := a.Characters(&pp); err != nil {
+			continue
+		}
+
+		for i, p := range pp {
+			if p.ID == uint32(characterID) {
+				pp = append(pp[:i], pp[i+1:]...)
+				a.UpdateCharacters(pp)
+
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("character %d not found", characterID)
 }
 
 // CreateAccount creates an account with SRP6 encoded password (salt, verifier).

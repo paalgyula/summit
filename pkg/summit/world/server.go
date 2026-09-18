@@ -34,6 +34,9 @@ type Server struct {
 	authManagement auth.ManagementService
 
 	baseData *basedata.Store
+
+	// NPC spawn manager
+	spawns *SpawnManager
 }
 
 func NewServer(opts ...ServerOption) (*Server, error) {
@@ -43,6 +46,7 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 		Str("service", "world").
 		Caller().Logger()
 	worldServer.clients = sync.Map{}
+	worldServer.spawns = NewSpawnManager()
 
 	// Apply options
 	for _, so := range opts {
@@ -80,11 +84,10 @@ func (ws *Server) Clients() map[string]wow.PayloadSender {
 	ret := map[string]wow.PayloadSender{}
 
 	ws.clients.Range(func(key, value any) bool {
-		// ! FIXME: babysocket clients should be re-enabled
-		// v, _ := value.(*WorldSession)
-		// ck, _ := key.(string)
+		v, _ := value.(*WorldSession)
+		ck, _ := key.(string)
 
-		// ret[ck] = v
+		ret[ck] = v
 
 		return true
 	})
@@ -126,7 +129,48 @@ func (ws *Server) AddClient(gc *WorldSession) {
 }
 
 func (ws *Server) Disconnected(gc *WorldSession, reason string) {
+	// Send DestroyObject to other players before removing
+	if gc.player != nil && gc.player.IsInWorld {
+		for _, other := range ws.GetOtherSessions(gc) {
+			if other.player != nil && other.player.IsInWorld {
+				other.sendDestroyObject(gc.player.GUID())
+			}
+		}
+	}
+
 	ws.clients.Delete(gc.ID)
+}
+
+// GetOnlineSessions returns all active sessions.
+func (ws *Server) GetOnlineSessions() []*WorldSession {
+	var sessions []*WorldSession
+
+	ws.clients.Range(func(_, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if ok {
+			sessions = append(sessions, gc)
+		}
+
+		return true
+	})
+
+	return sessions
+}
+
+// GetOtherSessions returns all sessions except the given one.
+func (ws *Server) GetOtherSessions(exclude *WorldSession) []*WorldSession {
+	var sessions []*WorldSession
+
+	ws.clients.Range(func(_, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if ok && gc.ID != exclude.ID {
+			sessions = append(sessions, gc)
+		}
+
+		return true
+	})
+
+	return sessions
 }
 
 func (ws *Server) Stats() {

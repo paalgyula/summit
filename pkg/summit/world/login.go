@@ -3,6 +3,7 @@ package world
 import (
 	"time"
 
+	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -52,6 +53,9 @@ func (gc *WorldSession) HandlePlayerLogin(data wow.PacketData) {
 
 	// Store player in session
 	gc.player = p
+
+	// Initialize player values (health, power, display, update fields)
+	p.Init()
 
 	// Send login verify world
 	gc.sendLoginVerifyWorld(p)
@@ -192,13 +196,126 @@ func (gc *WorldSession) addPlayerToMap(p *player.Player) {
 	// Mark player as in world
 	p.IsInWorld = true
 
-	// TODO: Add to grid/cell system
-	// TODO: Load nearby grids
-	// TODO: Send transport info
-	// TODO: Send self update packet
-	// TODO: Update object visibility
+	// Send existing players to the new player, and the new player to existing players
+	gc.sendVisiblePlayers(p)
 
 	gc.log.Debug().Str("name", p.Name).Msg("player added to map")
+}
+
+// sendVisiblePlayers handles visibility: sends CreateObject for existing players
+// to the new player, and sends CreateObject for the new player to existing players.
+// Also sends all NPCs to the new player.
+func (gc *WorldSession) sendVisiblePlayers(p *player.Player) {
+	server, ok := gc.ws.(*Server)
+	if !ok {
+		return
+	}
+
+	// Send existing players to the new player, and the new player to existing players
+	for _, other := range server.GetOtherSessions(gc) {
+		if other.player == nil || !other.player.IsInWorld {
+			continue
+		}
+
+		// Send the existing player to the new player
+		gc.sendCreateObjectForPlayer(other.player, p)
+
+		// Send the new player to the existing player
+		other.sendCreateObjectForPlayer(p, other.player)
+	}
+
+	// Send all NPCs to the new player
+	for _, npc := range server.spawns.GetNPCsInMap(p.Location.Map) {
+		gc.sendCreateObjectForNPC(npc)
+	}
+}
+
+// sendCreateObjectForPlayer sends SMSG_UPDATE_OBJECT with a create block
+// for the given player to the target session.
+func (gc *WorldSession) sendCreateObjectForPlayer(source *player.Player, target *player.Player) {
+	upd := &Updater{}
+
+	// Build update flags for the source player
+	flags := uint8(wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagLiving | wow.UpdateFlagHasPosition)
+	if source.GUID() == target.GUID() {
+		flags |= wow.UpdateFlagSelf
+	}
+	upd.updateFlags = flags
+
+	pkt := upd.BuildUpdateObject(source)
+	gc.socket.Send(pkt)
+}
+
+// sendCreateObjectForNPC sends SMSG_UPDATE_OBJECT with a create block for an NPC.
+func (gc *WorldSession) sendCreateObjectForNPC(npc *NPC) {
+	pkt := wow.NewPacket(wow.ServerUpdateObject)
+
+	_ = pkt.WriteUint32(1) // block count
+	_ = pkt.WriteOne(0)    // has transport
+
+	// Update type
+	_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
+
+	// GUID
+	_ = pkt.Write(npc.GetGUID())
+
+	// Object type ID
+	_ = pkt.WriteOne(int(wow.TypeIDUnit))
+
+	// Update flags
+	flags := uint8(wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagLiving | wow.UpdateFlagHasPosition)
+	_ = pkt.Write(flags)
+
+	// Movement flags
+	_ = pkt.Write(wow.MovementFlagNone)
+	_ = pkt.WriteOne(0)                           // extra movement flags
+	_ = pkt.Write(uint32(0))                      // time
+	_ = pkt.Write(float32(npc.X))                 // X
+	_ = pkt.Write(float32(npc.Y))                 // Y
+	_ = pkt.Write(float32(npc.Z))                 // Z
+	_ = pkt.Write(float32(npc.O))                 // O
+
+	// Unit speeds
+	_ = pkt.Write(float32(2.5))  // walk
+	_ = pkt.Write(float32(7.0))  // run
+	_ = pkt.Write(float32(4.5))  // run back
+	_ = pkt.Write(float32(4.7))  // swim
+	_ = pkt.Write(float32(2.5))  // swim back
+	_ = pkt.Write(float32(7.0))  // flight
+	_ = pkt.Write(float32(4.5))  // flight back
+	_ = pkt.Write(float32(7.0))  // turn rate
+
+	// Low GUID
+	_ = pkt.WriteUint32(0x0B) // unk for units
+
+	// High GUID
+	_ = pkt.WriteUint32(0x00) // unk
+
+	// Values update
+	mask := npc.Object.BuildFullUpdateMask()
+	blockCount := mask.GetUpdateBlockCount()
+
+	// Write mask
+	for i := uint32(0); i < blockCount; i++ {
+		val := uint32(0)
+		for b := uint32(0); b < 32; b++ {
+			idx := i*32 + b
+			if mask.GetBit(idx) {
+				val |= 1 << b
+			}
+		}
+
+		_ = pkt.Write(val)
+	}
+
+	// Write values
+	for i := uint32(0); i < blockCount*32; i++ {
+		if mask.GetBit(i) && int(i) < npc.Object.ValuesCount() {
+			_ = pkt.Write(npc.Object.GetUInt32Value(object.UpdateField(i)))
+		}
+	}
+
+	gc.socket.Send(pkt)
 }
 
 // sendInitialPacketsAfterAddToMap sends all required packets after adding player to map.
@@ -306,11 +423,8 @@ func (gc *WorldSession) sendActionButtons(p *player.Player) {
 
 // sendInitialTalents sends SMSG_INITIALIZE_FACTIONS with empty talent data.
 // A proper implementation would send SMSG_TALENT_INFO.
-func (gc *WorldSession) sendInitialTalents(p *player.Player) {
-	// Send SMSG_UPDATE_OBJECT with player values update
-	// This is a simplified version — a full implementation would build
-	// a proper update object with all player fields.
-	gc.sendPlayerCreate(p)
+func (gc *WorldSession) sendInitialTalents(_ *player.Player) {
+	// Talent info is sent separately; player create is handled in sendInitialPacketsAfterAddToMap.
 }
 
 // sendPlayerCreate sends the initial SMSG_UPDATE_OBJECT for the player's own creation.
