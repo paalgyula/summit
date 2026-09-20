@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: summit-assetserver
+  namespace: summit
+  labels:
+    app.kubernetes.io/name: summit-assetserver
+    app.kubernetes.io/part-of: summit
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: summit-assetserver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: summit-assetserver
+        app.kubernetes.io/part-of: summit
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: assetserver
+          image: ghcr.io/pilab-dev/summit-assetserver:latest
+          imagePullPolicy: Always
+          env:
+            - name: ASSETSERVER_LISTEN
+              value: ":8080"
+            - name: ASSETSERVER_MPQ
+              value: "/data/Client/Data"
+            - name: ASSETSERVER_CACHE
+              value: "/data/cache"
+            - name: ASSETSERVER_ASSETS
+              value: "/data/assets"
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: summit-assets-pvc

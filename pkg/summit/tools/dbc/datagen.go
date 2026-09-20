@@ -11,6 +11,7 @@ import (
 func LoadAll(dbcDirectoryPath string) {
 	_, _ = Load[wotlk.CharStartOutfitEntry]("CharStartOutfit.dbc", dbcDirectoryPath)
 	_, _ = Load[wotlk.MapEntry]("Map.dbc", dbcDirectoryPath)
+	_, _ = Load[wotlk.SpellEntryEntry]("Spell.dbc", dbcDirectoryPath)
 }
 
 func Load[C any](fileName string, baseDir ...string) ([]C, error) {

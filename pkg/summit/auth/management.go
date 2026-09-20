@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paalgyula/summit/pkg/store"
@@ -31,6 +32,11 @@ type ManagementService interface {
 
 	// AddSession adds session to the auth session store.
 	AddSession(session *Session)
+
+	// UpdateRealm registers or refreshes a world server in the realm list.
+	// World servers call it periodically; the returned duration is the
+	// heartbeat deadline.
+	UpdateRealm(status *Realm) (time.Duration, error)
 }
 
 // NewManagementService initializes account manager.
@@ -38,6 +44,7 @@ func NewManagementService(store store.AccountRepo) *ManagementServiceImpl {
 	return &ManagementServiceImpl{
 		store:    store,
 		sessions: make(map[string]*Session),
+		realms:   NewRealmRegistry(nil, DefaultRealmTTL),
 
 		log: log.With().Str("service", "management").Logger(),
 	}
@@ -46,8 +53,27 @@ func NewManagementService(store store.AccountRepo) *ManagementServiceImpl {
 type ManagementServiceImpl struct {
 	store    store.AccountRepo
 	sessions map[string]*Session
+	mu       sync.RWMutex
+	realms   *RealmRegistry
 
 	log zerolog.Logger
+}
+
+// SetRealmRegistry replaces the registry world servers report into (e.g. one
+// seeded with statically configured realms).
+func (ms *ManagementServiceImpl) SetRealmRegistry(rr *RealmRegistry) {
+	ms.realms = rr
+}
+
+// RealmRegistry returns the registry, which doubles as the RealmProvider.
+func (ms *ManagementServiceImpl) RealmRegistry() *RealmRegistry {
+	return ms.realms
+}
+
+// UpdateRealm records a world server's status report.
+func (ms *ManagementServiceImpl) UpdateRealm(status *Realm) (time.Duration, error) {
+	ms.realms.Update(status)
+	return ms.realms.TTL(), nil
 }
 
 // Register tries to register an account on the auth server if it does not exists already.
@@ -62,7 +88,8 @@ func (ms *ManagementServiceImpl) Register(user string, pass string, email string
 
 	pwcrypt := crypt.NewWoWSRP6()
 	salt := pwcrypt.RandomSalt()
-	verifier := pwcrypt.GenerateVerifier(strings.ToUpper(user), pass, salt)
+	// The client proves UPPER(user):UPPER(pass); derive the verifier the same way
+	verifier := pwcrypt.GenerateVerifier(strings.ToUpper(user), strings.ToUpper(pass), salt)
 
 	acc, err := store.AccountFromCreds(user, salt.Text(16), verifier.Text(16))
 	if err != nil {
@@ -91,12 +118,16 @@ func (ms *ManagementServiceImpl) FindAccount(user string) *store.Account {
 
 // GetSession returns the auth session if any.
 func (ms *ManagementServiceImpl) GetSession(user string) *Session {
-	user = strings.ToLower(user)
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
 
-	return ms.sessions[user]
+	return ms.sessions[strings.ToLower(user)]
 }
 
 // AddSession adds session to the auth session store.
 func (ms *ManagementServiceImpl) AddSession(session *Session) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
 	ms.sessions[strings.ToLower(session.AccountName)] = session
 }

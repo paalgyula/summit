@@ -104,12 +104,14 @@ func (pw *RealmClient) SendChallenge(user string) {
 	pw.Send(clp)
 }
 
-func (pw *RealmClient) ReadCommand() auth.RealmCommand {
+func (pw *RealmClient) ReadCommand() (auth.RealmCommand, error) {
 	var cmd uint8
 
-	_ = binary.Read(pw.conn, binary.LittleEndian, &cmd)
+	if err := binary.Read(pw.conn, binary.LittleEndian, &cmd); err != nil {
+		return 0, fmt.Errorf("realmclient: read command: %w", err)
+	}
 
-	return auth.RealmCommand(cmd)
+	return auth.RealmCommand(cmd), nil
 }
 
 func (pw *RealmClient) HandleLoginChallenge() {
@@ -173,7 +175,12 @@ func (pw *RealmClient) HandleRealmlist() {
 
 func (pw *RealmClient) HandlePackets() {
 	for {
-		cmd := pw.ReadCommand()
+		cmd, err := pw.ReadCommand()
+		if err != nil {
+			pw.log.Debug().Err(err).Msg("logon connection closed")
+
+			return
+		}
 
 		switch cmd {
 		case auth.AuthLoginChallenge:

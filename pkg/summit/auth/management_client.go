@@ -7,21 +7,24 @@ import (
 
 	authv1 "github.com/paalgyula/summit/pkg/pb/proto/auth/v1"
 	"github.com/paalgyula/summit/pkg/store"
+	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 type ManagementClient struct {
 	conn   *grpc.ClientConn
 	client authv1.AuthManagementClient
+	token  string
 
 	// RequestTimeout timeout for requests. Default is 5 seconds
 	RequestTimeout time.Duration
 }
 
 // NewManagementClient initializes new management client with gRPC protocol
-// to interact with the auth server.
-func NewManagementClient(addr string) (*ManagementClient, error) {
+// to interact with the auth server. token is the shared management secret.
+func NewManagementClient(addr, token string) (*ManagementClient, error) {
 	conn, err := grpc.Dial(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -32,8 +35,18 @@ func NewManagementClient(addr string) (*ManagementClient, error) {
 	client.RequestTimeout = time.Second * 5
 	client.client = authv1.NewAuthManagementClient(conn)
 	client.conn = conn
+	client.token = token
 
 	return client, nil
+}
+
+// context returns a request context carrying the management token.
+func (mc *ManagementClient) context() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), mc.RequestTimeout)
+	if mc.token != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, managementTokenHeader, "Bearer "+mc.token)
+	}
+	return ctx, cancel
 }
 
 // Close closes the management client connection.
@@ -45,7 +58,7 @@ func (mc *ManagementClient) Close() error {
 
 // Register registers a new user in auth server.
 func (mc *ManagementClient) Register(user, pass, email string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), mc.RequestTimeout)
+	ctx, cancel := mc.context()
 	defer cancel()
 
 	res, err := mc.client.Regiester(ctx, &authv1.RegisterRequest{
@@ -71,20 +84,25 @@ func (mc *ManagementClient) Register(user, pass, email string) error {
 	}
 }
 
-// FindAccount finds an account in the store.
-func (mc *ManagementClient) FindAccount(user string) *store.Account {
-	panic("not implemented") // TODO: Implement
+// FindAccount is not available remotely: world servers read accounts from
+// their own store, and the management API deliberately exposes no account data.
+func (mc *ManagementClient) FindAccount(_ string) *store.Account {
+	return nil
 }
 
-// GetSession returns the auth session if any.
+// GetSession returns the auth session if any. Errors (auth server down,
+// bad token) yield no session, i.e. the login is refused.
 func (mc *ManagementClient) GetSession(user string) *Session {
-	ctx, cancel := context.WithTimeout(context.Background(), mc.RequestTimeout)
+	ctx, cancel := mc.context()
 	defer cancel()
 
-	// TODO: is this a good idea to ignore the error?
-	res, _ := mc.client.GetSession(ctx, &authv1.GetSessionRequest{
+	res, err := mc.client.GetSession(ctx, &authv1.GetSessionRequest{
 		Username: user,
 	})
+	if err != nil {
+		log.Warn().Err(err).Str("account", user).Msg("management: session lookup failed")
+		return nil
+	}
 
 	if res.GetFound() {
 		return &Session{
@@ -96,7 +114,27 @@ func (mc *ManagementClient) GetSession(user string) *Session {
 	return nil
 }
 
-// AddSession adds session to the auth session store.
-func (mc *ManagementClient) AddSession(session *Session) {
-	panic("not implemented") // TODO: Implement
+// AddSession is only meaningful on the auth server itself.
+func (mc *ManagementClient) AddSession(_ *Session) {}
+
+// UpdateRealm reports this world server's status to the auth server.
+func (mc *ManagementClient) UpdateRealm(r *Realm) (time.Duration, error) {
+	ctx, cancel := mc.context()
+	defer cancel()
+
+	res, err := mc.client.UpdateRealm(ctx, &authv1.UpdateRealmRequest{Status: &authv1.RealmStatus{
+		Name:          r.Name,
+		Slug:          r.URLSlug(),
+		Address:       r.Address,
+		OnlinePlayers: r.OnlinePlayers,
+		MaxPlayers:    r.MaxPlayers,
+		Locked:        r.Lock != 0,
+		Icon:          uint32(r.Icon),
+		Timezone:      uint32(r.Timezone),
+	}})
+	if err != nil {
+		return 0, fmt.Errorf("management.UpdateRealm: %w", err)
+	}
+
+	return time.Duration(res.GetHeartbeatSeconds()) * time.Second, nil
 }

@@ -62,6 +62,19 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	// Spell handler
 	packets.OpcodeTable.Handle(wow.ClientCastSpell, gc.HandleCastSpell)
 
+	// Item handlers
+	packets.OpcodeTable.Handle(wow.ClientAutoequipItem, gc.HandleAutoEquipItem)
+	packets.OpcodeTable.Handle(wow.ClientAutoequipItemSlot, gc.HandleAutoEquipItemSlot)
+	packets.OpcodeTable.Handle(wow.ClientSwapInvItem, gc.HandleSwapInvItem)
+	packets.OpcodeTable.Handle(wow.ClientSwapItem, gc.HandleSwapItem)
+	packets.OpcodeTable.Handle(wow.ClientDestroyitem, gc.HandleDestroyItem)
+	packets.OpcodeTable.Handle(wow.ClientItemQuerySingle, gc.HandleItemQuerySingle)
+
+	// Teleport/area trigger handlers
+	packets.OpcodeTable.Handle(wow.ClientAreatrigger, gc.HandleAreaTriggerOpcode)
+	packets.OpcodeTable.Handle(wow.MsgMoveWorldportAck, gc.HandleMoveWorldportAck)
+	packets.OpcodeTable.Handle(wow.MsgMoveTeleportAck, gc.HandleTeleportAck)
+
 	// Movement handlers - all use the same handler function
 	movementOpcodes := []wow.OpCode{
 		wow.MsgMoveStartForward,

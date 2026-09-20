@@ -55,7 +55,7 @@ func NewItem(entry uint32, owner wow.GUID) *Item {
 	obj := object.NewObject()
 	obj.SetObjectType(obj.ObjectType() | wow.TypeMaskItem)
 
-	return &Item{
+	item := &Item{
 		Object:       obj,
 		Owner:        owner,
 		Contained:    owner,
@@ -63,6 +63,64 @@ func NewItem(entry uint32, owner wow.GUID) *Item {
 		StackCount:   1,
 		SlotIndex:    -1,
 		SpellCharges: [5]int32{-1, -1, -1, -1, -1},
+	}
+
+	item.initUpdateFields()
+
+	return item
+}
+
+// initUpdateFields sets up the item's update field values.
+func (i *Item) initUpdateFields() {
+	i.Object.InitValues(int(object.ItemEnd))
+
+	// Object fields
+	guid := i.Object.GUID()
+	i.Object.SetUInt32Value(object.ObjectFieldGuid, uint32(guid))
+	i.Object.SetUInt32Value(object.ObjectFieldGuid+1, uint32(uint64(guid)>>32))
+	i.Object.SetUInt32Value(object.ObjectFieldType, uint32(wow.TypeIDItem))
+	i.Object.SetUInt32Value(object.ObjectFieldEntry, i.ItemEntry)
+	i.Object.SetFloatValue(object.ObjectFieldScaleX, 1.0)
+
+	// Item fields
+	i.Object.SetUInt32Value(object.ItemFieldOwner, uint32(i.Owner))
+	i.Object.SetUInt32Value(object.ItemFieldOwner+1, uint32(uint64(i.Owner)>>32))
+	i.Object.SetUInt32Value(object.ItemFieldContained, uint32(i.Contained))
+	i.Object.SetUInt32Value(object.ItemFieldContained+1, uint32(uint64(i.Contained)>>32))
+	i.Object.SetUInt32Value(object.ItemFieldStackCount, i.StackCount)
+	i.Object.SetUInt32Value(object.ItemFieldFlags, i.ItemFlags)
+	i.Object.SetUInt32Value(object.ItemFieldDurability, i.Durability)
+	i.Object.SetUInt32Value(object.ItemFieldMaxdurability, i.MaxDurability)
+	i.Object.SetUInt32Value(object.ItemFieldPropertySeed, i.PropertySeed)
+	i.Object.SetUInt32Value(object.ItemFieldRandomPropertiesId, i.RandomPropertiesID)
+	i.Object.SetUInt32Value(object.ItemFieldCreatePlayedTime, i.PlayTime)
+
+	// Set spell charges
+	for j := 0; j < 5; j++ {
+		i.Object.SetInt32Value(object.UpdateField(int(object.ItemFieldSpellCharges)+j), i.SpellCharges[j])
+	}
+
+	// Set enchantments (each enchant has 3 fields: spell_id + duration + charges)
+	for j := 0; j < 12; j++ {
+		enchantField := object.UpdateField(int(object.ItemFieldEnchantment1_1) + j*3)
+		i.Object.SetUInt32Value(enchantField, i.Enchantments[j])
+	}
+}
+
+// UpdateFields updates the item's update field values from its current state.
+func (i *Item) UpdateFields() {
+	i.Object.SetUInt32Value(object.ItemFieldStackCount, i.StackCount)
+	i.Object.SetUInt32Value(object.ItemFieldFlags, i.ItemFlags)
+	i.Object.SetUInt32Value(object.ItemFieldDurability, i.Durability)
+	i.Object.SetUInt32Value(object.ItemFieldMaxdurability, i.MaxDurability)
+
+	for j := 0; j < 5; j++ {
+		i.Object.SetInt32Value(object.UpdateField(int(object.ItemFieldSpellCharges)+j), i.SpellCharges[j])
+	}
+
+	for j := 0; j < 12; j++ {
+		enchantField := object.UpdateField(int(object.ItemFieldEnchantment1_1) + j*3)
+		i.Object.SetUInt32Value(enchantField, i.Enchantments[j])
 	}
 }
 

@@ -25,6 +25,7 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 	switch t := unit.(type) {
 	case *player.Player:
 		o = t.Object
+		u = t.Unit
 		p = t
 	case *object.Object:
 		o = t
@@ -287,4 +288,141 @@ func (upd *Updater) buildValuesUpdate(p *player.Player, pkt *wow.Packet) {
 			_ = pkt.Write(p.Object.GetUInt32Value(object.UpdateField(i)))
 		}
 	}
+}
+
+// BuildItemCreateObject builds an SMSG_UPDATE_OBJECT with a CreateObject block for an item.
+func (upd *Updater) BuildItemCreateObject(item *player.Item, target *player.Player) *wow.Packet {
+	if item == nil || item.Object == nil {
+		return nil
+	}
+
+	p := wow.NewPacket(wow.ServerUpdateObject)
+
+	_ = p.WriteUint32(1) // block count (1 object)
+	_ = p.WriteOne(0)    // Has transport
+
+	// Write the create object block for the item
+	upd.buildItemCreateBlock(item, p)
+
+	return p
+}
+
+// buildItemCreateBlock writes a single UPDATETYPE_CREATE_OBJECT block for an item.
+func (upd *Updater) buildItemCreateBlock(item *player.Item, pkt *wow.Packet) {
+	// Update type
+	_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
+
+	// GUID
+	_ = pkt.Write(item.GUID())
+
+	// Object type ID
+	_ = pkt.WriteOne(int(wow.TypeIDItem))
+
+	// Update flags for items: HighGUID | LowGUID | HasPosition (no Living)
+	flags := uint8(wow.UpdateFlagHighGUID | wow.UpdateFlagLowGUID | wow.UpdateFlagHasPosition)
+	_ = pkt.Write(flags)
+
+	// Movement update (stationary position)
+	_ = pkt.Write(float32(0)) // X
+	_ = pkt.Write(float32(0)) // Y
+	_ = pkt.Write(float32(0)) // Z
+	_ = pkt.Write(float32(0)) // O
+
+	// Low GUID
+	_ = pkt.Write(item.GUID().Entry())
+
+	// High GUID
+	_ = pkt.WriteUint32(0) // Item high GUID is 0
+
+	// Values update (update mask + values block)
+	upd.buildItemValuesUpdate(item, pkt)
+}
+
+// buildItemValuesUpdate writes the update mask and values for an item.
+func (upd *Updater) buildItemValuesUpdate(item *player.Item, pkt *wow.Packet) {
+	mask := item.Object.BuildFullUpdateMask()
+	blockCount := mask.GetUpdateBlockCount()
+
+	// Write update mask (4 bytes per block)
+	for i := uint32(0); i < blockCount; i++ {
+		val := uint32(0)
+		for b := uint32(0); b < 32; b++ {
+			idx := i*32 + b
+			if mask.GetBit(idx) {
+				val |= 1 << b
+			}
+		}
+
+		_ = pkt.Write(val)
+	}
+
+	// Write values (only the fields that are set in the mask)
+	for i := uint32(0); i < blockCount*32; i++ {
+		if mask.GetBit(i) && int(i) < item.Object.ValuesCount() {
+			_ = pkt.Write(item.Object.GetUInt32Value(object.UpdateField(i)))
+		}
+	}
+}
+
+// BuildInventoryUpdate builds an SMSG_UPDATE_OBJECT with values update for player inventory fields.
+func (upd *Updater) BuildInventoryUpdate(p *player.Player) *wow.Packet {
+	if p == nil || p.Object == nil {
+		return nil
+	}
+
+	pkt := wow.NewPacket(wow.ServerUpdateObject)
+
+	_ = pkt.WriteUint32(1) // block count (1 object)
+	_ = pkt.WriteOne(0)    // Has transport
+
+	// Update type
+	_ = pkt.WriteOne(wow.UpdateTypeValues)
+
+	// GUID
+	_ = pkt.Write(p.GUID())
+
+	// Values update mask for inventory fields only
+	// We need to mark the inventory-related fields as dirty
+	mask := &object.UpdateMask{}
+	mask.SetCount(uint32(p.Object.ValuesCount()))
+
+	// Mark PlayerFieldInvSlotHead through PlayerFieldInvSlotHead + 45 (23 slots * 2)
+	for i := 0; i < 46; i++ {
+		field := int(object.PlayerFieldInvSlotHead) + i
+		if field < p.Object.ValuesCount() {
+			mask.SetBit(uint32(field))
+		}
+	}
+
+	// Mark PlayerFieldPackSlot_1 through PlayerFieldPackSlot_1 + 31 (16 slots * 2)
+	for i := 0; i < 32; i++ {
+		field := int(object.PlayerFieldPackSlot_1) + i
+		if field < p.Object.ValuesCount() {
+			mask.SetBit(uint32(field))
+		}
+	}
+
+	blockCount := mask.GetUpdateBlockCount()
+
+	// Write update mask
+	for i := uint32(0); i < blockCount; i++ {
+		val := uint32(0)
+		for b := uint32(0); b < 32; b++ {
+			idx := i*32 + b
+			if mask.GetBit(idx) {
+				val |= 1 << b
+			}
+		}
+
+		_ = pkt.Write(val)
+	}
+
+	// Write values
+	for i := uint32(0); i < blockCount*32; i++ {
+		if mask.GetBit(i) && int(i) < p.Object.ValuesCount() {
+			_ = pkt.Write(p.Object.GetUInt32Value(object.UpdateField(i)))
+		}
+	}
+
+	return pkt
 }

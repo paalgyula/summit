@@ -4,7 +4,6 @@ import (
 	"encoding/gob"
 	"net"
 
-	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
 )
 
@@ -29,22 +28,64 @@ func (sc *socketClient) Listen() {
 			return
 		}
 
-		log.Printf("data from baby client: %+v\n", data)
+		sc.s.log.Trace().
+			Str("id", sc.id).
+			Str("command", data.Command.String()).
+			Str("source", data.Source).
+			Str("target", data.Target).
+			Int("opcode", data.Opcode).
+			Int("size", data.Size).
+			Msg("received packet from baby client")
 
 		switch data.Command {
 		case CommandPacket:
-			if data.Target == "*" {
-				log.Printf("broadcasting opcode packet: %T\n", wow.OpCode(data.Opcode))
-				sc.s.SendToAll(data.Opcode, data.Data)
-			}
+			sc.handlePacket(&data)
 		case CommandInstruction:
-			fallthrough
+			sc.handleInstruction(&data)
 		case CommandResponse:
-			fallthrough
+			sc.handleResponse(&data)
 		default:
-			log.Error().Msgf("command type %+v is not implemented", data.Command)
+			sc.s.log.Warn().Msgf("unknown command type: %d", data.Command)
 		}
 	}
+}
+
+func (sc *socketClient) handlePacket(data *DataPacket) {
+	switch {
+	case data.Target == "*":
+		// Broadcast to all game clients
+		sc.s.log.Debug().
+			Int("opcode", data.Opcode).
+			Msg("broadcasting packet to all game clients")
+		sc.s.SendToAll(data.Opcode, data.Data)
+	case data.Target == "":
+		// Broadcast to all baby clients (except sender)
+		sc.s.log.Debug().
+			Int("opcode", data.Opcode).
+			Msg("broadcasting packet to all baby clients")
+		sc.s.SendPacketToBabies(sc.id, data.Opcode, data.Data)
+	default:
+		// Send to specific baby client by ID
+		sc.s.log.Debug().
+			Str("target", data.Target).
+			Int("opcode", data.Opcode).
+			Msg("sending packet to specific baby client")
+		sc.s.SendToBaby(data.Target, data.Opcode, data.Data)
+	}
+}
+
+func (sc *socketClient) handleInstruction(data *DataPacket) {
+	sc.s.log.Warn().
+		Str("source", data.Source).
+		Str("target", data.Target).
+		Msg("received instruction command (not implemented)")
+}
+
+func (sc *socketClient) handleResponse(data *DataPacket) {
+	sc.s.log.Warn().
+		Str("source", data.Source).
+		Str("target", data.Target).
+		Msg("received response command (not implemented)")
 }
 
 func (sc *socketClient) disconnected() {

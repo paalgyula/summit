@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	AuthManagement_Regiester_FullMethodName  = "/auth.v1.AuthManagement/Regiester"
-	AuthManagement_GetSession_FullMethodName = "/auth.v1.AuthManagement/GetSession"
+	AuthManagement_Regiester_FullMethodName   = "/auth.v1.AuthManagement/Regiester"
+	AuthManagement_GetSession_FullMethodName  = "/auth.v1.AuthManagement/GetSession"
+	AuthManagement_UpdateRealm_FullMethodName = "/auth.v1.AuthManagement/UpdateRealm"
 )
 
 // AuthManagementClient is the client API for AuthManagement service.
@@ -31,6 +32,9 @@ type AuthManagementClient interface {
 	Regiester(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
 	// GetSession requests the auth session from the auth server.
 	GetSession(ctx context.Context, in *GetSessionRequest, opts ...grpc.CallOption) (*GetSessionResponse, error)
+	// UpdateRealm registers a world server in the realm list, or refreshes
+	// its status; world servers call it periodically as a heartbeat.
+	UpdateRealm(ctx context.Context, in *UpdateRealmRequest, opts ...grpc.CallOption) (*UpdateRealmResponse, error)
 }
 
 type authManagementClient struct {
@@ -59,6 +63,15 @@ func (c *authManagementClient) GetSession(ctx context.Context, in *GetSessionReq
 	return out, nil
 }
 
+func (c *authManagementClient) UpdateRealm(ctx context.Context, in *UpdateRealmRequest, opts ...grpc.CallOption) (*UpdateRealmResponse, error) {
+	out := new(UpdateRealmResponse)
+	err := c.cc.Invoke(ctx, AuthManagement_UpdateRealm_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthManagementServer is the server API for AuthManagement service.
 // All implementations must embed UnimplementedAuthManagementServer
 // for forward compatibility
@@ -67,6 +80,9 @@ type AuthManagementServer interface {
 	Regiester(context.Context, *RegisterRequest) (*RegisterResponse, error)
 	// GetSession requests the auth session from the auth server.
 	GetSession(context.Context, *GetSessionRequest) (*GetSessionResponse, error)
+	// UpdateRealm registers a world server in the realm list, or refreshes
+	// its status; world servers call it periodically as a heartbeat.
+	UpdateRealm(context.Context, *UpdateRealmRequest) (*UpdateRealmResponse, error)
 	mustEmbedUnimplementedAuthManagementServer()
 }
 
@@ -79,6 +95,9 @@ func (UnimplementedAuthManagementServer) Regiester(context.Context, *RegisterReq
 }
 func (UnimplementedAuthManagementServer) GetSession(context.Context, *GetSessionRequest) (*GetSessionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSession not implemented")
+}
+func (UnimplementedAuthManagementServer) UpdateRealm(context.Context, *UpdateRealmRequest) (*UpdateRealmResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateRealm not implemented")
 }
 func (UnimplementedAuthManagementServer) mustEmbedUnimplementedAuthManagementServer() {}
 
@@ -129,6 +148,24 @@ func _AuthManagement_GetSession_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthManagement_UpdateRealm_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRealmRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthManagementServer).UpdateRealm(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthManagement_UpdateRealm_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthManagementServer).UpdateRealm(ctx, req.(*UpdateRealmRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthManagement_ServiceDesc is the grpc.ServiceDesc for AuthManagement service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -143,6 +180,10 @@ var AuthManagement_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetSession",
 			Handler:    _AuthManagement_GetSession_Handler,
+		},
+		{
+			MethodName: "UpdateRealm",
+			Handler:    _AuthManagement_UpdateRealm_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

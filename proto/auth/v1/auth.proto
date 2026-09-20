@@ -36,12 +36,45 @@ message GetSessionResponse {
     string session_key = 2;
 }
 
-// AuthManagement is a remote management interface to manage 
+// RealmStatus is what a world server reports about itself. The auth server
+// keeps it in the realm list until the realm stops reporting.
+message RealmStatus {
+    // Display name of the realm, e.g. "The Highest Summit".
+    string name = 1;
+    // URL identifier used by web clients: <public url>/realms/<slug>.
+    string slug = 2;
+    // Direct network address of the world server (host:port).
+    string address = 3;
+    // Number of players currently in the world.
+    uint32 online_players = 4;
+    // Player capacity used to derive the population indicator.
+    uint32 max_players = 5;
+    // Realm is locked (no new logins).
+    bool locked = 6;
+    // Realm type icon (Cfg_Configs.dbc) and timezone as in the native realm list.
+    uint32 icon = 7;
+    uint32 timezone = 8;
+}
+
+message UpdateRealmRequest {
+    RealmStatus status = 1;
+}
+
+message UpdateRealmResponse {
+    // Seconds within which the world server must report again to stay listed.
+    uint32 heartbeat_seconds = 1;
+}
+
+// AuthManagement is a remote management interface to manage
 // users and realms in the auth server.
 service AuthManagement {
     // Register try to register an account on the auth server.
     rpc Regiester(RegisterRequest) returns (RegisterResponse);
-    
+
     // GetSession requests the auth session from the auth server.
     rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+
+    // UpdateRealm registers a world server in the realm list, or refreshes
+    // its status; world servers call it periodically as a heartbeat.
+    rpc UpdateRealm(UpdateRealmRequest) returns (UpdateRealmResponse);
 }

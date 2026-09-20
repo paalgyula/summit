@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: summit-assetserver
+  namespace: summit
+  labels:
+    app.kubernetes.io/name: summit-assetserver
+    app.kubernetes.io/part-of: summit
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: summit-assetserver
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

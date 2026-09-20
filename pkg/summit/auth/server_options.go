@@ -23,6 +23,14 @@ func WithManagement(l net.Listener) ServerOption {
 	}
 }
 
+// WithManagementToken sets the shared secret every management client must
+// present; without it the management API accepts anyone who can reach the port.
+func WithManagementToken(token string) ServerOption {
+	return func(s *Server) {
+		s.managementToken = token
+	}
+}
+
 // WithAccountStore you can specify the account source.
 // func WithAccountStore(store store.AccountRepository) ServerOption {
 // 	return func(s *Server) {

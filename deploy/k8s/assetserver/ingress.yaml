@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: summit-assetserver
+  namespace: summit
+  labels:
+    app.kubernetes.io/name: summit-assetserver
+    app.kubernetes.io/part-of: summit
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: assets-summit.dev.pilab.hu
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: summit-assetserver
+                port:
+                  number: 8080
+  tls:
+    - hosts:
+        - assets-summit.dev.pilab.hu
+      secretName: assets-summit-dev-pilab-hu-tls

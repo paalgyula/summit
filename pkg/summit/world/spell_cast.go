@@ -25,89 +25,74 @@ func (gc *WorldSession) HandleCastSpell(data wow.PacketData) {
 	var targetGUID uint64
 	_ = reader.Read(&targetGUID)
 
-	// Find the spell template
+	// Find the spell info from DBC data
 	server, ok := gc.ws.(*Server)
-	if !ok || server.spellManager == nil {
+	if !ok || server.spellMgr == nil {
 		return
 	}
 
-	spell := server.spellManager.GetSpell(spellID)
-	if spell == nil {
+	spellInfo := server.spellMgr.GetSpellInfo(spellID)
+	if spellInfo == nil {
 		gc.log.Debug().Uint32("spell", spellID).Msg("unknown spell")
-		gc.sendCastFailed(spellID, SpellCastResult(6)) // Unknown spell
+		gc.sendCastFailed(spellID, SpellCastFailedUnknownSpell)
 		return
 	}
 
 	// Check if player knows this spell
 	if !gc.player.KnowsSpell(spellID) {
-		gc.sendCastFailed(spellID, SpellCastResult(6))
+		gc.sendCastFailed(spellID, SpellCastFailedUnknownSpell)
 		return
 	}
 
-	// Check power cost
-	if !gc.player.HasPowerForSpell(int(spell.PowerType), spell.PowerCost) {
-		gc.sendCastFailed(spellID, SpellCastNoMana)
+	// Create the spell execution engine
+	spell := NewSpell(gc.player, spellInfo, TriggeredNone)
+	if spell == nil {
+		gc.sendCastFailed(spellID, SpellCastFailedSpellFailed)
 		return
 	}
 
-	// Check if spell is on cooldown
-	if gc.player.IsSpellOnCooldown(spellID) {
-		gc.sendCastFailed(spellID, SpellCastResult(14)) // Not ready yet
-		return
-	}
+	// Set up targets
+	targets := SpellCastTargets{}
 
-	// Check range
+	// Find target player if needed
 	var target *player.Player
-	if spell.TargetType != SpellTargetSelf && targetGUID != 0 {
+	if !spellInfo.IsSelfCast() && targetGUID != 0 {
 		target = gc.findPlayerByGUID(server, targetGUID)
 		if target == nil {
 			gc.sendCastFailed(spellID, SpellCastResult(5)) // Invalid target
 			return
 		}
-
-		if !gc.player.IsWithinRange(target, spell.Range) {
-			gc.sendCastFailed(spellID, SpellCastTargetTooFar)
-			return
-		}
+		targets.UnitTarget = target
 	}
 
-	// Send cast start to client
-	gc.sendSpellGo(castID, spell, target)
+	// Prepare the spell (validates and starts cast)
+	result := spell.Prepare(&targets)
+	if result != SpellCastSuccess {
+		gc.sendCastFailed(spellID, result)
+		return
+	}
 
-	// Consume power
-	gc.player.ConsumePowerForSpell(int(spell.PowerType), spell.PowerCost)
+	// Send spell go packet
+	gc.sendSpellGo(castID, spellInfo, target)
 
-	// Apply instant effects
-	if spell.CastTime == 0 {
-		gc.applySpellEffects(spell, target)
-		gc.sendSpellCastComplete(castID, spell)
-	} else {
-		// Start cast timer for non-instant spells
-		gc.startCasting(spell, castID, target, targetGUID)
+	// Store active spell on player for non-instant casts
+	if spell.State == SpellStateCasting {
+		gc.player.ActiveSpell = &ActiveSpell{
+			Spell:      spell,
+			Caster:     gc.player,
+			Target:     target,
+			TargetGUID: targetGUID,
+			State:      spell.State,
+			StartTime:  time.Now(),
+			CastTime:   time.Duration(spell.CastTimeLeft) * time.Millisecond,
+		}
+		gc.player.ActiveSpell.(*ActiveSpell).CastEndTime = time.Now().Add(time.Duration(spell.CastTimeLeft) * time.Millisecond)
 	}
 
 	gc.log.Debug().
 		Uint32("spell", spellID).
-		Str("name", spell.Name).
+		Uint32("spellId", spellInfo.Id).
 		Msg("spell cast")
-}
-
-// startCasting begins the cast time for a spell.
-func (gc *WorldSession) startCasting(spell *SpellTemplate, castID uint32, target *player.Player, targetGUID uint64) {
-	// Create active spell
-	activeSpell := &ActiveSpell{
-		Spell:      spell,
-		Caster:     gc.player,
-		Target:     target,
-		TargetGUID: targetGUID,
-		State:      SpellStateCasting,
-		StartTime:  time.Now(),
-		CastEndTime: time.Now().Add(spell.CastTime),
-		CastTime:   spell.CastTime,
-	}
-
-	// Store active spell on player
-	gc.player.ActiveSpell = activeSpell
 }
 
 // ProcessSpellTick processes ongoing spell casts.
@@ -116,155 +101,23 @@ func (gc *WorldSession) ProcessSpellTick(now time.Time) {
 		return
 	}
 
-	// Type assert to *ActiveSpell
 	activeSpell, ok := gc.player.ActiveSpell.(*ActiveSpell)
 	if !ok {
 		return
 	}
 
-	switch activeSpell.State {
-	case SpellStateCasting:
-		if now.After(activeSpell.CastEndTime) {
-			// Cast complete - apply effects
-			gc.applySpellEffects(activeSpell.Spell, activeSpell.Target)
-			gc.sendSpellCastComplete(0, activeSpell.Spell)
-			gc.player.ActiveSpell = nil
-		}
-	}
-}
-
-// applySpellEffects applies all effects of a spell.
-func (gc *WorldSession) applySpellEffects(spell *SpellTemplate, target *player.Player) {
-	for _, effect := range spell.Effects {
-		if effect.Type == SpellEffectNone {
-			continue
-		}
-
-		switch effect.Type {
-		case SpellEffectSchoolDamage:
-			gc.applyDamageEffect(spell, effect, target)
-		case SpellEffectHeal:
-			gc.applyHealEffect(spell, effect, target)
-		case SpellEffectApplyAura:
-			gc.applyAuraEffect(spell, effect, target)
-		case SpellEffectEnergize:
-			gc.applyEnergizeEffect(spell, effect, target)
-		}
-	}
-}
-
-// applyDamageEffect applies a damage spell effect.
-func (gc *WorldSession) applyDamageEffect(spell *SpellTemplate, effect SpellEffectData, target *player.Player) {
-	if target == nil {
+	if activeSpell.Spell == nil {
+		gc.player.ActiveSpell = nil
 		return
 	}
 
-	damage := uint32(effect.BasePoints)
-	if damage == 0 {
-		damage = 1
+	// Tick the spell engine (50ms per world update)
+	const tickMs int32 = 50
+
+	stillCasting := activeSpell.Spell.Update(tickMs)
+	if !stillCasting {
+		gc.player.ActiveSpell = nil
 	}
-
-	// Apply damage
-	newHealth := target.GetHealth()
-	if damage > newHealth {
-		damage = newHealth
-	}
-
-	newHealth -= damage
-	target.SetHealth(newHealth)
-
-	// Send damage update
-	gc.broadcastPlayerStatsToAll(target)
-
-	// Send spell log
-	gc.sendSpellLog(spell, target, damage, 0)
-
-	// Check if target died
-	if target.IsDead() {
-		target.Die()
-	}
-}
-
-// applyHealEffect applies a heal spell effect.
-func (gc *WorldSession) applyHealEffect(spell *SpellTemplate, effect SpellEffectData, target *player.Player) {
-	if target == nil {
-		target = gc.player // heal self if no target
-	}
-
-	heal := uint32(effect.BasePoints)
-	if heal == 0 {
-		heal = 1
-	}
-
-	// Apply heal
-	newHealth := target.GetHealth() + heal
-	if newHealth > target.GetMaxHealth() {
-		newHealth = target.GetMaxHealth()
-	}
-
-	target.SetHealth(newHealth)
-
-	// Send heal update
-	gc.broadcastPlayerStatsToAll(target)
-
-	// Send spell log
-	gc.sendSpellLog(spell, target, 0, heal)
-}
-
-// applyAuraEffect applies an aura (buff/debuff) effect.
-func (gc *WorldSession) applyAuraEffect(spell *SpellTemplate, effect SpellEffectData, target *player.Player) {
-	if target == nil {
-		target = gc.player
-	}
-
-	// Create aura
-	aura := &Aura{
-		SpellID:    spell.ID,
-		Spell:      spell,
-		CasterGUID: uint64(gc.player.GUID()),
-		Duration:   spell.Duration,
-		Remaining:  spell.Duration,
-		StackCount: 1,
-		StartTime:  time.Now(),
-		Effects: []AuraEffect{
-			{
-				Type:   effect.TriggerAura,
-				Value:  effect.BasePoints,
-				Period: effect.ApplyAuraPeriod,
-				LastTick: time.Now(),
-			},
-		},
-	}
-
-	// Add aura to target (append to auras slice)
-	target.Auras = append(target.Auras, aura)
-
-	// Send aura update
-	gc.sendAuraUpdate(target, aura)
-}
-
-// applyEnergizeEffect applies a power restoration effect.
-func (gc *WorldSession) applyEnergizeEffect(spell *SpellTemplate, effect SpellEffectData, target *player.Player) {
-	if target == nil {
-		target = gc.player
-	}
-
-	amount := uint32(effect.BasePoints)
-	powerType := spell.PowerType
-
-	// Restore power
-	currentPower := target.GetPower(wow.PowerType(powerType))
-	maxPower := target.GetMaxPower(wow.PowerType(powerType))
-
-	newPower := currentPower + amount
-	if newPower > maxPower {
-		newPower = maxPower
-	}
-
-	target.SetPower(wow.PowerType(powerType), newPower)
-
-	// Send power update
-	gc.broadcastPlayerStatsToAll(target)
 }
 
 // broadcastPlayerStatsToAll sends health/mana updates for a player to all nearby players.
@@ -285,7 +138,7 @@ func (gc *WorldSession) broadcastPlayerStatsToAll(target *player.Player) {
 
 	// Update primary power
 	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
-		mask.SetBit(uint32(object.UpdateField(int(object.UnitFieldPower1)+int(powerType))))
+		mask.SetBit(uint32(object.UpdateField(int(object.UnitFieldPower1) + int(powerType))))
 	}
 
 	// Build values block
@@ -351,11 +204,11 @@ func (gc *WorldSession) sendCastFailed(spellID uint32, result SpellCastResult) {
 }
 
 // sendSpellGo sends SMSG_SPELL_GO when a spell is cast.
-func (gc *WorldSession) sendSpellGo(castID uint32, spell *SpellTemplate, target *player.Player) {
+func (gc *WorldSession) sendSpellGo(castID uint32, spellInfo *SpellInfo, target *player.Player) {
 	pkt := wow.NewPacket(wow.ServerSpellGo)
 
 	// Spell ID
-	_ = pkt.Write(spell.ID)
+	_ = pkt.Write(spellInfo.Id)
 
 	// Cast ID
 	_ = pkt.Write(castID)
@@ -389,17 +242,11 @@ func (gc *WorldSession) sendSpellGo(castID uint32, spell *SpellTemplate, target 
 	gc.socket.Send(pkt)
 }
 
-// sendSpellCastComplete sends SMSG_SPELL_GO when cast completes.
-func (gc *WorldSession) sendSpellCastComplete(castID uint32, spell *SpellTemplate) {
-	// For instant spells, this was already sent
-	// For channeled spells, this would be sent when channel ends
-}
-
 // sendSpellLog sends SMSG_SPELLLOGEXECUTE with damage/heal information.
-func (gc *WorldSession) sendSpellLog(spell *SpellTemplate, target *player.Player, damage, heal uint32) {
+func (gc *WorldSession) sendSpellLog(spellInfo *SpellInfo, target *player.Player, damage, heal uint32) {
 	pkt := wow.NewPacket(wow.ServerSpelllogexecute)
 
-	_ = pkt.Write(spell.ID)
+	_ = pkt.Write(spellInfo.Id)
 	_ = pkt.Write(target.GUID())
 	_ = pkt.Write(uint32(0)) // spell log flags
 	_ = pkt.Write(uint32(0)) // amount
@@ -422,16 +269,20 @@ func (gc *WorldSession) sendAuraUpdate(target *player.Player, aura *Aura) {
 	_ = pkt.WriteOne(0)
 
 	// Spell ID
-	_ = pkt.Write(aura.SpellID)
+	var spellID uint32
+	if aura.SpellInfo != nil {
+		spellID = aura.SpellInfo.Id
+	}
+	_ = pkt.Write(spellID)
 
 	// Stack count
-	_ = pkt.Write(aura.StackCount)
+	_ = pkt.Write(aura.StackAmount)
 
-	// Duration
-	_ = pkt.Write(int32(aura.Duration / time.Millisecond))
+	// Duration (ms)
+	_ = pkt.Write(aura.Duration)
 
-	// Max duration
-	_ = pkt.Write(int32(aura.Spell.Duration / time.Millisecond))
+	// Max duration (ms)
+	_ = pkt.Write(aura.MaxDuration)
 
 	// Flags
 	_ = pkt.Write(uint32(0))

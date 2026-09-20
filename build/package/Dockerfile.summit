@@ -1,0 +1,11 @@
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 summit
+
+# /data holds summit-store.yaml (persistent account/character store); config is /etc/summit/server.yaml
+WORKDIR /data
+COPY bin/summit /app/summit
+RUN chown -R summit:summit /data
+
+USER summit
+EXPOSE 5000 5001 5002 8129
+ENTRYPOINT ["/app/summit"]

@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: summit-server
+  namespace: summit
+  labels:
+    app.kubernetes.io/name: summit-server
+    app.kubernetes.io/part-of: summit
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate # the yaml store must not be written by two instances
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: summit-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: summit-server
+        app.kubernetes.io/part-of: summit
+    spec:
+      imagePullSecrets:
+        - name: ghcr-secret
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: summit
+          image: ghcr.io/pilab-dev/summit-server:latest
+          imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: SUMMIT_AUTH_MANAGEMENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: summit-management
+                  key: token
+            - name: SUMMIT_WORLD_AUTH_MANAGEMENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: summit-management
+                  key: token
+          ports:
+            - name: management
+              containerPort: 4999
+            - name: auth-ws
+              containerPort: 5001
+            - name: realm-ws
+              containerPort: 5002
+            - name: auth-tcp
+              containerPort: 5000
+            - name: world-tcp
+              containerPort: 8129
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: auth-ws
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: realm-ws
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: store
+              mountPath: /data
+            - name: config
+              mountPath: /etc/summit/server.yaml
+              subPath: server.yaml
+              readOnly: true
+      volumes:
+        - name: store
+          persistentVolumeClaim:
+            claimName: summit-store-pvc
+        - name: config
+          configMap:
+            name: summit-server-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: summit-server
+  namespace: summit
+  labels:
+    app.kubernetes.io/name: summit-server
+    app.kubernetes.io/part-of: summit
+spec:
+  selector:
+    app.kubernetes.io/name: summit-server
+  ports:
+    - name: management
+      port: 4999
+      targetPort: management
+    - name: auth-ws
+      port: 5001
+      targetPort: auth-ws
+    - name: realm-ws
+      port: 5002
+      targetPort: realm-ws
+    - name: auth-tcp
+      port: 5000
+      targetPort: auth-tcp
+    - name: world-tcp
+      port: 8129
+      targetPort: world-tcp

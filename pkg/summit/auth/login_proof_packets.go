@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -54,11 +55,11 @@ func (pkt *ClientLoginProof) UnmarshalPacket(bb wow.PacketData) error {
 // ServerLoginProof is the server's response to a client's challenge. It contains
 // some SRP information used for handshaking.
 type ServerLoginProof struct {
-	StatusCode    uint8
-	Proof         big.Int
-	AccountFlags  uint32
-	SurveyID      uint32
-	LoginFlags    uint16
+	StatusCode   uint8
+	Proof        big.Int
+	AccountFlags uint32
+	SurveyID     uint32
+	LoginFlags   uint16
 }
 
 // Bytes writes out the packet to an array of bytes.
@@ -70,7 +71,8 @@ func (pkt *ServerLoginProof) MarshalPacket() []byte {
 	_ = w.Write(pkt.StatusCode)
 
 	if pkt.StatusCode == 0 {
-		_, _ = w.WriteZeroPadded(wow.ReverseBytes(pkt.Proof.Bytes()), 30)
+		// M2 is a 20-byte SHA-1 digest, little-endian on the wire
+		_, _ = w.WriteZeroPadded(wow.ReverseBytes(pkt.Proof.Bytes()), 20)
 
 		// BC+ extended fields
 		w.Write(pkt.AccountFlags) // Account flags
@@ -94,17 +96,20 @@ func (pkt *ServerLoginProof) ReadPacket(r io.Reader) int {
 		return -1
 	}
 
+	// M2 (20) + account flags (4) + survey id (4) + login flags (2)
 	data := make([]byte, 30)
 
-	readed, _ := r.Read(data)
+	readed, _ := io.ReadFull(r, data)
 	if readed != 30 {
-		panic(fmt.Sprintf("readed should be 32 got: %d", readed))
+		panic(fmt.Sprintf("readed should be 30 got: %d", readed))
 	}
 
 	slp.Proof = *big.NewInt(0)
-	slp.Proof.SetBytes(wow.ReverseBytes(data))
-
-	// return proof, nil
+	slp.Proof.SetBytes(wow.ReverseBytes(data[:20]))
+	slp.AccountFlags = binary.LittleEndian.Uint32(data[20:24])
+	slp.SurveyID = binary.LittleEndian.Uint32(data[24:28])
+	slp.LoginFlags = binary.LittleEndian.Uint16(data[28:30])
+	*pkt = *slp
 
 	return 0
 }

@@ -336,6 +336,15 @@ func (gc *WorldSession) sendInitialPacketsAfterAddToMap(p *player.Player) {
 	gc.sendPlayerCreate(p)
 }
 
+// sendCreateObjectSelf sends the player's own create object update.
+func (gc *WorldSession) sendCreateObjectSelf() {
+	if gc.player == nil {
+		return
+	}
+
+	gc.sendPlayerCreate(gc.player)
+}
+
 // resetTimeSync resets the time sync counter.
 func (gc *WorldSession) resetTimeSync() {
 	gc.timeSyncCounter = 0

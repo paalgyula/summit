@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: summit-server-config
+  namespace: summit
+  labels:
+    app.kubernetes.io/name: summit-server
+    app.kubernetes.io/part-of: summit
+data:
+  server.yaml: |
+    log:
+      level: 0
+      format: json
+    auth:
+      listen: 0.0.0.0:5000
+      ws_listen: 0.0.0.0:5001
+      # Web clients reach every realm through the ingress: <public_url>/realms/<slug>
+      public_url: wss://summit.dev.pilab.hu
+      # gRPC management API (session validation, realm registration) for world
+      # servers and summitctl. Cluster-internal only; the token comes from the
+      # summit-management secret (SUMMIT_AUTH_MANAGEMENT_TOKEN).
+      management:
+        enabled: true
+        listen: 0.0.0.0:4999
+      realm_ttl: 30
+    world:
+      listen: 0.0.0.0:8129
+      ws_listen: 0.0.0.0:5002
+      # This pod hosts the realm; it reports online players/population into the
+      # realm list every few seconds. A world server in its own deployment would
+      # set world.auth_management.address to summit-server:4999 instead.
+      realm:
+        name: The Highest Summit
+        slug: highest-summit
+        address: summit-server:5002
+        max_players: 1000
+    # Realms listed (as offline) before their world server reports in
+    realms:
+      - name: The Highest Summit
+        slug: highest-summit
+        address: summit-server:5002

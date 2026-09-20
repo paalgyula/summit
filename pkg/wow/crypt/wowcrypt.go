@@ -42,15 +42,13 @@ type WowCrypt struct {
 // The session key should be 40 bytes long.
 // which has been created on the auth session packet. The default skip for WOTLK client is 1024.
 func NewServerWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
-	if len(key.Bytes()) != 40 {
-		panic("the crypt key should be 40 bytes long")
-	}
+	keyBytes := SessionKeyBytes(key.Bytes())
 
 	wc := new(WowCrypt)
 
 	// Encoder setup
 	h := hmac.New(sha1.New, r) // r -> server to client
-	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
+	_, _ = h.Write(wow.ReverseBytes(append([]byte(nil), keyBytes...)))
 	wc.encKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
@@ -59,7 +57,7 @@ func NewServerWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
 
 	// Decoder setup
 	h = hmac.New(sha1.New, s) // s -> client to server
-	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
+	_, _ = h.Write(wow.ReverseBytes(append([]byte(nil), keyBytes...)))
 	wc.decKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
@@ -77,15 +75,13 @@ func NewServerWowcrypt(key *big.Int, skip int) (*WowCrypt, error) {
 // NewClientWoWCrypt initializes a client side crypter. The only difference from
 // the server crypter is the encoder/decoder key setup.
 func NewClientWoWCrypt(key *big.Int, skip int) (*WowCrypt, error) {
-	if len(key.Bytes()) != 40 {
-		panic("the crypt key should be 40 bytes long")
-	}
+	keyBytes := SessionKeyBytes(key.Bytes())
 
 	wc := new(WowCrypt)
 
 	// Encoder setup
 	h := hmac.New(sha1.New, s) // s -> client to server
-	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
+	_, _ = h.Write(wow.ReverseBytes(append([]byte(nil), keyBytes...)))
 	wc.encKey = h.Sum(nil)
 
 	if h.Size() != digestLength {
@@ -94,7 +90,7 @@ func NewClientWoWCrypt(key *big.Int, skip int) (*WowCrypt, error) {
 
 	// Decoder setup
 	h = hmac.New(sha1.New, r) // r -> server to client
-	_, _ = h.Write(wow.ReverseBytes(key.Bytes()))
+	_, _ = h.Write(wow.ReverseBytes(append([]byte(nil), keyBytes...)))
 	wc.decKey = h.Sum(nil)
 
 	if h.Size() != digestLength {

@@ -1,0 +1,48 @@
+# summit.dev.pilab.hu
+#   /realm/auth   -> login WebSocket (realm list, session keys)
+#   /realms/<slug> -> that realm's world WebSocket
+#   /             -> web client
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: summit
+  namespace: summit
+  labels:
+    app.kubernetes.io/part-of: summit
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Long-lived game WebSockets
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - summit.dev.pilab.hu
+      secretName: summit-dev-pilab-hu-tls
+  rules:
+    - host: summit.dev.pilab.hu
+      http:
+        paths:
+          - path: /realm/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: summit-server
+                port:
+                  name: auth-ws
+          - path: /realms
+            pathType: Prefix
+            backend:
+              service:
+                name: summit-server
+                port:
+                  name: realm-ws
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: summit-client
+                port:
+                  name: http

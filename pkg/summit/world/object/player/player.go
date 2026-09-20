@@ -2,6 +2,7 @@ package player
 
 import (
 	"math"
+	"time"
 
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
@@ -153,18 +154,18 @@ type Player struct {
 	Location     WorldLocation
 	BindLocation WorldLocation
 
-	Level  uint8
-	XP     uint32
-	Money  uint32
+	Level uint8
+	XP    uint32
+	Money uint32
 
 	Health    uint32
 	MaxHealth uint32
 	Power     [wow.MaxPowerTypes]uint32
 	MaxPower  [wow.MaxPowerTypes]uint32
 
-	DisplayID        uint32
-	NativeDisplayID  uint32
-	MountDisplayID   uint32
+	DisplayID       uint32
+	NativeDisplayID uint32
+	MountDisplayID  uint32
 
 	Inventory *Inventory
 	GuildID   uint32
@@ -200,8 +201,11 @@ type Player struct {
 	// Active auras (buffs/debuffs) - interface to avoid circular import
 	Auras []interface{}
 
-	// Spell cooldowns (spell ID -> expiry time in Unix ms)
-	SpellCooldowns map[uint32]int64
+	// SpellModifiers from talents/gear - ModifierList stored as interface to avoid circular import
+	SpellModifiers interface{} `json:"-"`
+
+	// Spell cooldowns (spell ID or category → expiry time)
+	SpellCooldowns map[uint32]time.Time
 
 	// Action bar (12 buttons per bar, 3 bars + stance bar)
 	Actions [48]uint32
@@ -218,6 +222,15 @@ type Player struct {
 	// Death state
 	IsGhost   bool
 	DeathTime int64 // when player died (Unix ms)
+
+	// CurrentMap is the map the player is currently on (interface to avoid circular import)
+	CurrentMap interface{}
+
+	// CurrentMapID is the map ID the player is on
+	CurrentMapID uint32
+
+	// CurrentInstanceID is the instance ID (0 for non-instanced maps)
+	CurrentInstanceID uint32
 }
 
 // Initializes the inventory. The slots can be nil, in this case it will be initialized as
@@ -252,7 +265,19 @@ func (p *Player) GUID() wow.GUID {
 	return wow.NewPlayerGUID(p.ID)
 }
 
+// GetGUID returns the player's GUID (satisfies the world.Unit interface).
+func (p *Player) GetGUID() wow.GUID {
+	return p.GUID()
+}
+
 func (p *Player) Init() {
+	if p.Object == nil {
+		p.Object = object.NewObject()
+	}
+	if p.Unit == nil {
+		p.Unit = object.NewUnit()
+	}
+
 	// Set default health/mana based on class
 	p.MaxHealth = 100
 	p.Health = 100
@@ -539,6 +564,11 @@ func (p *Player) GetHealth() uint32 {
 	return p.Health
 }
 
+// GetLevel returns the player's level as uint32.
+func (p *Player) GetLevel() uint32 {
+	return uint32(p.Level)
+}
+
 // SetHealth sets the current health, clamping to [0, MaxHealth].
 func (p *Player) SetHealth(v uint32) {
 	if v > p.MaxHealth {
@@ -685,19 +715,16 @@ func (p *Player) IsSpellOnCooldown(spellID uint32) bool {
 		return false
 	}
 
-	// Check if cooldown has expired (using a placeholder time)
-	// In real code, this would use time.Now().UnixMilli()
-	return expiry > 0
+	return time.Now().Before(expiry)
 }
 
 // AddCooldown sets a cooldown for a spell.
 func (p *Player) AddCooldown(spellID uint32, durationMs int64) {
 	if p.SpellCooldowns == nil {
-		p.SpellCooldowns = make(map[uint32]int64)
+		p.SpellCooldowns = make(map[uint32]time.Time)
 	}
 
-	// Store as absolute time (placeholder - would use time.Now().UnixMilli() + durationMs)
-	p.SpellCooldowns[spellID] = durationMs
+	p.SpellCooldowns[spellID] = time.Now().Add(time.Duration(durationMs) * time.Millisecond)
 }
 
 // IsWithinRange checks if the player is within range of a target.
@@ -851,5 +878,159 @@ func (p *Player) Resurrect() {
 
 	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
 		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldPower1)+int(powerType)), p.Power[powerType])
+	}
+}
+
+// GetMap returns the current map (interface to avoid circular import).
+func (p *Player) GetMap() interface{} {
+	return p.CurrentMap
+}
+
+// SetMap sets the current map.
+func (p *Player) SetMap(m interface{}) {
+	p.CurrentMap = m
+}
+
+// GetMapID returns the current map ID.
+func (p *Player) GetMapID() uint32 {
+	return p.CurrentMapID
+}
+
+// SetMapID sets the current map ID.
+func (p *Player) SetMapID(mapID uint32) {
+	p.CurrentMapID = mapID
+}
+
+// GetInstanceID returns the current instance ID.
+func (p *Player) GetInstanceID() uint32 {
+	return p.CurrentInstanceID
+}
+
+// SetInstanceID sets the current instance ID.
+func (p *Player) SetInstanceID(instanceID uint32) {
+	p.CurrentInstanceID = instanceID
+}
+
+// TeleportTo teleports the player to the given location.
+func (p *Player) TeleportTo(mapID uint32, x, y, z, o float32) {
+	p.Location.Map = mapID
+	p.Location.X = x
+	p.Location.Y = y
+	p.Location.Z = z
+	p.Location.O = o
+
+	p.CurrentMapID = mapID
+}
+
+// UpdateInventoryFields updates the player's inventory update fields.
+// This sets PlayerFieldInvSlotHead and PlayerFieldPackSlot_1 with item GUIDs.
+func (p *Player) UpdateInventoryFields() {
+	if p.Inventory == nil {
+		return
+	}
+
+	// Set equipment and bag slot GUIDs (PlayerFieldInvSlotHead covers slots 0-22)
+	// Each slot takes 2 uint32 values (low + high GUID)
+	for i := 0; i < InventorySlotTotal && i < 23; i++ {
+		item := p.Inventory.GetItem(i)
+		slotField := object.UpdateField(int(object.PlayerFieldInvSlotHead) + i*2)
+
+		if item != nil {
+			guid := item.GUID()
+			p.Object.SetUInt32Value(slotField, uint32(guid))
+			p.Object.SetUInt32Value(slotField+1, uint32(uint64(guid)>>32))
+		} else {
+			p.Object.SetUInt32Value(slotField, 0)
+			p.Object.SetUInt32Value(slotField+1, 0)
+		}
+	}
+
+	// Set backpack slot GUIDs (PlayerFieldPackSlot_1 covers slots 27-38, 12 slots)
+	for i := 0; i < 12; i++ {
+		absSlot := InventorySlotItemStart + i
+		item := p.Inventory.GetItem(absSlot)
+		slotField := object.UpdateField(int(object.PlayerFieldPackSlot_1) + i*2)
+
+		if item != nil {
+			guid := item.GUID()
+			p.Object.SetUInt32Value(slotField, uint32(guid))
+			p.Object.SetUInt32Value(slotField+1, uint32(uint64(guid)>>32))
+		} else {
+			p.Object.SetUInt32Value(slotField, 0)
+			p.Object.SetUInt32Value(slotField+1, 0)
+		}
+	}
+}
+
+// EquipItem equips an item to the appropriate slot.
+// Returns the previously equipped item if the slot was occupied, or nil.
+func (p *Player) EquipItem(item *Item) *Item {
+	if item == nil || p.Inventory == nil {
+		return nil
+	}
+
+	// Determine the equipment slot based on item's inventory type
+	inventoryType := GetItemInventoryType(item.ItemEntry)
+	slot := FindEquipSlot(inventoryType)
+	if slot < 0 {
+		return nil
+	}
+
+	// Get existing item in that slot
+	prev := p.Inventory.SetEquipment(slot, item)
+
+	// Update item's owner and contained
+	item.Owner = p.GUID()
+	item.Contained = p.GUID()
+	item.SlotIndex = slot
+
+	// Update item update fields
+	item.initUpdateFields()
+
+	// Update player's inventory update fields
+	p.UpdateInventoryFields()
+
+	return prev
+}
+
+// UnequipItem removes an item from an equipment slot.
+func (p *Player) UnequipItem(slot int) *Item {
+	if p.Inventory == nil || slot < 0 || slot >= EquipmentSlotEnd {
+		return nil
+	}
+
+	item := p.Inventory.RemoveItem(slot)
+	if item != nil {
+		// Update player's inventory update fields
+		p.UpdateInventoryFields()
+	}
+
+	return item
+}
+
+// GetItemInventoryType returns the inventory type for an item entry.
+// This is a placeholder - actual implementation would look up item_template.
+func GetItemInventoryType(entry uint32) wow.InventoryType {
+	// TODO: Look up from item_template database
+	// For now, return based on entry ranges (hardcoded for testing)
+	switch {
+	case entry >= 25000 && entry < 25010:
+		return wow.InventoryTypeHead
+	case entry >= 25010 && entry < 25020:
+		return wow.InventoryTypeShoulders
+	case entry >= 25020 && entry < 25030:
+		return wow.InventoryTypeChest
+	case entry >= 25030 && entry < 25040:
+		return wow.InventoryTypeLegs
+	case entry >= 25040 && entry < 25050:
+		return wow.InventoryTypeFeet
+	case entry >= 25050 && entry < 25060:
+		return wow.InventoryTypeWeaponMainHand
+	case entry >= 25060 && entry < 25070:
+		return wow.InventoryTypeWeaponOffHand
+	case entry >= 25070 && entry < 25080:
+		return wow.InventoryTypeRanged
+	default:
+		return wow.InventoryType(0)
 	}
 }

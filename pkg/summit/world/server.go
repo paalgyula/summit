@@ -5,14 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"runtime"
 	"sync"
 	"time"
 
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/auth"
+	"github.com/paalgyula/summit/pkg/summit/world/areatrigger"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
+	"github.com/paalgyula/summit/pkg/summit/world/worldstate"
+	"github.com/paalgyula/summit/pkg/summit/world/wsconn"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -22,16 +29,23 @@ type Server struct {
 	clients sync.Map
 
 	gameListener net.Listener
+	echoServer   *echo.Echo
 	log          zerolog.Logger
 
 	// Database access
-	charStore  store.CharacterRepo
-	worldStore store.WorldRepo
+	accountStore store.AccountRepo
+	charStore    store.CharacterRepo
+	worldStore   store.WorldRepo
 
 	bs *babysocket.Server
 
 	// Management client for auth. Can be direct, or gRPC based.
 	authManagement auth.ManagementService
+
+	// Realm-list identity reported to the auth server (nil: not advertised)
+	realm     *RealmIdentity
+	realmLock uint8
+	done      chan struct{}
 
 	baseData *basedata.Store
 
@@ -41,8 +55,17 @@ type Server struct {
 	// Game object manager
 	gameObjects *GameObjectManager
 
-	// Spell manager
-	spellManager *SpellManager
+	// Spell data manager (DBC-loaded spell data)
+	spellMgr *SpellMgr
+
+	// Map manager
+	mapManager *mapmanager.MapManager
+
+	// AreaTrigger manager
+	areaTriggerMgr *areatrigger.Manager
+
+	// WorldState manager
+	worldStateManager *worldstate.Manager
 }
 
 func NewServer(opts ...ServerOption) (*Server, error) {
@@ -52,9 +75,17 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 		Str("service", "world").
 		Caller().Logger()
 	worldServer.clients = sync.Map{}
+	worldServer.done = make(chan struct{})
 	worldServer.spawns = NewSpawnManager()
 	worldServer.gameObjects = NewGameObjectManager()
-	worldServer.spellManager = NewSpellManager()
+	worldServer.spellMgr = NewSpellMgr()
+
+	// Initialize map management system
+	worldServer.mapManager = mapmanager.GetMapManager()
+
+	// Initialize areatrigger system
+	worldServer.areaTriggerMgr = areatrigger.NewManager()
+	worldServer.mapManager.SetAreaTriggerManager(worldServer.areaTriggerMgr)
 
 	// Apply options
 	for _, so := range opts {
@@ -81,11 +112,72 @@ func (ws *Server) StartServer(worldStore store.WorldRepo, charStore store.Charac
 
 	ws.charStore = charStore
 	ws.worldStore = worldStore
+	if accRepo, ok := charStore.(store.AccountRepo); ok {
+		ws.accountStore = accRepo
+	}
+
+	// Initialize worldstate manager with database
+	ws.worldStateManager = worldstate.NewManager(nil) // TODO: pass actual DB
 
 	go ws.startListener()
 	go ws.Run()
+	go ws.reportRealmStatus()
 
 	return nil
+}
+
+// StartWebSocketServer starts a dedicated Echo WebSocket server for realm/world connections.
+func (ws *Server) StartWebSocketServer(listenAddr string) error {
+	e := echo.New()
+	e.HideBanner = true
+	e.HidePort = true
+
+	e.Use(middleware.Recover())
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodOptions},
+		AllowHeaders: []string{"*"},
+	}))
+
+	h := wsconn.NewHandler(ws)
+	e.GET(wsconn.RealmPath, h.HandleWS)
+	e.GET("/health", func(c echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
+
+	ws.echoServer = e
+	ws.log.Info().Str("listen", listenAddr).Msg("realm websocket server starting")
+
+	go func() {
+		if err := e.Start(listenAddr); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			ws.log.Error().Err(err).Msg("realm websocket server failed")
+		}
+	}()
+
+	return nil
+}
+
+// NewWorldSessionConn implements wsconn.SessionFactory: a browser connection
+// gets the same session, handshake and encryption as an accepted TCP client.
+func (ws *Server) NewWorldSessionConn(conn net.Conn) {
+	NewWorldSession(conn, ws)
+}
+
+func (ws *Server) startListener() {
+	for {
+		conn, err := ws.gameListener.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+
+			log.Error().Err(err).Msg("tcp listener error")
+
+			continue
+		}
+
+		NewWorldSession(conn, ws)
+	}
 }
 
 func (ws *Server) Clients() map[string]wow.PayloadSender {
@@ -101,23 +193,6 @@ func (ws *Server) Clients() map[string]wow.PayloadSender {
 	})
 
 	return ret
-}
-
-func (ws *Server) startListener() {
-	for {
-		conn, err := ws.gameListener.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return
-			}
-
-			log.Error().Err(err).Msg("listener error")
-
-			continue
-		}
-
-		NewWorldSession(conn, ws)
-	}
 }
 
 func (ws *Server) AddClient(gc *WorldSession) {
@@ -212,6 +287,11 @@ func (ws *Server) Run() {
 
 // update runs one world tick. It processes all connected sessions.
 func (ws *Server) update(now time.Time) {
+	// Update all maps
+	if ws.mapManager != nil {
+		ws.mapManager.Update(50) // 50ms tick
+	}
+
 	ws.clients.Range(func(key, value any) bool {
 		gc, ok := value.(*WorldSession)
 		if !ok {
@@ -275,6 +355,21 @@ func (ws *Server) GetAllSessions() []*WorldSession {
 	})
 
 	return sessions
+}
+
+// GetMapManager returns the map manager.
+func (ws *Server) GetMapManager() *mapmanager.MapManager {
+	return ws.mapManager
+}
+
+// GetAreaTriggerManager returns the areatrigger manager.
+func (ws *Server) GetAreaTriggerManager() *areatrigger.Manager {
+	return ws.areaTriggerMgr
+}
+
+// GetWorldStateManager returns the worldstate manager.
+func (ws *Server) GetWorldStateManager() *worldstate.Manager {
+	return ws.worldStateManager
 }
 
 func MemUsage() string {

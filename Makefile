@@ -16,7 +16,7 @@ LFLAGS ?= -X ${DOC_PACKAGE}.Gitsha=${GIT_SHA} \
 
 TAGS?=netgo
 
-BUILDCMD=CGO_ENABLED=0 GOOS=linux go build -a -tags ${TAGS} -ldflags "-s -w ${LFLAGS}" 
+BUILDCMD=CGO_ENABLED=0 GOOS=linux GOARCH=${ARCHITECTURES} go build -a -tags ${TAGS} -ldflags "-s -w ${LFLAGS}" 
 
 default: build
 
@@ -61,6 +61,24 @@ build:
 	go build -o bin/summit cmd/summit/summit.go
 	go build -o bin/serworm cmd/serworm/serworm.go
 	go build -o bin/datagen cmd/datagen/datagen.go
+	go build -o bin/assetserver cmd/assetserver/main.go
+	go build -o bin/summitctl cmd/summitctl/summitctl.go
+
+## Run the whole local dev stack (game server, asset server, web client) with restart on rebuild
+dev:
+	@scripts/dev.sh
+
+## Build, push and roll out the asset server to Kubernetes, evicting its cache
+deploy-assetserver:
+	@scripts/deploy-assetserver.sh
+
+## Build, push and roll out the game server and web client to Kubernetes
+deploy-summit:
+	@scripts/deploy-summit.sh
+
+## Wipe the asset server's conversion cache in the running pod
+evict-asset-cache:
+	@scripts/deploy-assetserver.sh evict-cache
 
 build-dist: clean
 	@mkdir -p bin/
@@ -70,7 +88,18 @@ build-dist: clean
 	@$(BUILDCMD) -o bin/serworm cmd/serworm/serworm.go
 	@echo "--> Compiling datagen"
 	@$(BUILDCMD) -o bin/datagen cmd/datagen/datagen.go
+	@echo "--> Compiling assetserver"
+	@$(BUILDCMD) -o bin/assetserver cmd/assetserver/main.go
+	@echo "--> Compiling summitctl"
+	@$(BUILDCMD) -o bin/summitctl cmd/summitctl/summitctl.go
+	@echo "--> Compressing binaries with UPX for small bandwidth environment..."
+	@command -v upx >/dev/null 2>&1 && upx -9 bin/* || echo "UPX not available, skipping"
 	@echo "Done. You can find the compiled binaries in the bin/ folder"
+
+## Compress compiled binaries in bin/ with UPX
+upx:
+	@echo "--> Compressing binaries in bin/ with UPX..."
+	@command -v upx >/dev/null 2>&1 && upx -9 bin/* || (echo "UPX is not installed" && exit 1)
 
 ## Installs dependencies (summit code generation tools) to go's bin folder. Usually to $HOME/go/bin
 install:	

@@ -1,0 +1,9 @@
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+COPY bin/assetserver /app/assetserver
+
+EXPOSE 8080
+
+ENTRYPOINT ["/app/assetserver"]

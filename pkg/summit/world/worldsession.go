@@ -86,6 +86,29 @@ func NewWorldSession(n net.Conn, ws SessionManager, handlers ...PacketHandler) *
 	return gc
 }
 
+// LoginCharacter loads and initializes the player character into the world
+// sending all initial world packets directly over the active session.
+func (gc *WorldSession) LoginCharacter(p *player.Player) {
+	gc.player = p
+	p.Init()
+
+	gc.sendLoginVerifyWorld(p)
+	gc.sendFeatureSystemStatus()
+	gc.sendMOTD()
+	gc.sendLearnedDanceMoves()
+	gc.sendInitialPacketsBeforeAddToMap(p)
+	gc.addPlayerToMap(p)
+	gc.sendInitialPacketsAfterAddToMap(p)
+	gc.setPlayerOnline(p)
+	gc.sendFriendStatus(p, FriendStatusOnline)
+
+	if p.GroupID > 0 {
+		gc.sendGroupUpdate(p)
+	}
+
+	gc.log.Info().Str("name", p.Name).Msg("player logged into world via websocket")
+}
+
 func (gc *WorldSession) recover() {
 	a := recover()
 	if a == nil { // No recover needed
@@ -264,7 +287,7 @@ func (gc *WorldSession) broadcastPlayerStats() {
 
 	// Update primary power
 	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
-		mask.SetBit(uint32(object.UpdateField(int(object.UnitFieldPower1)+int(powerType))))
+		mask.SetBit(uint32(object.UpdateField(int(object.UnitFieldPower1) + int(powerType))))
 	}
 
 	// Build values block
@@ -332,7 +355,7 @@ func (gc *WorldSession) sendDeath() {
 	// Send release spirit dialog
 	pkt := wow.NewPacket(wow.ServerDeathReleaseLoc)
 
-	_ = pkt.Write(uint32(0)) // release location map
+	_ = pkt.Write(uint32(0))  // release location map
 	_ = pkt.Write(float32(0)) // release location x
 	_ = pkt.Write(float32(0)) // release location y
 	_ = pkt.Write(float32(0)) // release location z

@@ -15,8 +15,10 @@ import (
 )
 
 type Server struct {
-	logonListener net.Listener
-	rpcListener   net.Listener
+	// managementToken is the shared secret management clients must present.
+	managementToken string
+	logonListener   net.Listener
+	rpcListener     net.Listener
 
 	// The realm provider
 	realmProvider RealmProvider
@@ -107,7 +109,10 @@ func (s *Server) StartManagementServer() {
 		return
 	}
 
-	srv := grpc.NewServer()
+	if s.managementToken == "" {
+		s.log.Warn().Msg("management server has no token configured: any client can read session keys")
+	}
+	srv := grpc.NewServer(grpc.UnaryInterceptor(managementAuthInterceptor(s.managementToken)))
 	authv1.RegisterAuthManagementServer(srv, &managementRPCServer{
 		srv: s.management,
 	})

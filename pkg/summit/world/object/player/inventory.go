@@ -154,18 +154,109 @@ func (inv *Inventory) CountItems() int {
 }
 
 // ToCharacterEnum writes inventory item display data for the character enum packet.
+//
 //nolint:errcheck
 func (inv *Inventory) ToCharacterEnum(w *wow.Packet) {
 	for i := 0; i < EquipmentSlotEnd; i++ {
-		item := inv.Slots[i]
+		var item *Item
+		if i < len(inv.Slots) {
+			item = inv.Slots[i]
+		}
 		if item == nil {
 			w.Write(uint32(0)) // DisplayInfoID
 			w.Write(wow.InventoryType(0))
 			w.Write(uint32(0)) // EnchantSlot
 		} else {
 			w.Write(item.ItemEntry)
-			w.Write(wow.InventoryType(0)) // TODO: map slot to InventoryType
+			w.Write(SlotToInventoryType(i))
 			w.Write(item.GetEnchant(0))
 		}
+	}
+}
+
+// SlotToInventoryType maps an equipment slot index to the corresponding InventoryType.
+func SlotToInventoryType(slot int) wow.InventoryType {
+	switch slot {
+	case EquipmentSlotHead:
+		return wow.InventoryTypeHead
+	case EquipmentSlotNeck:
+		return wow.InventoryTypeNeck
+	case EquipmentSlotShoulder:
+		return wow.InventoryTypeShoulders
+	case EquipmentSlotBody:
+		return wow.InventoryTypeBody
+	case EquipmentSlotChest:
+		return wow.InventoryTypeChest
+	case EquipmentSlotWaist:
+		return wow.InventoryTypeWaist
+	case EquipmentSlotLegs:
+		return wow.InventoryTypeLegs
+	case EquipmentSlotFeet:
+		return wow.InventoryTypeFeet
+	case EquipmentSlotWrists:
+		return wow.InventoryTypeWrists
+	case EquipmentSlotHands:
+		return wow.InventoryTypeHands
+	case EquipmentSlotFinger1, EquipmentSlotFinger2:
+		return wow.InventoryTypeFinger
+	case EquipmentSlotTrinket1, EquipmentSlotTrinket2:
+		return wow.InventoryTypeTrinket
+	case EquipmentSlotBack:
+		return wow.InventoryTypeCloak
+	case EquipmentSlotMainHand:
+		return wow.InventoryTypeWeaponMainHand
+	case EquipmentSlotOffHand:
+		return wow.InventoryTypeWeaponOffHand
+	case EquipmentSlotRanged:
+		return wow.InventoryTypeRanged
+	case EquipmentSlotTabard:
+		return wow.InventoryTypeTabard
+	default:
+		return wow.InventoryType(0)
+	}
+}
+
+// FindEquipSlot determines the correct equipment slot for an item based on its inventory type.
+// Returns -1 if the item cannot be equipped.
+func FindEquipSlot(inventoryType wow.InventoryType) int {
+	switch inventoryType {
+	case wow.InventoryTypeHead:
+		return EquipmentSlotHead
+	case wow.InventoryTypeNeck:
+		return EquipmentSlotNeck
+	case wow.InventoryTypeShoulders:
+		return EquipmentSlotShoulder
+	case wow.InventoryTypeBody:
+		return EquipmentSlotBody
+	case wow.InventoryTypeChest:
+		return EquipmentSlotChest
+	case wow.InventoryTypeWaist:
+		return EquipmentSlotWaist
+	case wow.InventoryTypeLegs:
+		return EquipmentSlotLegs
+	case wow.InventoryTypeFeet:
+		return EquipmentSlotFeet
+	case wow.InventoryTypeWrists:
+		return EquipmentSlotWrists
+	case wow.InventoryTypeHands:
+		return EquipmentSlotHands
+	case wow.InventoryTypeFinger:
+		return EquipmentSlotFinger1 // TODO: check if finger2 is empty
+	case wow.InventoryTypeTrinket:
+		return EquipmentSlotTrinket1 // TODO: check if trinket2 is empty
+	case wow.InventoryTypeCloak:
+		return EquipmentSlotBack
+	case wow.InventoryTypeWeaponMainHand:
+		return EquipmentSlotMainHand
+	case wow.InventoryTypeWeaponOffHand:
+		return EquipmentSlotOffHand
+	case wow.InventoryTypeShield, wow.InventoryTypeHoldable:
+		return EquipmentSlotOffHand
+	case wow.InventoryTypeRanged, wow.InventoryTypeRelic:
+		return EquipmentSlotRanged
+	case wow.InventoryTypeTabard:
+		return EquipmentSlotTabard
+	default:
+		return -1
 	}
 }

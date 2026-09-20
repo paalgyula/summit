@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: summit-store-pvc
+  namespace: summit
+  labels:
+    app.kubernetes.io/name: summit-server
+    app.kubernetes.io/part-of: summit
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: nfs-csi
+  resources:
+    requests:
+      storage: 1Gi

@@ -23,6 +23,7 @@ func init() {
 	rootCmd.AddCommand(authCmd)
 
 	authCmd.PersistentFlags().String("authserver", "127.0.0.1:4999", "Auth server management interface address")
+	authCmd.PersistentFlags().String("token", os.Getenv("SUMMIT_AUTH_MANAGEMENT_TOKEN"), "Management API shared token (SUMMIT_AUTH_MANAGEMENT_TOKEN)")
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
@@ -36,8 +37,9 @@ func registerCmd() *cobra.Command {
 		Args:  cobra.MinimumNArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
 			addr := cmd.Flags().Lookup("authserver").Value.String()
+			token := cmd.Flags().Lookup("token").Value.String()
 
-			client, err := auth.NewManagementClient(addr)
+			client, err := auth.NewManagementClient(addr, token)
 			if err != nil {
 				panic(err)
 			}

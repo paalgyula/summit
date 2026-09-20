@@ -31,11 +31,11 @@ var (
 type AuthState uint8
 
 const (
-	AuthStateChallenge       AuthState = iota // Waiting for login/reconnect challenge
-	AuthStateLogonProof                       // Waiting for login proof
-	AuthStateReconnectProof                   // Waiting for reconnect proof
-	AuthStateAuthed                           // Authenticated, can handle realm list
-	AuthStateClosed                           // Connection closed
+	AuthStateChallenge      AuthState = iota // Waiting for login/reconnect challenge
+	AuthStateLogonProof                      // Waiting for login proof
+	AuthStateReconnectProof                  // Waiting for reconnect proof
+	AuthStateAuthed                          // Authenticated, can handle realm list
+	AuthStateClosed                          // Connection closed
 )
 
 type AuthConnection struct {
@@ -57,8 +57,8 @@ type AuthConnection struct {
 	state AuthState
 
 	// Reconnect state
-	reconnectProof [16]byte  // Random proof sent to client during reconnect challenge
-	sessionKey     string    // Session key from previous login (for reconnect verification)
+	reconnectProof [16]byte // Random proof sent to client during reconnect challenge
+	sessionKey     string   // Session key from previous login (for reconnect verification)
 }
 
 func NewAuthConnection(c net.Conn, rp RealmProvider,

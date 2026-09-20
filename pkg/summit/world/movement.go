@@ -191,6 +191,9 @@ func (gc *WorldSession) updatePlayerPosition(info *MovementInfo) {
 
 	// Update movement flags on player
 	gc.player.MoveFlags = wow.MovementFlag(info.Flags)
+
+	// Check areatriggers after position update
+	gc.checkAreaTriggers()
 }
 
 // broadcastMovement broadcasts the movement to other players in range.
@@ -303,4 +306,33 @@ func (gc *WorldSession) HandleMoveTimeSkipped(data wow.PacketData) {
 	_ = reader.Read(&skippedTime)
 
 	gc.log.Trace().Uint32("skipped", skippedTime).Msg("time skipped")
+}
+
+// checkAreaTriggers checks if the player has entered any areatriggers.
+func (gc *WorldSession) checkAreaTriggers() {
+	if gc.player == nil {
+		return
+	}
+
+	server, ok := gc.ws.(*Server)
+	if !ok || server.areaTriggerMgr == nil {
+		return
+	}
+
+	// Get areatriggers for current map
+	triggers := server.areaTriggerMgr.GetTriggersForMap(gc.player.Location.Map)
+
+	for _, at := range triggers {
+		// Check if player is inside the trigger
+		if at.IsInside(gc.player.Location.X, gc.player.Location.Y, gc.player.Location.Z) {
+			// Check if script is registered
+			server.areaTriggerMgr.CheckTrigger(
+				gc.player.ID,
+				at.Entry,
+				gc.player.Location.X,
+				gc.player.Location.Y,
+				gc.player.Location.Z,
+			)
+		}
+	}
 }

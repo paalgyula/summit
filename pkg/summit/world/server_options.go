@@ -63,3 +63,14 @@ func WithAuthManagement(ms auth.ManagementService) ServerOption {
 		return nil
 	}
 }
+
+// WithSpellDBC loads spell data from DBC files in the given directory.
+func WithSpellDBC(dbcPath string) ServerOption {
+	return func(s *Server) error {
+		if err := s.spellMgr.LoadSpells(dbcPath); err != nil {
+			return fmt.Errorf("world.LoadSpells: %w", err)
+		}
+
+		return nil
+	}
+}

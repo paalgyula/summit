@@ -1,5 +1,10 @@
 package auth
 
+import (
+	"regexp"
+	"strings"
+)
+
 type RealmProvider interface {
 	// Returns a list of realms for the given account.
 	Realms(accountID string) ([]*Realm, error)
@@ -37,10 +42,19 @@ type Realm struct {
 	Flags RealmFlags
 	// Name name of the server
 	Name string
+	// Slug is the URL-safe realm identifier used by the web client's
+	// WebSocket endpoint (/realms/<slug>). Derived from Name when empty.
+	Slug string
 	// Address is a network address of the world server
 	Address string
-	// Population
+	// Population indicator (online / capacity)
 	Population float32
+	// OnlinePlayers currently in the world
+	OnlinePlayers uint32
+	// MaxPlayers is the capacity the population indicator is relative to
+	MaxPlayers uint32
+	// Online is false for realms whose world server is not reporting
+	Online bool
 	// NumCharacters number of characters in server
 	NumCharacters uint8
 	// Timezone
@@ -48,4 +62,33 @@ type Realm struct {
 
 	// Unknown - needs research whats this
 	Unknown uint8
+}
+
+var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
+
+// Slugify turns a realm name into its URL identifier ("The Highest Summit" -> "the-highest-summit").
+func Slugify(name string) string {
+	return strings.Trim(nonSlugChars.ReplaceAllString(strings.ToLower(name), "-"), "-")
+}
+
+// URLSlug returns the realm's explicit slug, or one derived from its name.
+func (r *Realm) URLSlug() string {
+	if r.Slug != "" {
+		return r.Slug
+	}
+	return Slugify(r.Name)
+}
+
+// WebSocketURL is the realm's world WebSocket endpoint for web clients.
+// With a public base URL (e.g. "wss://summit.dev.pilab.hu") every realm is
+// reached through the ingress as <base>/realms/<slug>; otherwise the realm's
+// own listen address is used directly.
+func (r *Realm) WebSocketURL(publicBaseURL string) string {
+	if publicBaseURL != "" {
+		return strings.TrimRight(publicBaseURL, "/") + "/realms/" + r.URLSlug()
+	}
+	if strings.HasPrefix(r.Address, "ws://") || strings.HasPrefix(r.Address, "wss://") {
+		return r.Address
+	}
+	return "ws://" + r.Address + "/realms/" + r.URLSlug()
 }

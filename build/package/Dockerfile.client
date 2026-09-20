@@ -1,0 +1,16 @@
+# Builds the web client and serves it as static files. Endpoints are derived
+# from the page origin at runtime (wss://<host>/realm/auth), so no build-time
+# configuration is needed beyond the asset server host.
+FROM node:22-alpine AS build
+WORKDIR /src
+COPY client/package.json client/package-lock.json* ./
+RUN npm ci
+COPY client/ ./
+ARG VITE_ASSET_HOST=https://assets-summit.dev.pilab.hu
+ENV VITE_ASSET_HOST=$VITE_ASSET_HOST
+RUN npm run build
+
+FROM nginxinc/nginx-unprivileged:1.27-alpine
+COPY build/package/nginx-client.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /src/dist /usr/share/nginx/html
+EXPOSE 8080
