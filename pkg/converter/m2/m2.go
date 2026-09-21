@@ -50,6 +50,7 @@ type M2Vertex struct {
 	BoneIndices [4]uint8
 	Normal      [3]float32
 	TexCoords   [2]float32
+	TexCoords2  [2]float32 // second UV set (multi-texture batches)
 }
 
 // ArrayRef is an M2Array header: element count and byte offset into the
@@ -89,10 +90,95 @@ const SequenceFlagAlias = 0x40
 // AnimLoader returns the raw contents of the external .anim file for a sequence.
 type AnimLoader func(sequenceID, variation uint16) ([]byte, error)
 
+// GlobalFlagTextureCombiners (M2 header flag 0x08): batches' shader_id
+// indexes the texture_combiner_combos table.
+const GlobalFlagTextureCombiners = 0x08
+
+// Texture types: 0 is a fixed file name, the others are replaced at runtime
+// (character skin, hair, creature skins, ...).
+const (
+	TextureTypeFilename = 0
+	TextureTypeSkin     = 1
+	TextureTypeHair     = 6
+)
+
+// Texture flags.
+const (
+	TextureFlagWrapX = 0x1
+	TextureFlagWrapY = 0x2
+)
+
 type M2Texture struct {
 	Type  uint32
 	Flags uint32
-	Name  string
+	Name  string // BLP path for TextureTypeFilename
+}
+
+// Render flags (M2Material.flags).
+const (
+	MaterialFlagUnlit     = 0x01
+	MaterialFlagUnfogged  = 0x02
+	MaterialFlagTwoSided  = 0x04
+	MaterialFlagDepthTest = 0x08
+	MaterialFlagNoDepthWr = 0x10
+)
+
+// Blend modes (M2Material.blending_mode).
+const (
+	BlendOpaque   = 0
+	BlendAlphaKey = 1
+	BlendAlpha    = 2
+	BlendNoAlpha  = 3
+	BlendAdd      = 4
+	BlendMod      = 5
+	BlendMod2x    = 6
+)
+
+type M2Material struct {
+	Flags     uint16
+	BlendMode uint16
+}
+
+// M2Color is a per-texture-unit colour and alpha animation (M2Color).
+type M2Color struct {
+	Color M2Track // C3Vector
+	Alpha M2Track // fixed16
+}
+
+// M2TextureTransform animates a texture's UVs (M2TextureTransform, 60 bytes).
+type M2TextureTransform struct {
+	Translation M2Track // C3Vector
+	Rotation    M2Track // C4Quaternion
+	Scaling     M2Track // C3Vector
+}
+
+// M2Light is a light embedded in the model (M2Light record, 156 bytes).
+type M2Light struct {
+	Type             uint16 // 0 directional, 1 point
+	Bone             int16
+	Position         [3]float32
+	AmbientColor     M2Track // C3Vector
+	AmbientIntensity M2Track // float
+	DiffuseColor     M2Track // C3Vector
+	DiffuseIntensity M2Track // float
+	AttenuationStart M2Track // float
+	AttenuationEnd   M2Track // float
+	Visibility       M2Track // uint8
+}
+
+// M2Camera is a camera embedded in the model (login/character screens,
+// cinematics). Positions are in model space; FOV is the diagonal field of
+// view in radians (WotLK).
+type M2Camera struct {
+	Type     int32 // -1 portrait, 0 character info, 1+ flyby
+	FOV      float32
+	FarClip  float32
+	NearClip float32
+	Position M2Track // M2SplineKey<C3Vector>
+	PosBase  [3]float32
+	Target   M2Track // M2SplineKey<C3Vector>
+	TgtBase  [3]float32
+	Roll     M2Track // M2SplineKey<float>
 }
 
 type Model struct {
@@ -104,6 +190,19 @@ type Model struct {
 	Bones           []M2Bone
 	Sequences       []M2Sequence
 	Textures        []M2Texture
+	Materials       []M2Material
+	TextureLookup   []uint16 // texture_lookup_table: batch texture combo -> Textures index
+	TexUnitLookup   []int16  // texture_unit_lookup_table: batch texcoord combo -> 0 uv0, 1 uv1, -1 env map
+	Cameras         []M2Camera
+	Lights          []M2Light
+	// TextureCombinerCombos lists the per-texture combiner ops batches index
+	// with shader_id when GlobalFlagTextureCombiners is set.
+	TextureCombinerCombos  []uint16
+	TextureTransforms      []M2TextureTransform
+	TextureTransformLookup []int16 // batch transform combo -> TextureTransforms index (-1 none)
+	Colors                 []M2Color
+	TextureWeights         []M2Track // transparency animations (fixed16)
+	TransparencyLookup     []uint16  // batch weight combo -> TextureWeights index
 
 	raw []byte // file contents, needed to resolve animation tracks
 }
@@ -263,8 +362,167 @@ func Read(r io.Reader) (*Model, error) {
 
 			v.TexCoords[0] = mathFloat32(data[vOff+32 : vOff+36])
 			v.TexCoords[1] = mathFloat32(data[vOff+36 : vOff+40])
+			v.TexCoords2[0] = mathFloat32(data[vOff+40 : vOff+44])
+			v.TexCoords2[1] = mathFloat32(data[vOff+44 : vOff+48])
 
 			m.Vertices[i] = v
+		}
+	}
+
+	// Textures (base+80): M2Texture{type u32, flags u32, filename M2Array<char>}
+	texCnt, texOfs := readArr(base + 80)
+	if int(texOfs)+int(texCnt)*16 <= len(data) {
+		m.Textures = make([]M2Texture, texCnt)
+		for i := uint32(0); i < texCnt; i++ {
+			tOff := int(texOfs) + int(i)*16
+			tex := M2Texture{
+				Type:  binary.LittleEndian.Uint32(data[tOff : tOff+4]),
+				Flags: binary.LittleEndian.Uint32(data[tOff+4 : tOff+8]),
+			}
+			nCnt, nOfs := readArr(tOff + 8)
+			if nCnt > 0 && int(nOfs)+int(nCnt) <= len(data) {
+				tex.Name = strings.TrimRight(string(data[nOfs:nOfs+nCnt]), "\x00")
+			}
+			m.Textures[i] = tex
+		}
+	}
+
+	// Materials (base+112): {flags u16, blending_mode u16}
+	matCnt, matOfs := readArr(base + 112)
+	if int(matOfs)+int(matCnt)*4 <= len(data) {
+		m.Materials = make([]M2Material, matCnt)
+		for i := uint32(0); i < matCnt; i++ {
+			mOff := int(matOfs) + int(i)*4
+			m.Materials[i] = M2Material{
+				Flags:     binary.LittleEndian.Uint16(data[mOff : mOff+2]),
+				BlendMode: binary.LittleEndian.Uint16(data[mOff+2 : mOff+4]),
+			}
+		}
+	}
+
+	// Colours (base+72): M2Color{color track, alpha track}, 40 bytes
+	colCnt, colOfs := readArr(base + 72)
+	if int(colOfs)+int(colCnt)*40 <= len(data) {
+		m.Colors = make([]M2Color, colCnt)
+		for i := uint32(0); i < colCnt; i++ {
+			c := int(colOfs) + int(i)*40
+			m.Colors[i] = M2Color{Color: readTrack(data, c), Alpha: readTrack(data, c+20)}
+		}
+	}
+
+	// Texture weights (base+88): one fixed16 track each
+	twCnt, twOfs := readArr(base + 88)
+	if int(twOfs)+int(twCnt)*20 <= len(data) {
+		m.TextureWeights = make([]M2Track, twCnt)
+		for i := uint32(0); i < twCnt; i++ {
+			m.TextureWeights[i] = readTrack(data, int(twOfs)+int(i)*20)
+		}
+	}
+
+	// Transparency lookup table (base+144)
+	trCnt, trOfs := readArr(base + 144)
+	if int(trOfs)+int(trCnt)*2 <= len(data) {
+		m.TransparencyLookup = make([]uint16, trCnt)
+		for i := uint32(0); i < trCnt; i++ {
+			m.TransparencyLookup[i] = binary.LittleEndian.Uint16(data[int(trOfs)+int(i)*2:])
+		}
+	}
+
+	// Texture transforms (base+96) and their lookup table (base+152)
+	ttCnt, ttOfs := readArr(base + 96)
+	if int(ttOfs)+int(ttCnt)*60 <= len(data) {
+		m.TextureTransforms = make([]M2TextureTransform, ttCnt)
+		for i := uint32(0); i < ttCnt; i++ {
+			o := int(ttOfs) + int(i)*60
+			m.TextureTransforms[i] = M2TextureTransform{
+				Translation: readTrack(data, o),
+				Rotation:    readTrack(data, o+20),
+				Scaling:     readTrack(data, o+40),
+			}
+		}
+	}
+	ttlCnt, ttlOfs := readArr(base + 152)
+	if int(ttlOfs)+int(ttlCnt)*2 <= len(data) {
+		m.TextureTransformLookup = make([]int16, ttlCnt)
+		for i := uint32(0); i < ttlCnt; i++ {
+			m.TextureTransformLookup[i] = int16(binary.LittleEndian.Uint16(data[int(ttlOfs)+int(i)*2:]))
+		}
+	}
+
+	// Texture combiner combos (base+304), present when the flag is set
+	if flags&GlobalFlagTextureCombiners != 0 {
+		ccCnt, ccOfs := readArr(base + 304)
+		if ccCnt < 4096 && int(ccOfs)+int(ccCnt)*2 <= len(data) {
+			m.TextureCombinerCombos = make([]uint16, ccCnt)
+			for i := uint32(0); i < ccCnt; i++ {
+				m.TextureCombinerCombos[i] = binary.LittleEndian.Uint16(data[int(ccOfs)+int(i)*2:])
+			}
+		}
+	}
+
+	// Lights (base+264): 156-byte M2Light records
+	lCnt, lOfs := readArr(base + 264)
+	if int(lOfs)+int(lCnt)*156 <= len(data) {
+		m.Lights = make([]M2Light, lCnt)
+		for i := uint32(0); i < lCnt; i++ {
+			l := int(lOfs) + int(i)*156
+			light := M2Light{
+				Type:             binary.LittleEndian.Uint16(data[l : l+2]),
+				Bone:             int16(binary.LittleEndian.Uint16(data[l+2 : l+4])),
+				AmbientColor:     readTrack(data, l+16),
+				AmbientIntensity: readTrack(data, l+36),
+				DiffuseColor:     readTrack(data, l+56),
+				DiffuseIntensity: readTrack(data, l+76),
+				AttenuationStart: readTrack(data, l+96),
+				AttenuationEnd:   readTrack(data, l+116),
+				Visibility:       readTrack(data, l+136),
+			}
+			for k := 0; k < 3; k++ {
+				light.Position[k] = mathFloat32(data[l+4+k*4 : l+8+k*4])
+			}
+			m.Lights[i] = light
+		}
+	}
+
+	// Cameras (base+272): 100-byte M2Camera records; Cataclysm (271+) turned
+	// the FOV into a track and changed the record size
+	camCnt, camOfs := readArr(base + 272)
+	if version < 271 && int(camOfs)+int(camCnt)*100 <= len(data) {
+		m.Cameras = make([]M2Camera, camCnt)
+		for i := uint32(0); i < camCnt; i++ {
+			c := int(camOfs) + int(i)*100
+			cam := M2Camera{
+				Type:     int32(binary.LittleEndian.Uint32(data[c : c+4])),
+				FOV:      mathFloat32(data[c+4 : c+8]),
+				FarClip:  mathFloat32(data[c+8 : c+12]),
+				NearClip: mathFloat32(data[c+12 : c+16]),
+				Position: readTrack(data, c+16),
+				Target:   readTrack(data, c+48),
+				Roll:     readTrack(data, c+80),
+			}
+			for k := 0; k < 3; k++ {
+				cam.PosBase[k] = mathFloat32(data[c+36+k*4 : c+40+k*4])
+				cam.TgtBase[k] = mathFloat32(data[c+68+k*4 : c+72+k*4])
+			}
+			m.Cameras[i] = cam
+		}
+	}
+
+	// Texture unit (texcoord) lookup table (base+136)
+	tuCnt, tuOfs := readArr(base + 136)
+	if int(tuOfs)+int(tuCnt)*2 <= len(data) {
+		m.TexUnitLookup = make([]int16, tuCnt)
+		for i := uint32(0); i < tuCnt; i++ {
+			m.TexUnitLookup[i] = int16(binary.LittleEndian.Uint16(data[int(tuOfs)+int(i)*2:]))
+		}
+	}
+
+	// Texture lookup table (base+128)
+	tlCnt, tlOfs := readArr(base + 128)
+	if int(tlOfs)+int(tlCnt)*2 <= len(data) {
+		m.TextureLookup = make([]uint16, tlCnt)
+		for i := uint32(0); i < tlCnt; i++ {
+			m.TextureLookup[i] = binary.LittleEndian.Uint16(data[int(tlOfs)+int(i)*2:])
 		}
 	}
 
@@ -328,6 +586,34 @@ func (m *Model) TrackKeys(t M2Track, seq int, elemSize int, ext []byte) ([]uint3
 		times[i] = binary.LittleEndian.Uint32(src[int(ts.Offset)+i*4:])
 	}
 	return times, src[int(vs.Offset) : int(vs.Offset)+n*stride]
+}
+
+// FirstKey returns the raw bytes of the first keyframe value of a track in
+// the given sequence, or nil. ext is the sequence's external .anim contents.
+func (m *Model) FirstKey(t M2Track, seq int, elemSize int, ext []byte) []byte {
+	_, vals := m.TrackKeys(t, seq, elemSize, ext)
+	if len(vals) < elemSize {
+		return nil
+	}
+	return vals[:elemSize]
+}
+
+// SplineKeyValue returns the value part of the first M2SplineKey<C3Vector>
+// of a track in the given sequence (the key's in/out tangents are ignored).
+// ext is the sequence's external .anim contents, or nil when in-file.
+func (m *Model) SplineKeyValue(t M2Track, seq int, ext []byte) ([3]float32, bool) {
+	if seq < 0 || seq >= len(t.Values) || t.Values[seq].Count == 0 {
+		return [3]float32{}, false
+	}
+	src := m.raw
+	if ext != nil {
+		src = ext
+	}
+	ofs := int(t.Values[seq].Offset)
+	if ofs+12 > len(src) {
+		return [3]float32{}, false
+	}
+	return [3]float32{mathFloat32(src[ofs : ofs+4]), mathFloat32(src[ofs+4 : ofs+8]), mathFloat32(src[ofs+8 : ofs+12])}, true
 }
 
 func mathFloat32(b []byte) float32 {

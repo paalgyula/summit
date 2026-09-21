@@ -84,19 +84,26 @@ type DoodadPlacement struct {
 }
 
 type WMOPlacement struct {
-	NameID   uint32
-	UniqueID uint32
-	Pos      [3]float32
-	Rot      [3]float32
-	Extents  [2][3]float32
-	Flags    uint16
+	NameID    uint32
+	UniqueID  uint32
+	Pos       [3]float32
+	Rot       [3]float32
+	Extents   [2][3]float32
+	Flags     uint16
+	DoodadSet uint16
+	NameSet   uint16
 }
 
 type ADT struct {
 	Textures   []string
+	ModelNames []string // MMDX entries, indexed through MMID by DoodadPlacement.NameID
+	WMONames   []string // MWMO entries, indexed through MWID by WMOPlacement.NameID
 	DoodadDefs []DoodadPlacement
 	WMODefs    []WMOPlacement
 	Chunks     [16][16]*Chunk
+
+	mmdx, mwmo []byte // raw name blocks, resolved once the offset tables are read
+	mmid, mwid []uint32
 }
 
 // OpenADT reads and parses an ADT terrain file from disk.
@@ -133,6 +140,15 @@ func ReadADT(r io.Reader) (*ADT, error) {
 		case "MTEX", "XETM":
 			adt.Textures = parseStringList(chunkData)
 
+		case "MMDX", "XDMM":
+			adt.mmdx = chunkData
+		case "MMID", "DIMM":
+			adt.mmid = parseUint32List(chunkData)
+		case "MWMO", "OMWM":
+			adt.mwmo = chunkData
+		case "MWID", "DIWM":
+			adt.mwid = parseUint32List(chunkData)
+
 		case "MDDF", "FDDM":
 			doodadCount := len(chunkData) / 36
 			adt.DoodadDefs = make([]DoodadPlacement, doodadCount)
@@ -161,15 +177,20 @@ func ReadADT(r io.Reader) (*ADT, error) {
 			adt.WMODefs = make([]WMOPlacement, wmoCount)
 			for i := 0; i < wmoCount; i++ {
 				off := i * 64
-				adt.WMODefs[i] = WMOPlacement{
-					NameID:   binary.LittleEndian.Uint32(chunkData[off : off+4]),
-					UniqueID: binary.LittleEndian.Uint32(chunkData[off+4 : off+8]),
-					Pos: [3]float32{
-						math.Float32frombits(binary.LittleEndian.Uint32(chunkData[off+8 : off+12])),
-						math.Float32frombits(binary.LittleEndian.Uint32(chunkData[off+12 : off+16])),
-						math.Float32frombits(binary.LittleEndian.Uint32(chunkData[off+16 : off+20])),
-					},
+				def := WMOPlacement{
+					NameID:    binary.LittleEndian.Uint32(chunkData[off : off+4]),
+					UniqueID:  binary.LittleEndian.Uint32(chunkData[off+4 : off+8]),
+					Flags:     binary.LittleEndian.Uint16(chunkData[off+56 : off+58]),
+					DoodadSet: binary.LittleEndian.Uint16(chunkData[off+58 : off+60]),
+					NameSet:   binary.LittleEndian.Uint16(chunkData[off+60 : off+62]),
 				}
+				for k := 0; k < 3; k++ {
+					def.Pos[k] = math.Float32frombits(binary.LittleEndian.Uint32(chunkData[off+8+k*4:]))
+					def.Rot[k] = math.Float32frombits(binary.LittleEndian.Uint32(chunkData[off+20+k*4:]))
+					def.Extents[0][k] = math.Float32frombits(binary.LittleEndian.Uint32(chunkData[off+32+k*4:]))
+					def.Extents[1][k] = math.Float32frombits(binary.LittleEndian.Uint32(chunkData[off+44+k*4:]))
+				}
+				adt.WMODefs[i] = def
 			}
 
 		case "MCNK", "KNCM":
@@ -182,7 +203,35 @@ func ReadADT(r io.Reader) (*ADT, error) {
 		pos = chunkDataEnd
 	}
 
+	adt.ModelNames = resolveNames(adt.mmdx, adt.mmid)
+	adt.WMONames = resolveNames(adt.mwmo, adt.mwid)
+
 	return adt, nil
+}
+
+func parseUint32List(data []byte) []uint32 {
+	res := make([]uint32, len(data)/4)
+	for i := range res {
+		res[i] = binary.LittleEndian.Uint32(data[i*4:])
+	}
+	return res
+}
+
+// resolveNames reads the NUL-terminated string at every offset of an
+// MMID/MWID table out of its MMDX/MWMO block.
+func resolveNames(block []byte, offsets []uint32) []string {
+	names := make([]string, len(offsets))
+	for i, ofs := range offsets {
+		if int(ofs) >= len(block) {
+			continue
+		}
+		end := int(ofs)
+		for end < len(block) && block[end] != 0 {
+			end++
+		}
+		names[i] = string(block[ofs:end])
+	}
+	return names
 }
 
 func parseStringList(data []byte) []string {
@@ -468,6 +517,8 @@ func (adt *ADT) ExportGLB(w io.Writer) error {
 		Mesh: &meshIdx,
 	})
 	doc.Scenes[0].Nodes = append(doc.Scenes[0].Nodes, nodeIdx)
+
+	adt.addPlacementNodes(doc)
 
 	return doc.ToGLB(w)
 }

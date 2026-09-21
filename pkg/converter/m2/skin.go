@@ -21,10 +21,28 @@ type Submesh struct {
 	TriangleCount uint16
 }
 
+// TextureUnit (M2Batch) binds a submesh to a material and texture layer.
+type TextureUnit struct {
+	Flags              uint8
+	PriorityPlane      int8
+	ShaderID           uint16
+	SubmeshIndex       uint16
+	GeosetIndex        uint16
+	ColorIndex         uint16
+	MaterialIndex      uint16
+	MaterialLayer      uint16
+	TextureCount       uint16
+	TextureComboIndex  uint16 // into Model.TextureLookup
+	TexCoordComboIndex uint16
+	WeightComboIndex   uint16
+	TransformCombo     uint16
+}
+
 type Skin struct {
-	Indices   []uint16
-	Triangles []uint16
-	Submeshes []Submesh
+	Indices      []uint16
+	Triangles    []uint16
+	Submeshes    []Submesh
+	TextureUnits []TextureUnit
 }
 
 // OpenSkin reads and parses a .skin file from disk.
@@ -101,6 +119,30 @@ func ReadSkin(r io.Reader) (*Skin, error) {
 				VertexCount:   binary.LittleEndian.Uint16(data[off+6 : off+8]),
 				TriangleStart: binary.LittleEndian.Uint16(data[off+8 : off+10]),
 				TriangleCount: binary.LittleEndian.Uint16(data[off+10 : off+12]),
+			}
+		}
+	}
+
+	tuCount := binary.LittleEndian.Uint32(data[36:40])
+	tuOffset := binary.LittleEndian.Uint32(data[40:44])
+	if int(tuOffset)+int(tuCount)*24 <= len(data) {
+		s.TextureUnits = make([]TextureUnit, tuCount)
+		for i := uint32(0); i < tuCount; i++ {
+			off := int(tuOffset) + int(i)*24
+			s.TextureUnits[i] = TextureUnit{
+				Flags:              data[off],
+				PriorityPlane:      int8(data[off+1]),
+				ShaderID:           binary.LittleEndian.Uint16(data[off+2:]),
+				SubmeshIndex:       binary.LittleEndian.Uint16(data[off+4:]),
+				GeosetIndex:        binary.LittleEndian.Uint16(data[off+6:]),
+				ColorIndex:         binary.LittleEndian.Uint16(data[off+8:]),
+				MaterialIndex:      binary.LittleEndian.Uint16(data[off+10:]),
+				MaterialLayer:      binary.LittleEndian.Uint16(data[off+12:]),
+				TextureCount:       binary.LittleEndian.Uint16(data[off+14:]),
+				TextureComboIndex:  binary.LittleEndian.Uint16(data[off+16:]),
+				TexCoordComboIndex: binary.LittleEndian.Uint16(data[off+18:]),
+				WeightComboIndex:   binary.LittleEndian.Uint16(data[off+20:]),
+				TransformCombo:     binary.LittleEndian.Uint16(data[off+22:]),
 			}
 		}
 	}

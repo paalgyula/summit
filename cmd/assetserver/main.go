@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	var listenAddr, assetDir, cacheDir, mpqDir string
+	var listenAddr, assetDir, cacheDir, mpqDir, upstream string
 
 	rootCmd := &cobra.Command{
 		Use:   "assetserver",
@@ -36,12 +36,16 @@ func main() {
 			if v := os.Getenv("ASSETSERVER_MPQ"); v != "" && mpqDir == "" {
 				mpqDir = v
 			}
+			if v := os.Getenv("ASSETSERVER_UPSTREAM"); v != "" && upstream == "" {
+				upstream = v
+			}
 
 			cfg := assetserver.Config{
-				ListenAddr: listenAddr,
-				AssetDir:   assetDir,
-				CacheDir:   cacheDir,
-				MPQDir:     mpqDir,
+				ListenAddr:  listenAddr,
+				AssetDir:    assetDir,
+				CacheDir:    cacheDir,
+				MPQDir:      mpqDir,
+				UpstreamURL: upstream,
 			}
 
 			srv, err := assetserver.NewServer(cfg)
@@ -70,6 +74,7 @@ func main() {
 	rootCmd.Flags().StringVarP(&assetDir, "assets", "a", "client/assets", "path to assets directory")
 	rootCmd.Flags().StringVarP(&cacheDir, "cache", "c", "", "path to cache directory (defaults to assets/.cache)")
 	rootCmd.Flags().StringVarP(&mpqDir, "mpq", "m", "", "path to WoW Data/ directory containing MPQs for JIT extraction")
+	rootCmd.Flags().StringVarP(&upstream, "upstream", "u", "", "asset server URL to fetch missing source files (ADT/M2/WMO/BLP) from, e.g. https://assets-summit.dev.pilab.hu")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)

@@ -108,3 +108,20 @@ func TestAssetServerJITWebP(t *testing.T) {
 		t.Fatalf("expected image/webp, got %s", w2.Header().Get("Content-Type"))
 	}
 }
+
+func TestMPQLoadOrder(t *testing.T) {
+	want := []int{0, 0, 0, 1, 2, 2, 2, 3, 3}
+	got := []string{"Data/common.MPQ", "Data/common-2.MPQ", "Data/lichking.MPQ", "Data/enUS/locale-enUS.MPQ",
+		"Data/patch.MPQ", "Data/patch-2.MPQ", "Data/patch-3.MPQ", "Data/enUS/patch-enUS.MPQ", "Data/enUS/patch-enUS-2.MPQ"}
+	for i, p := range got {
+		if mpqRank(p) != want[i] {
+			t.Errorf("rank(%s) = %d, want %d", p, mpqRank(p), want[i])
+		}
+	}
+	if mpqNumber("Data/patch-3.MPQ") != 3 || mpqNumber("Data/patch.MPQ") != 1 || mpqNumber("Data/enUS/patch-enUS-2.MPQ") != 2 {
+		t.Errorf("mpqNumber")
+	}
+	if !isLocaleDir("enUS") || isLocaleDir("Data") || isLocaleDir("Interface") {
+		t.Errorf("isLocaleDir")
+	}
+}

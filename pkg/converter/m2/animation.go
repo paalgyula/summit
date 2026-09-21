@@ -2,6 +2,7 @@ package m2
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/paalgyula/summit/pkg/converter/gltf"
 )
@@ -105,7 +106,40 @@ func addAnimations(doc *gltf.Document, model *Model, jointNodes []int, restTrans
 			doc.Animations = append(doc.Animations, anim)
 		}
 	}
+
+	// Tracks driven by a global sequence loop independently of the played
+	// sequence (waving banners, drifting clouds): one always-on clip each.
+	for gs, duration := range model.GlobalSequences {
+		anim := gltf.Animation{Name: fmt.Sprintf("%s%d", GlobalSequencePrefix, gs), Extras: AnimationExtras{
+			SequenceID: 0xFFFF,
+			DurationMs: duration,
+		}}
+		for bIdx, bone := range model.Bones {
+			for _, ch := range boneChannelsFor(model, bone, 0, nil, restTranslation[bIdx], gs) {
+				sampler := gltf.AnimationSampler{
+					Input:         doc.AddFloat32ScalarAccessor(ch.times),
+					Interpolation: ch.interpolation,
+				}
+				if ch.vec4 != nil {
+					sampler.Output = doc.AddFloat32Vec4Accessor(ch.vec4, 0)
+				} else {
+					sampler.Output = doc.AddFloat32Vec3Accessor(ch.vec3, 0)
+				}
+				anim.Samplers = append(anim.Samplers, sampler)
+				anim.Channels = append(anim.Channels, gltf.AnimationChannel{
+					Sampler: len(anim.Samplers) - 1,
+					Target:  gltf.AnimationChannelTarget{Node: jointNodes[bIdx], Path: ch.path},
+				})
+			}
+		}
+		if len(anim.Channels) > 0 {
+			doc.Animations = append(doc.Animations, anim)
+		}
+	}
 }
+
+// GlobalSequencePrefix names the always-looping global sequence clips.
+const GlobalSequencePrefix = "GlobalSequence_"
 
 // resolveSequenceData follows alias links and loads external data when needed.
 // It returns the sequence index holding the keyframes and the .anim bytes (nil = in-file).
@@ -142,9 +176,19 @@ func resolveSequenceData(model *Model, seqIdx int, loader AnimLoader) (int, []by
 // rest translation, so the animated node transform is
 // translation = (pivot - parentPivot) + t, rotation = R, scale = S.
 func boneChannels(model *Model, bone M2Bone, seq int, ext []byte, rest [3]float32) []boneChannel {
-	var out []boneChannel
+	return boneChannelsFor(model, bone, seq, ext, rest, -1)
+}
 
-	if ch, ok := vec3Channel(model, bone.Translation, seq, ext); ok {
+// boneChannelsFor extracts the channels of a bone that are driven either by
+// the sequence (gs < 0) or by global sequence gs, whose keys live at index 0.
+func boneChannelsFor(model *Model, bone M2Bone, seq int, ext []byte, rest [3]float32, gs int) []boneChannel {
+	var out []boneChannel
+	if gs >= 0 {
+		seq, ext = 0, nil
+	}
+	driven := func(t M2Track) bool { return int(t.GlobalSequence) == gs || (gs < 0 && t.GlobalSequence < 0) }
+
+	if ch, ok := vec3Channel(model, bone.Translation, seq, ext); ok && driven(bone.Translation) {
 		for i := range ch.vec3 {
 			v := gltf.ConvertM2ToGLTPosition(ch.vec3[i][0], ch.vec3[i][1], ch.vec3[i][2])
 			ch.vec3[i] = [3]float32{rest[0] + v[0], rest[1] + v[1], rest[2] + v[2]}
@@ -153,7 +197,7 @@ func boneChannels(model *Model, bone M2Bone, seq int, ext []byte, rest [3]float3
 		out = append(out, ch)
 	}
 
-	if times, raw := model.TrackKeys(bone.Rotation, seq, 8, ext); len(times) > 0 && bone.Rotation.GlobalSequence < 0 {
+	if times, raw := model.TrackKeys(bone.Rotation, seq, 8, ext); len(times) > 0 && driven(bone.Rotation) {
 		stride := 8
 		if bone.Rotation.Interpolation >= 2 {
 			stride *= 3
@@ -173,7 +217,7 @@ func boneChannels(model *Model, bone M2Bone, seq int, ext []byte, rest [3]float3
 		}
 	}
 
-	if ch, ok := vec3Channel(model, bone.Scale, seq, ext); ok {
+	if ch, ok := vec3Channel(model, bone.Scale, seq, ext); ok && driven(bone.Scale) {
 		for i := range ch.vec3 {
 			s := ch.vec3[i]
 			ch.vec3[i] = [3]float32{s[1], s[2], s[0]}
@@ -186,9 +230,6 @@ func boneChannels(model *Model, bone M2Bone, seq int, ext []byte, rest [3]float3
 }
 
 func vec3Channel(model *Model, track M2Track, seq int, ext []byte) (boneChannel, bool) {
-	if track.GlobalSequence >= 0 {
-		return boneChannel{}, false
-	}
 	times, raw := model.TrackKeys(track, seq, 12, ext)
 	if len(times) == 0 {
 		return boneChannel{}, false

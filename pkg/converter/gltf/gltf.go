@@ -34,6 +34,7 @@ type Document struct {
 	Skins       []Skin       `json:"skins,omitempty"`
 	Animations  []Animation  `json:"animations,omitempty"`
 	Materials   []Material   `json:"materials,omitempty"`
+	Cameras     []Camera     `json:"cameras,omitempty"`
 	Textures    []Texture    `json:"textures,omitempty"`
 	Images      []Image      `json:"images,omitempty"`
 	Samplers    []Sampler    `json:"samplers,omitempty"`
@@ -51,18 +52,34 @@ type Asset struct {
 }
 
 type Scene struct {
-	Name  string `json:"name,omitempty"`
-	Nodes []int  `json:"nodes"`
+	Name   string `json:"name,omitempty"`
+	Nodes  []int  `json:"nodes"`
+	Extras any    `json:"extras,omitempty"`
 }
 
 type Node struct {
 	Name        string      `json:"name,omitempty"`
 	Mesh        *int        `json:"mesh,omitempty"`
 	Skin        *int        `json:"skin,omitempty"`
+	Camera      *int        `json:"camera,omitempty"`
 	Children    []int       `json:"children,omitempty"`
 	Translation *[3]float32 `json:"translation,omitempty"`
 	Rotation    *[4]float32 `json:"rotation,omitempty"` // x, y, z, w
 	Scale       *[3]float32 `json:"scale,omitempty"`
+	Extras      any         `json:"extras,omitempty"`
+}
+
+type Camera struct {
+	Name        string       `json:"name,omitempty"`
+	Type        string       `json:"type"` // "perspective"
+	Perspective *Perspective `json:"perspective,omitempty"`
+}
+
+type Perspective struct {
+	AspectRatio *float32 `json:"aspectRatio,omitempty"`
+	YFov        float32  `json:"yfov"`
+	ZNear       float32  `json:"znear"`
+	ZFar        float32  `json:"zfar,omitempty"`
 }
 
 type Mesh struct {
@@ -111,8 +128,16 @@ type Material struct {
 	Name                 string                `json:"name,omitempty"`
 	PbrMetallicRoughness *PbrMetallicRoughness `json:"pbrMetallicRoughness,omitempty"`
 	DoubleSided          bool                  `json:"doubleSided,omitempty"`
+	AlphaMode            string                `json:"alphaMode,omitempty"` // "OPAQUE" (default), "MASK", "BLEND"
+	AlphaCutoff          *float32              `json:"alphaCutoff,omitempty"`
 	Extras               any                   `json:"extras,omitempty"`
 }
+
+const (
+	AlphaModeOpaque = "OPAQUE"
+	AlphaModeMask   = "MASK"
+	AlphaModeBlend  = "BLEND"
+)
 
 type PbrMetallicRoughness struct {
 	BaseColorFactor  [4]float32   `json:"baseColorFactor,omitempty"`
