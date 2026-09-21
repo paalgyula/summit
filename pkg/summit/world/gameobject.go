@@ -1,6 +1,7 @@
 package world
 
 import (
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -55,44 +56,26 @@ const (
 	GOStateLocked  GOState = 2
 )
 
-// GameObjectTemplate holds the template data for a game object type.
-// Similar to AzerothCore's GameObjectTemplate.
+// GameObjectTemplate wraps the basedata template with convenience accessors.
 type GameObjectTemplate struct {
-	Entry     uint32
-	Type      GameObjectType
-	DisplayID uint32
-	Name      string
-	Faction   uint32
-	Flags     uint32
-	Size      float32
-
-	// LockID for interaction (0 = no lock)
-	LockID uint32
-
-	// QuestID that this GO is related to (0 = none)
-	QuestID uint32
-
-	// Chest loot (item entries)
-	ChestLoot []uint32
-
-	// Door/GOober settings
-	DoorOpenDelay uint32 // ms to auto-close
+	*basedata.GameObjectTemplate
 }
 
-// GameObjectData holds spawn data for a specific game object instance.
-// Similar to AzerothCore's GameObjectData.
+// Type returns the game object type as the local enum.
+func (t *GameObjectTemplate) Type() GameObjectType {
+	return GameObjectType(t.GameObjectTemplate.Type)
+}
+
+// GetFlags returns 0 — flags are not stored in basedata yet.
+// TODO: extend basedata.GameObjectTemplate with Flags, Faction fields from AC.
+func (t *GameObjectTemplate) GetFlags() uint32 { return 0 }
+
+// GetFaction returns 0 — faction is not stored in basedata yet.
+func (t *GameObjectTemplate) GetFaction() uint32 { return 0 }
+
+// GameObjectData wraps a basedata.GameObjectSpawn for use by the world server.
 type GameObjectData struct {
-	ID        uint32 // spawn ID
-	Entry     uint32 // template entry
-	MapID     uint32
-	PhaseMask uint32
-	PosX      float32
-	PosY      float32
-	PosZ      float32
-	O         float32
-	SpawnMask uint32
-	AnimProgress uint32
-	GOState   GOState
+	*basedata.GameObjectSpawn
 }
 
 // GameObject represents a spawned game object in the world.
@@ -111,36 +94,36 @@ type GameObject struct {
 	X, Y, Z, O float32
 	Map         uint32
 
-	GOState     GOState
+	GOState      GOState
 	AnimProgress uint32
 
 	Template *GameObjectTemplate
 
 	// Chest state
-	Looted    bool
+	Looted      bool
 	RespawnTime int64 // when to respawn (Unix ms), 0 = never
 }
 
 // NewGameObject creates a new game object from template and spawn data.
 func NewGameObject(template *GameObjectTemplate, data *GameObjectData) *GameObject {
 	g := &GameObject{
-		Object:      object.NewObject(),
-		ID:          data.ID,
-		Entry:       data.Entry,
-		Name:        template.Name,
-		Type:        template.Type,
-		DisplayID:   template.DisplayID,
-		Faction:     template.Faction,
-		Flags:       template.Flags,
-		Size:        template.Size,
-		X:           data.PosX,
-		Y:           data.PosY,
-		Z:           data.PosZ,
-		O:           data.O,
-		Map:         data.MapID,
-		GOState:     data.GOState,
-		AnimProgress: data.AnimProgress,
-		Template:    template,
+		Object:       object.NewObject(),
+		ID:           data.GUID,
+		Entry:        data.Entry,
+		Name:         template.Name,
+		Type:         template.Type(),
+		DisplayID:    template.DisplayID,
+		Faction:      template.GetFaction(),
+		Flags:        template.GetFlags(),
+		Size:         template.Size,
+		X:            data.PosX,
+		Y:            data.PosY,
+		Z:            data.PosZ,
+		O:            data.O,
+		Map:          data.MapID,
+		GOState:      GOState(data.State),
+		AnimProgress: uint32(data.AnimProgress),
+		Template:     template,
 	}
 
 	g.init()
@@ -198,103 +181,138 @@ type GameObjectManager struct {
 }
 
 // NewGameObjectManager creates a new game object manager.
+// If basedata is available, it loads templates and spawns from there.
 func NewGameObjectManager() *GameObjectManager {
 	gm := &GameObjectManager{
 		templates: make(map[uint32]*GameObjectTemplate),
 		spawns:    make(map[uint32]*GameObject),
 	}
 
-	// Register some basic templates
-	gm.registerDefaultTemplates()
-
-	// Spawn test game objects
-	gm.spawnDefaults()
+	// Try to load from basedata (loaded from MongoDB or JSON)
+	if bd := basedata.GetInstance(); bd != nil {
+		gm.loadFromBasedata(bd)
+	} else {
+		// Fallback: register minimal test templates
+		gm.registerDefaultTemplates()
+		gm.spawnDefaults()
+	}
 
 	return gm
+}
+
+// loadFromBasedata loads templates and spawns from the basedata store.
+func (gm *GameObjectManager) loadFromBasedata(bd *basedata.Store) {
+	// Load templates
+	for entry, tpl := range bd.GameObjectTemplates {
+		gm.templates[entry] = &GameObjectTemplate{tpl}
+	}
+
+	// Load spawns
+	for guid, spawn := range bd.GameObjectSpawns {
+		tpl, ok := gm.templates[spawn.Entry]
+		if !ok {
+			continue
+		}
+
+		data := &GameObjectData{spawn}
+		g := NewGameObject(tpl, data)
+		gm.spawns[guid] = g
+	}
 }
 
 // registerDefaultTemplates registers basic game object templates.
 func (gm *GameObjectManager) registerDefaultTemplates() {
 	// Test chest
 	gm.templates[100001] = &GameObjectTemplate{
-		Entry:     100001,
-		Type:      GameObjectTypeChest,
-		DisplayID: 31, // generic chest model
-		Name:      "Test Chest",
-		Faction:   0,
-		Flags:     0,
-		Size:      1.0,
-		LockID:    0, // no lock
-		ChestLoot: []uint32{2589}, // Linen Cloth
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry:     100001,
+			Type:      uint8(GameObjectTypeChest),
+			DisplayID: 31,
+			Name:      "Test Chest",
+			Size:      1.0,
+			// Data[0]=lockId, Data[1]=lootId
+			Data: [24]int32{0, 2589},
+		},
 	}
 
 	// Test door
 	gm.templates[100002] = &GameObjectTemplate{
-		Entry:       100002,
-		Type:        GameObjectTypeDoor,
-		DisplayID:   57, // generic door model
-		Name:        "Test Door",
-		Faction:     0,
-		Flags:       0,
-		Size:        1.0,
-		DoorOpenDelay: 5000, // 5 seconds
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry:     100002,
+			Type:      uint8(GameObjectTypeDoor),
+			DisplayID: 57,
+			Name:      "Test Door",
+			Size:      1.0,
+			// Data[0]=startOpen, Data[1]=lockId, Data[2]=autoCloseTime(ms)
+			Data: [24]int32{0, 0, 5000},
+		},
 	}
 
 	// Test sign
 	gm.templates[100003] = &GameObjectTemplate{
-		Entry:     100003,
-		Type:      GameObjectTypeText,
-		DisplayID: 293, // generic sign model
-		Name:      "Welcome Sign",
-		Faction:   0,
-		Flags:     0,
-		Size:      1.0,
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry:     100003,
+			Type:      uint8(GameObjectTypeText),
+			DisplayID: 293,
+			Name:      "Welcome Sign",
+			Size:      1.0,
+		},
+	}
+
+	// Test goober (button-like clickable object)
+	gm.templates[100004] = &GameObjectTemplate{
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry:     100004,
+			Type:      uint8(GameObjectTypeGoober),
+			DisplayID: 293,
+			Name:      "Test Goober",
+			Size:      1.0,
+			// Data[0]=lockId, Data[1]=questId, Data[2]=eventId, Data[3]=autoCloseTime
+			Data: [24]int32{0, 0, 0, 3000},
+		},
 	}
 }
 
 // spawnDefaults spawns some test game objects.
 func (gm *GameObjectManager) spawnDefaults() {
 	// Spawn a test chest near starting area
-	gm.SpawnObject(100001, &GameObjectData{
-		ID:        1,
-		Entry:     100001,
-		MapID:     0,
-		PhaseMask: 1,
-		PosX:      -8940.0,
-		PosY:      -140.0,
-		PosZ:      83.0,
-		O:         0,
-		SpawnMask: 1,
-		GOState:   GOStateReady,
+	gm.spawnFromData(100001, &basedata.GameObjectSpawn{
+		GUID:  1,
+		Entry: 100001,
+		MapID: 0, PhaseMask: 1,
+		PosX: -8940.0, PosY: -140.0, PosZ: 83.0,
+		State: uint8(GOStateReady),
 	})
 
 	// Spawn a test door
-	gm.SpawnObject(100002, &GameObjectData{
-		ID:        2,
-		Entry:     100002,
-		MapID:     0,
-		PhaseMask: 1,
-		PosX:      -8935.0,
-		PosY:      -135.0,
-		PosZ:      83.0,
-		O:         1.57, // facing south
-		SpawnMask: 1,
-		GOState:   GOStateReady,
+	gm.spawnFromData(100002, &basedata.GameObjectSpawn{
+		GUID:  2,
+		Entry: 100002,
+		MapID: 0, PhaseMask: 1,
+		PosX: -8935.0, PosY: -135.0, PosZ: 83.0, O: 1.57,
+		State: uint8(GOStateReady),
 	})
 
 	// Spawn a test sign
-	gm.SpawnObject(100003, &GameObjectData{
-		ID:        3,
-		Entry:     100003,
-		MapID:     0,
-		PhaseMask: 1,
-		PosX:      -8930.0,
-		PosY:      -130.0,
-		PosZ:      83.5,
-		O:         0,
-		SpawnMask: 1,
-		GOState:   GOStateReady,
+	gm.spawnFromData(100003, &basedata.GameObjectSpawn{
+		GUID:  3,
+		Entry: 100003,
+		MapID: 0, PhaseMask: 1,
+		PosX: -8930.0, PosY: -130.0, PosZ: 83.5,
+		State: uint8(GOStateReady),
 	})
+}
+
+// spawnFromData spawns a game object from a basedata spawn record.
+func (gm *GameObjectManager) spawnFromData(entry uint32, spawn *basedata.GameObjectSpawn) {
+	tpl, ok := gm.templates[entry]
+	if !ok {
+		return
+	}
+
+	data := &GameObjectData{spawn}
+	g := NewGameObject(tpl, data)
+	gm.spawns[spawn.GUID] = g
 }
 
 // SpawnObject spawns a game object from template and data.
@@ -305,7 +323,7 @@ func (gm *GameObjectManager) SpawnObject(entry uint32, data *GameObjectData) {
 	}
 
 	g := NewGameObject(template, data)
-	gm.spawns[data.ID] = g
+	gm.spawns[data.GUID] = g
 }
 
 // GetObject returns a game object by spawn ID.
