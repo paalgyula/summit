@@ -1,0 +1,21 @@
+auth:
+  management:
+    enabled: true
+    listen: "127.0.0.1:4999"
+    token: "summit-dev-token"
+  listen: "127.0.0.1:5000"
+  ws_listen: "127.0.0.1:5001"
+
+world:
+  enabled: true
+  listen: "127.0.0.1:8129"
+  ws_listen: "127.0.0.1:5002"
+  realm:
+    name: "The Highest Summit"
+    slug: "highest-summit"
+    max_players: 1000
+
+store:
+  mongodb:
+    uri: "mongodb://admin:admin@localhost:27017"
+    database: "summit"
