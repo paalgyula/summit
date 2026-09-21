@@ -15,9 +15,12 @@ import (
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world/areatrigger"
+	"github.com/paalgyula/summit/pkg/summit/world/channel"
+	"github.com/paalgyula/summit/pkg/summit/world/lfg"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
+	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/summit/world/worldstate"
 	"github.com/paalgyula/summit/pkg/summit/world/wsconn"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -58,6 +61,12 @@ type Server struct {
 	// Spell data manager (DBC-loaded spell data)
 	spellMgr *SpellMgr
 
+	// Quest manager (quest templates, relations, completion)
+	questMgr *quest.Manager
+
+	// Respawn manager (handles NPC respawn timers)
+	respawnMgr *RespawnManager
+
 	// Map manager
 	mapManager *mapmanager.MapManager
 
@@ -66,6 +75,21 @@ type Server struct {
 
 	// WorldState manager
 	worldStateManager *worldstate.Manager
+
+	// Group manager
+	groupMu sync.RWMutex
+	groups  map[uint32]*Group
+
+	// Channel managers (one per faction + neutral)
+	channelAlliance *channel.Manager
+	channelHorde    *channel.Manager
+	channelNeutral  *channel.Manager
+
+	// LFG manager
+	lfgMgr *lfg.Manager
+
+	// Chat configuration
+	chatConfig ChatConfig
 }
 
 func NewServer(opts ...ServerOption) (*Server, error) {
@@ -82,6 +106,35 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 
 	// Initialize map management system
 	worldServer.mapManager = mapmanager.GetMapManager()
+	worldServer.groups = make(map[uint32]*Group)
+	worldServer.channelAlliance = channel.NewManager(1)
+	worldServer.channelHorde = channel.NewManager(2)
+	worldServer.channelNeutral = channel.NewManager(0)
+	worldServer.chatConfig = DefaultChatConfig()
+
+	// Initialize LFG with sample dungeons (real data should come from DBC)
+	worldServer.lfgMgr = lfg.NewManager([]*lfg.Dungeon{
+		{ID: 1, Name: "Ragefire Chasm", MapID: 389, MinLevel: 8, MaxLevel: 13},
+		{ID: 2, Name: "Wailing Caverns", MapID: 43, MinLevel: 10, MaxLevel: 18},
+		{ID: 3, Name: "The Deadmines", MapID: 36, MinLevel: 10, MaxLevel: 18},
+		{ID: 4, Name: "Shadowfang Keep", MapID: 33, MinLevel: 11, MaxLevel: 20},
+		{ID: 5, Name: "Stormwind Stockade", MapID: 34, MinLevel: 15, MaxLevel: 22},
+		{ID: 6, Name: "Gnomeregan", MapID: 90, MinLevel: 17, MaxLevel: 24},
+		{ID: 7, Name: "Razorfen Kraul", MapID: 17, MinLevel: 23, MaxLevel: 30},
+		{ID: 8, Name: "The Scarlet Monastery", MapID: 189, MinLevel: 26, MaxLevel: 36},
+		{ID: 9, Name: "Uldaman", MapID: 70, MinLevel: 31, MaxLevel: 40},
+		{ID: 10, Name: "Zul'Farrak", MapID: 117, MinLevel: 35, MaxLevel: 43},
+		{ID: 11, Name: "Maraudon", MapID: 138, MinLevel: 36, MaxLevel: 44},
+		{ID: 12, Name: "Temple of Atal'Hakkar", MapID: 109, MinLevel: 41, MaxLevel: 50},
+		{ID: 13, Name: "Blackrock Depths", MapID: 158, MinLevel: 48, MaxLevel: 56},
+		{ID: 14, Name: "Lower Blackrock Spire", MapID: 229, MinLevel: 53, MaxLevel: 60},
+		{ID: 15, Name: "Upper Blackrock Spire", MapID: 229, MinLevel: 55, MaxLevel: 60},
+		{ID: 16, Name: "Dire Maul", MapID: 429, MinLevel: 54, MaxLevel: 60},
+		{ID: 17, Name: "Stratholme", MapID: 329, MinLevel: 55, MaxLevel: 60},
+		{ID: 18, Name: "Scholomance", MapID: 289, MinLevel: 55, MaxLevel: 60},
+		{ID: 19, Name: "Ragefire Chasm (Heroic)", MapID: 389, Difficulty: 1, MinLevel: 70, MaxLevel: 80},
+		{ID: 20, Name: "Deadmines (Heroic)", MapID: 36, Difficulty: 1, MinLevel: 70, MaxLevel: 80},
+	})
 
 	// Initialize areatrigger system
 	worldServer.areaTriggerMgr = areatrigger.NewManager()
@@ -115,6 +168,16 @@ func (ws *Server) StartServer(worldStore store.WorldRepo, charStore store.Charac
 	if accRepo, ok := charStore.(store.AccountRepo); ok {
 		ws.accountStore = accRepo
 	}
+
+	// Initialize quest manager with world data
+	ws.questMgr = quest.NewManager(worldStore)
+
+	// Load creature spawns from database (falls back to hardcoded if no world store)
+	ws.spawns = NewSpawnManagerFromDB(worldStore)
+
+	// Initialize respawn manager
+	ws.respawnMgr = NewRespawnManager(ws.spawns)
+	ws.respawnMgr.SetServer(ws)
 
 	// Initialize worldstate manager with database
 	ws.worldStateManager = worldstate.NewManager(nil) // TODO: pass actual DB
@@ -212,8 +275,17 @@ func (ws *Server) AddClient(gc *WorldSession) {
 }
 
 func (ws *Server) Disconnected(gc *WorldSession, reason string) {
-	// Send DestroyObject to other players before removing
+	// Save and clean up the player before removing
 	if gc.player != nil && gc.player.IsInWorld {
+		// Persist the character to the database
+		if err := ws.charStore.UpdateCharacter(gc.player); err != nil {
+			gc.log.Error().Err(err).Str("name", gc.player.Name).
+				Msg("failed to save character on disconnect")
+		} else {
+			gc.log.Info().Str("name", gc.player.Name).Msg("character saved on disconnect")
+		}
+
+		// Send DestroyObject to other players before removing
 		for _, other := range ws.GetOtherSessions(gc) {
 			if other.player != nil && other.player.IsInWorld {
 				other.sendDestroyObject(gc.player.GUID())
@@ -230,6 +302,7 @@ func (ws *Server) Disconnected(gc *WorldSession, reason string) {
 	}
 
 	ws.clients.Delete(gc.ID)
+	gc.log.Info().Str("reason", reason).Msg("client disconnected")
 }
 
 // GetOnlineSessions returns all active sessions.
@@ -275,6 +348,11 @@ func (ws *Server) Run() {
 
 	defer ws.gameListener.Close()
 	defer ws.log.Warn().Msg("world server stopped")
+
+	// Cancel all pending respawn goroutines on shutdown
+	if ws.respawnMgr != nil {
+		defer ws.respawnMgr.Shutdown()
+	}
 
 	lastSave := time.Now()
 	saveInterval := 5 * time.Minute
@@ -325,8 +403,13 @@ func (ws *Server) saveAll() {
 			return true
 		}
 
-		if gc.player != nil {
-			gc.log.Debug().Str("name", gc.player.Name).Msg("periodic save")
+		if gc.player != nil && gc.player.IsInWorld {
+			if err := ws.charStore.UpdateCharacter(gc.player); err != nil {
+				gc.log.Error().Err(err).Str("name", gc.player.Name).
+					Msg("periodic save failed")
+			} else {
+				gc.log.Debug().Str("name", gc.player.Name).Msg("periodic save")
+			}
 		}
 
 		return true
@@ -363,6 +446,70 @@ func (ws *Server) GetAllSessions() []*WorldSession {
 	})
 
 	return sessions
+}
+
+// GetGroup returns the group with the given ID, or nil.
+func (ws *Server) GetGroup(id uint32) *Group {
+	ws.groupMu.RLock()
+	defer ws.groupMu.RUnlock()
+
+	return ws.groups[id]
+}
+
+// SetGroup stores a group in the server's group map.
+func (ws *Server) SetGroup(g *Group) {
+	ws.groupMu.Lock()
+	defer ws.groupMu.Unlock()
+
+	ws.groups[g.ID] = g
+}
+
+// RemoveGroup removes a group from the server.
+func (ws *Server) RemoveGroup(id uint32) {
+	ws.groupMu.Lock()
+	defer ws.groupMu.Unlock()
+
+	delete(ws.groups, id)
+}
+
+// SessionByGUID returns the WorldSession whose player has the given GUID, or nil.
+func (ws *Server) SessionByGUID(guid wow.GUID) *WorldSession {
+	var result *WorldSession
+
+	ws.clients.Range(func(_, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if ok && gc.player != nil && gc.player.GUID() == guid {
+			result = gc
+
+			return false
+		}
+
+		return true
+	})
+
+	return result
+}
+
+// GetChannelManager returns the channel manager for the given team.
+func (ws *Server) GetChannelManager(team int) *channel.Manager {
+	switch team {
+	case 1:
+		return ws.channelAlliance
+	case 2:
+		return ws.channelHorde
+	default:
+		return ws.channelNeutral
+	}
+}
+
+// GetLfgManager returns the LFG manager.
+func (ws *Server) GetLfgManager() *lfg.Manager {
+	return ws.lfgMgr
+}
+
+// GetChatConfig returns the chat configuration.
+func (ws *Server) GetChatConfig() ChatConfig {
+	return ws.chatConfig
 }
 
 // GetMapManager returns the map manager.

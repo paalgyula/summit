@@ -3,7 +3,6 @@ package world
 import (
 	"fmt"
 
-	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
 )
@@ -36,44 +35,82 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	}
 
 	for _, oh := range handlers {
-		if len(packets.OpcodeTable) <= int(oh.Opcode) {
+		if len(gc.opcodes) <= int(oh.Opcode) {
 			log.Printf("opcode table too short: 0x%03x", oh.Opcode)
 
 			continue
 		}
 
-		packets.OpcodeTable.Handle(oh.Opcode, oh.Handler)
+		gc.opcodes.Handle(oh.Opcode, oh.Handler)
 	}
 
-	packets.OpcodeTable.Handle(wow.ClientPing, gc.PingHandler)
-	packets.OpcodeTable.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
-	packets.OpcodeTable.Handle(wow.ClientCharEnum, gc.SendCharacterEnum)
-	packets.OpcodeTable.Handle(wow.ClientCharCreate, gc.CreateCharacter)
-	packets.OpcodeTable.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
-	packets.OpcodeTable.Handle(wow.ClientPlayerLogin, gc.HandlePlayerLogin)
+	gc.opcodes.Handle(wow.ClientPing, gc.PingHandler)
+	gc.opcodes.Handle(wow.ClientAuthSession, gc.AuthSessionHandler)
+	gc.opcodes.Handle(wow.ClientCharEnum, gc.SendCharacterEnum)
+	gc.opcodes.Handle(wow.ClientCharCreate, gc.CreateCharacter)
+	gc.opcodes.Handle(wow.ClientRealmSplit, gc.HandleRealmSplit)
+	gc.opcodes.Handle(wow.ClientPlayerLogin, gc.HandlePlayerLogin)
+
+	// Logout handler
+	gc.opcodes.Handle(wow.ClientLogoutRequest, gc.HandleLogoutRequest)
 
 	// Chat handler
-	packets.OpcodeTable.Handle(wow.ClientMessagechat, gc.HandleMessageChat)
+	gc.opcodes.Handle(wow.ClientMessagechat, gc.HandleMessageChat)
+
+	// Channel handlers
+	gc.opcodes.Handle(wow.ClientJoinChannel, gc.HandleJoinChannel)
+	gc.opcodes.Handle(wow.ClientLeaveChannel, gc.HandleLeaveChannel)
+	gc.opcodes.Handle(wow.ClientChannelList, gc.HandleChannelList)
+	gc.opcodes.Handle(wow.ClientChannelPassword, gc.HandleChannelPassword)
+	gc.opcodes.Handle(wow.ClientChannelSetOwner, gc.HandleChannelSetOwner)
+	gc.opcodes.Handle(wow.ClientChannelOwner, gc.HandleChannelOwner)
+	gc.opcodes.Handle(wow.ClientChannelModerator, gc.HandleChannelModerator)
+	gc.opcodes.Handle(wow.ClientChannelUnmoderator, gc.HandleChannelUnmoderator)
+	gc.opcodes.Handle(wow.ClientChannelMute, gc.HandleChannelMute)
+	gc.opcodes.Handle(wow.ClientChannelUnmute, gc.HandleChannelUnmute)
+	gc.opcodes.Handle(wow.ClientChannelKick, gc.HandleChannelKick)
+	gc.opcodes.Handle(wow.ClientChannelBan, gc.HandleChannelBan)
+	gc.opcodes.Handle(wow.ClientChannelUnban, gc.HandleChannelUnban)
+
+	// LFG handlers
+	gc.opcodes.Handle(wow.ClientLfgJoin, gc.HandleLfgJoin)
+	gc.opcodes.Handle(wow.ClientLfgLeave, gc.HandleLfgLeave)
+	gc.opcodes.Handle(wow.ClientLfgSetRoles, gc.HandleLfgSetRoles)
+	gc.opcodes.Handle(wow.ClientLfgGetStatus, gc.HandleLfgGetStatus)
+
+	// Name query
+	gc.opcodes.Handle(wow.ClientNameQuery, gc.HandleNameQuery)
+	gc.opcodes.Handle(wow.ClientCreatureQuery, gc.HandleCreatureQuery)
+
+	// Targeting
+	gc.opcodes.Handle(wow.ClientSetSelection, gc.HandleSetSelection)
+
+	// Action bar
+	gc.opcodes.Handle(wow.ClientSetActionButton, gc.HandleSetActionButton)
+
+	// Emotes
+	gc.opcodes.Handle(wow.ClientTextEmote, gc.HandleTextEmote)
+	gc.opcodes.Handle(wow.ClientEmote, gc.HandleEmote)
 
 	// Combat handlers
-	packets.OpcodeTable.Handle(wow.ClientAttackswing, gc.HandleAttackSwing)
-	packets.OpcodeTable.Handle(wow.ClientAttackstop, gc.HandleAttackStop)
+	gc.opcodes.Handle(wow.ClientAttackswing, gc.HandleAttackSwing)
+	gc.opcodes.Handle(wow.ClientAttackstop, gc.HandleAttackStop)
 
 	// Spell handler
-	packets.OpcodeTable.Handle(wow.ClientCastSpell, gc.HandleCastSpell)
+	gc.opcodes.Handle(wow.ClientCastSpell, gc.HandleCastSpell)
 
 	// Item handlers
-	packets.OpcodeTable.Handle(wow.ClientAutoequipItem, gc.HandleAutoEquipItem)
-	packets.OpcodeTable.Handle(wow.ClientAutoequipItemSlot, gc.HandleAutoEquipItemSlot)
-	packets.OpcodeTable.Handle(wow.ClientSwapInvItem, gc.HandleSwapInvItem)
-	packets.OpcodeTable.Handle(wow.ClientSwapItem, gc.HandleSwapItem)
-	packets.OpcodeTable.Handle(wow.ClientDestroyitem, gc.HandleDestroyItem)
-	packets.OpcodeTable.Handle(wow.ClientItemQuerySingle, gc.HandleItemQuerySingle)
+	gc.opcodes.Handle(wow.ClientAutoequipItem, gc.HandleAutoEquipItem)
+	gc.opcodes.Handle(wow.ClientAutoequipItemSlot, gc.HandleAutoEquipItemSlot)
+	gc.opcodes.Handle(wow.ClientSwapInvItem, gc.HandleSwapInvItem)
+	gc.opcodes.Handle(wow.ClientSwapItem, gc.HandleSwapItem)
+	gc.opcodes.Handle(wow.ClientDestroyitem, gc.HandleDestroyItem)
+	gc.opcodes.Handle(wow.ClientItemQuerySingle, gc.HandleItemQuerySingle)
 
 	// Teleport/area trigger handlers
-	packets.OpcodeTable.Handle(wow.ClientAreatrigger, gc.HandleAreaTriggerOpcode)
-	packets.OpcodeTable.Handle(wow.MsgMoveWorldportAck, gc.HandleMoveWorldportAck)
-	packets.OpcodeTable.Handle(wow.MsgMoveTeleportAck, gc.HandleTeleportAck)
+	gc.opcodes.Handle(wow.ClientAreatrigger, gc.HandleAreaTriggerOpcode)
+	gc.opcodes.Handle(wow.MsgMoveWorldportAck, gc.HandleMoveWorldportAck)
+	gc.opcodes.Handle(wow.MsgMoveTeleportAck, gc.HandleTeleportAck)
 
 	// Movement handlers - all use the same handler function
 	movementOpcodes := []wow.OpCode{
@@ -90,6 +127,9 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 		wow.MsgMoveStartPitchDown,
 		wow.MsgMoveStopPitch,
 		wow.MsgMoveFallLand,
+		wow.MsgMoveJump,
+		wow.MsgMoveSetFacing,
+		wow.MsgMoveSetPitch,
 		wow.MsgMoveStartSwim,
 		wow.MsgMoveStopSwim,
 		wow.MsgMoveHeartbeat,
@@ -99,7 +139,7 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	}
 
 	for _, op := range movementOpcodes {
-		packets.OpcodeTable.Handle(op, handlePacket(func(data wow.PacketData) {
+		gc.opcodes.Handle(op, handlePacket(func(data wow.PacketData) {
 			gc.HandleMovementOpcodes(op, data)
 		}))
 	}
@@ -117,22 +157,33 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	}
 
 	for _, op := range speedOpcodes {
-		packets.OpcodeTable.Handle(op, handlePacket(func(data wow.PacketData) {
+		gc.opcodes.Handle(op, handlePacket(func(data wow.PacketData) {
 			gc.HandleMovementSpeed(op, data)
 		}))
 	}
 
 	// Special movement handlers
-	packets.OpcodeTable.Handle(wow.ClientMoveFallReset, handlePacket(func(data wow.PacketData) {
+	gc.opcodes.Handle(wow.ClientMoveFallReset, handlePacket(func(data wow.PacketData) {
 		gc.HandleMovementOpcodes(wow.ClientMoveFallReset, data)
 	}))
-	packets.OpcodeTable.Handle(wow.ClientMoveTimeSkipped, gc.HandleMoveTimeSkipped)
+	gc.opcodes.Handle(wow.ClientMoveTimeSkipped, gc.HandleMoveTimeSkipped)
+
+	// Quest handlers
+	gc.opcodes.Handle(wow.ClientQuestgiverHello, gc.HandleQuestgiverHello)
+	gc.opcodes.Handle(wow.ClientQuestgiverQueryQuest, gc.HandleQuestgiverQueryQuest)
+	gc.opcodes.Handle(wow.ClientQuestgiverAcceptQuest, gc.HandleQuestgiverAcceptQuest)
+	gc.opcodes.Handle(wow.ClientQuestgiverCompleteQuest, gc.HandleQuestgiverCompleteQuest)
+	gc.opcodes.Handle(wow.ClientQuestgiverRequestReward, gc.HandleQuestgiverRequestReward)
+	gc.opcodes.Handle(wow.ClientQuestgiverChooseReward, gc.HandleQuestgiverChooseReward)
+	gc.opcodes.Handle(wow.ClientQuestgiverCancel, gc.HandleQuestgiverCancel)
+	gc.opcodes.Handle(wow.ClientQuestgiverStatusQuery, gc.HandleQuestgiverStatusQuery)
+	gc.opcodes.Handle(wow.ClientQuestlogRemoveQuest, gc.HandleQuestLogRemoveQuest)
 }
 
 func (gc *WorldSession) Handle(pkt *wow.Packet) {
 	wow.GetPacketDumper().Write(pkt.Opcode(), pkt.Bytes())
 
-	handle := packets.OpcodeTable.Get(pkt.Opcode())
+	handle := gc.opcodes.Get(pkt.Opcode())
 	if handle == nil {
 		// return errors.New("no handler record found")
 		gc.log.Warn().Msgf("no handler record found: 0x%04x", pkt.OpCode())

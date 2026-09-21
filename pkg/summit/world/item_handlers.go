@@ -3,6 +3,7 @@ package world
 import (
 	"fmt"
 
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -43,17 +44,30 @@ func (gc *WorldSession) HandleAutoEquipItem(data wow.PacketData) {
 		return
 	}
 
-	// Equip the item
-	prev := gc.player.EquipItem(item)
+	// Validate equip
+	tpl := gc.getItemTemplate(uint32(item.ItemEntry))
+	result := player.CanEquipItem(gc.player, item, tpl, -1)
+	if result != player.EquipResultOK {
+		gc.log.Warn().
+			Int("result", int(result)).
+			Uint32("entry", item.ItemEntry).
+			Msg("cannot equip item")
 
-	// If there was a previous item, put it in the source slot
-	if prev != nil {
-		gc.player.Inventory.SetItem(int(srcSlot), prev)
-		prev.UpdateFields()
+		gc.sendInventoryChangeFailure(item, nil, result)
+		return
 	}
 
-	// Update item fields
-	item.UpdateFields()
+	// Equip the item with validation
+	prev, result := gc.player.EquipItemWithValidation(item, tpl, -1)
+	if result != player.EquipResultOK {
+		gc.log.Warn().
+			Int("result", int(result)).
+			Uint32("entry", item.ItemEntry).
+			Msg("equip failed")
+
+		gc.sendInventoryChangeFailure(item, prev, result)
+		return
+	}
 
 	// Send inventory update to the player
 	gc.sendInventoryUpdate()
@@ -92,6 +106,7 @@ func (gc *WorldSession) HandleAutoEquipItemSlot(data wow.PacketData) {
 
 	// Find the item in inventory
 	var srcSlot int = -1
+
 	for i := 0; i < player.InventorySlotTotal; i++ {
 		item := gc.player.Inventory.GetItem(i)
 		if item != nil && uint64(item.GUID()) == itemGUID {
@@ -110,22 +125,25 @@ func (gc *WorldSession) HandleAutoEquipItemSlot(data wow.PacketData) {
 		return
 	}
 
-	// Swap with existing item in destination
-	existing := gc.player.Inventory.GetEquipment(int(destSlot))
-	gc.player.Inventory.SetItem(srcSlot, existing)
-	gc.player.Inventory.SetEquipment(int(destSlot), item)
+	// Validate equip
+	tpl := gc.getItemTemplate(uint32(item.ItemEntry))
+	result := player.CanEquipItemInSlot(gc.player, item, tpl, int(destSlot))
+	if result != player.EquipResultOK {
+		gc.log.Warn().
+			Int("result", int(result)).
+			Uint32("entry", item.ItemEntry).
+			Msg("cannot equip item in slot")
 
-	// Update item fields
-	item.SlotIndex = int(destSlot)
-	item.UpdateFields()
-
-	if existing != nil {
-		existing.SlotIndex = srcSlot
-		existing.UpdateFields()
+		gc.sendInventoryChangeFailure(item, nil, result)
+		return
 	}
 
-	// Update player inventory fields
-	gc.player.UpdateInventoryFields()
+	// Equip with validation
+	prev, result := gc.player.EquipItemWithValidation(item, tpl, int(destSlot))
+	if result != player.EquipResultOK {
+		gc.sendInventoryChangeFailure(item, prev, result)
+		return
+	}
 
 	// Send inventory update
 	gc.sendInventoryUpdate()
@@ -198,7 +216,6 @@ func (gc *WorldSession) HandleSwapItem(data wow.PacketData) {
 		Msg("swap item")
 
 	// TODO: Implement bag-to-bag swapping
-	// For now, only handle same-bag swaps
 	if srcBag != destBag {
 		gc.log.Warn().Msg("cross-bag swap not implemented")
 		return
@@ -284,169 +301,203 @@ func (gc *WorldSession) sendItemQueryResponse(entry uint32) {
 	// Write item entry (with error bit cleared)
 	_ = pkt.Write(entry)
 
-	// Write item class (2 = ITEM_CLASS_WEAPON, 4 = ITEM_CLASS_ARMOR)
-	// TODO: Look up from item_template database
-	itemClass := uint32(2) // Weapon
-	_ = pkt.Write(itemClass)
+	// Try to look up the full template
+	tpl := gc.getItemTemplate(entry)
+	if tpl == nil {
+		// Item not found - send minimal response with error
+		_ = pkt.Write(uint32(tpl.Class))
+		_ = pkt.Write(uint32(tpl.SubClass))
+		pkt.WriteString(tpl.Name)
 
-	// Write subclass
-	_ = pkt.Write(uint32(0))
+		// Write remaining fields as zeros
+		for i := 0; i < 32; i++ {
+			_ = pkt.Write(uint32(0))
+		}
 
-	// Write name (null-terminated string)
-	pkt.WriteString(fmt.Sprintf("Item %d", entry))
-
-	// Write remaining fields (simplified - would need full item_template data)
-	for i := 0; i < 32; i++ {
-		_ = pkt.Write(uint32(0)) // padding
+		gc.socket.Send(pkt)
+		return
 	}
 
+	// Write item class
+	_ = pkt.Write(tpl.Class)
+	// Write subclass
+	_ = pkt.Write(tpl.SubClass)
+	// Write name
+	pkt.WriteString(tpl.Name)
+
 	// Write displayid
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.DisplayID)
 	// Write quality
-	_ = pkt.Write(uint32(0)) // Common
-
+	_ = pkt.Write(tpl.Quality)
 	// Write flags
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.Flags)
 	// Write buy price
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(uint32(tpl.BuyPrice))
 	// Write sell price
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.SellPrice)
 	// Write inventory type
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.InventoryType)
 	// Write allowable class
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(uint32(tpl.AllowableClass))
 	// Write allowable race
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(uint32(tpl.AllowableRace))
 	// Write item level
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.ItemLevel)
 	// Write required level
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.RequiredLevel)
 	// Write required skill
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.RequiredSkill)
 	// Write required skill rank
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.RequiredSkillRank)
 	// Write required spell
 	_ = pkt.Write(uint32(0))
-
 	// Write required reputation faction
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.RequiredRepFaction)
 	// Write required reputation rank
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.RequiredRepRank)
 	// Write max count
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(uint32(tpl.MaxCount))
 	// Write max stack
-	_ = pkt.Write(uint32(1))
-
+	_ = pkt.Write(uint32(tpl.Stackable))
 	// Write container slots
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(tpl.ContainerSlots)
 
 	// Write stats count
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(tpl.StatsCount)
 
 	// Write 10 stat pairs (type + value)
 	for i := 0; i < 10; i++ {
-		_ = pkt.Write(uint32(0)) // stat type
-		_ = pkt.Write(int32(0))  // stat value
+		if i < len(tpl.Stats) {
+			_ = pkt.Write(tpl.Stats[i].Type)
+			_ = pkt.Write(tpl.Stats[i].Value)
+		} else {
+			_ = pkt.Write(uint32(0))
+			_ = pkt.Write(int32(0))
+		}
 	}
 
-	// Write 5 damage pairs (min + max + type)
-	for i := 0; i < 5; i++ {
-		_ = pkt.Write(float32(0)) // min damage
-		_ = pkt.Write(float32(0)) // max damage
-		_ = pkt.Write(uint32(0))  // damage type
+	// Write 2 damage pairs (min + max + type)
+	for i := 0; i < 2; i++ {
+		if i < len(tpl.Damage) {
+			_ = pkt.Write(tpl.Damage[i].Min)
+			_ = pkt.Write(tpl.Damage[i].Max)
+			_ = pkt.Write(tpl.Damage[i].Type)
+		} else {
+			_ = pkt.Write(float32(0))
+			_ = pkt.Write(float32(0))
+			_ = pkt.Write(uint32(0))
+		}
 	}
 
 	// Write armor
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(tpl.Armor)
 
 	// Write holy/fire/nature/frost/shadow/arcane resistance
-	for i := 0; i < 6; i++ {
-		_ = pkt.Write(uint32(0))
-	}
+	_ = pkt.Write(uint32(tpl.HolyRes))
+	_ = pkt.Write(uint32(tpl.FireRes))
+	_ = pkt.Write(uint32(tpl.NatureRes))
+	_ = pkt.Write(uint32(tpl.FrostRes))
+	_ = pkt.Write(uint32(tpl.ShadowRes))
+	_ = pkt.Write(uint32(tpl.ArcaneRes))
 
 	// Write delay
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.Delay)
 	// Write ammo type
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.AmmoType)
 	// Write ranged damage
-	_ = pkt.Write(float32(0))
+	_ = pkt.Write(tpl.RangedModRange)
 
 	// Write spell info (5 spells)
 	for i := 0; i < 5; i++ {
-		_ = pkt.Write(uint32(0)) // spell id
-		_ = pkt.Write(uint32(0)) // trigger
-		_ = pkt.Write(int32(0))  // charges
-		_ = pkt.Write(int32(0))  // cooldown
-		_ = pkt.Write(uint32(0)) // category
-		_ = pkt.Write(int32(0))  // category cooldown
+		if i < len(tpl.Spells) {
+			_ = pkt.Write(uint32(tpl.Spells[i].SpellID))
+			_ = pkt.Write(tpl.Spells[i].Trigger)
+			_ = pkt.Write(tpl.Spells[i].Charges)
+			_ = pkt.Write(tpl.Spells[i].Cooldown)
+			_ = pkt.Write(tpl.Spells[i].Category)
+			_ = pkt.Write(tpl.Spells[i].CategoryCooldown)
+		} else {
+			_ = pkt.Write(uint32(0))
+			_ = pkt.Write(uint32(0))
+			_ = pkt.Write(int32(0))
+			_ = pkt.Write(int32(0))
+			_ = pkt.Write(uint32(0))
+			_ = pkt.Write(int32(0))
+		}
 	}
 
 	// Write socket info (3 sockets)
 	for i := 0; i < 3; i++ {
-		_ = pkt.Write(uint32(0)) // color
-		_ = pkt.Write(uint32(0)) // content
+		if i < len(tpl.Sockets) {
+			_ = pkt.Write(tpl.Sockets[i].Color)
+			_ = pkt.Write(tpl.Sockets[i].Content)
+		} else {
+			_ = pkt.Write(uint32(0))
+			_ = pkt.Write(uint32(0))
+		}
 	}
 
 	// Write socket bonus
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(tpl.SocketBonus)
 
 	// Write gem properties
 	_ = pkt.Write(uint32(0))
 
 	// Write item set
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(tpl.ItemSet)
 
 	// Write max durability
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(tpl.MaxDurability)
 
 	// Write area
 	_ = pkt.Write(uint32(0))
-
 	// Write map
 	_ = pkt.Write(uint32(0))
 
 	// Write bag family
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(tpl.BagFamily)
 
 	// Write tool category
 	_ = pkt.Write(uint32(0))
-
 	// Write item set category
 	_ = pkt.Write(uint32(0))
-
 	// Write primary skill line
 	_ = pkt.Write(uint32(0))
-
 	// Write required skill rank
-	_ = pkt.Write(uint32(0))
-
+	_ = pkt.Write(tpl.RequiredSkillRank)
 	// Write component skill line
 	_ = pkt.Write(uint32(0))
-
 	// Write primary stat
 	_ = pkt.Write(int32(0))
-
 	// Write secondary stat
 	_ = pkt.Write(int32(0))
-
 	// Write spell ICD
 	_ = pkt.Write(uint32(0))
+
+	gc.socket.Send(pkt)
+}
+
+// getItemTemplate retrieves an item template from basedata.
+func (gc *WorldSession) getItemTemplate(entry uint32) *basedata.ItemTemplate {
+	return basedata.GetInstance().LookupItem(entry)
+}
+
+// sendInventoryChangeFailure sends SMSG_INVENTORY_CHANGE_FAILURE.
+func (gc *WorldSession) sendInventoryChangeFailure(item *player.Item, other *player.Item, result player.EquipResult) {
+	if gc.player == nil {
+		return
+	}
+
+	pkt := wow.NewPacket(wow.ServerInventoryChangeFailure)
+
+	_ = pkt.Write(uint8(result))
+	_ = pkt.Write(uint64(item.GUID()))
+
+	if other != nil {
+		_ = pkt.Write(uint64(other.GUID()))
+	} else {
+		_ = pkt.Write(uint64(0))
+	}
 
 	gc.socket.Send(pkt)
 }
@@ -500,3 +551,6 @@ func (gc *WorldSession) equipStartingItems() {
 
 	gc.player.UpdateInventoryFields()
 }
+
+// unused import guard
+var _ = fmt.Sprintf
