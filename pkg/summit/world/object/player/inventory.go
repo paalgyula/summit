@@ -31,16 +31,14 @@ const (
 
 // Bag/backpack slot range.
 const (
-	// InventorySlotBuybackStart through InventorySlotBuybackEnd are buyback slots.
-	InventorySlotBuybackStart = 19
-	InventorySlotBuybackEnd   = 23
+	// InventorySlotBagStart through InventorySlotBagEnd are the 4 bag slots
+	// where players equip containers (backpack, bags). Matches AC INVENTORY_SLOT_BAG_*.
+	InventorySlotBagStart = 19
+	InventorySlotBagEnd   = 23
 
-	// InventorySlotBagStart through InventorySlotBagEnd are the 4 bag slots.
-	InventorySlotBagStart = 23
-	InventorySlotBagEnd   = 27
-
-	// InventorySlotItemStart through InventorySlotItemEnd are the backpack (main bag) slots.
-	InventorySlotItemStart = 27
+	// InventorySlotItemStart through InventorySlotItemEnd are the backpack
+	// (main bag) slots. Matches AC INVENTORY_SLOT_ITEM_*.
+	InventorySlotItemStart = 23
 	InventorySlotItemEnd   = 39
 
 	// InventorySlotTotal is the total number of player inventory slots.
@@ -157,8 +155,8 @@ func (inv *Inventory) CountItems() int {
 }
 
 // CharEnumSlots is the number of item slots SMSG_CHAR_ENUM describes for a
-// character: the equipment and the four bags (INVENTORY_SLOT_BAG_END).
-const CharEnumSlots = InventorySlotBagEnd - 4
+// character: the 19 equipment slots + 4 bag slots = 23 total.
+const CharEnumSlots = InventorySlotBagEnd // 19 equipment + 4 bag = 23
 
 // ToCharacterEnum writes inventory item display data for the character enum
 // packet: the display id and inventory type of the item template in every

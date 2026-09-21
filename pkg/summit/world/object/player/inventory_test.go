@@ -87,3 +87,22 @@ func TestCharacterEnumWritesDisplayIDs(t *testing.T) {
 	assert.EqualValues(t, 0, display)
 	assert.EqualValues(t, 0, invType)
 }
+
+func TestInspectSummitDat(t *testing.T) {
+	bd, err := basedata.LoadFromFile("../../../../../summit.dat")
+	if err != nil {
+		t.Skip("summit.dat not found")
+	}
+	t.Logf("Items loaded: %d, CreateInfo: %d", len(bd.Items), len(bd.PlayerCreateInfo))
+	for _, pci := range bd.PlayerCreateInfo {
+		if pci.Race == wow.RaceTauren {
+			t.Logf("Tauren Class %d Gender %d:", pci.Class, pci.Gender)
+			for i, slot := range pci.Inventory {
+				if slot != nil && slot.ItemID > 0 {
+					t.Logf("  Slot %d: ItemID=%d, DisplayID=%d, InvType=%d",
+						i, slot.ItemID, slot.DisplayItemID, slot.InventoryType)
+				}
+			}
+		}
+	}
+}
