@@ -115,3 +115,57 @@ type CreatureQuestInvolvedRelationEntity struct {
 }
 
 func (CreatureQuestInvolvedRelationEntity) CollectionName() string { return "creatureInvolvedRelation" }
+
+// --- GameObject ---
+
+// GameObjectTemplateEntity is the MongoDB document for the gameobjectTemplate collection.
+type GameObjectTemplateEntity struct {
+	Entry      uint32   `bson:"entry"`
+	Type       uint8    `bson:"type"`
+	DisplayID  uint32   `bson:"displayId"`
+	Name       string   `bson:"name"`
+	IconName   string   `bson:"iconName,omitempty"`
+	Size       float32  `bson:"size"`
+	Data       [24]int32 `bson:"data"`
+	AIName     string   `bson:"aiName,omitempty"`
+	ScriptName string   `bson:"scriptName,omitempty"`
+}
+
+func (GameObjectTemplateEntity) CollectionName() string { return "gameobjectTemplate" }
+
+// GameObjectSpawnEntity is the MongoDB document for the gameobject collection.
+type GameObjectSpawnEntity struct {
+	GUID          uint32    `bson:"guid"`
+	Entry         uint32    `bson:"entry"`
+	MapID         uint16    `bson:"map"`
+	ZoneID        uint16    `bson:"zoneId,omitempty"`
+	AreaID        uint16    `bson:"areaId,omitempty"`
+	SpawnMask     uint8     `bson:"spawnMask"`
+	PhaseMask     uint32    `bson:"phaseMask"`
+	PosX          float32   `bson:"positionX"`
+	PosY          float32   `bson:"positionY"`
+	PosZ          float32   `bson:"positionZ"`
+	Orientation   float32   `bson:"orientation"`
+	Rotation      [4]float32 `bson:"rotation"`
+	SpawnTimeSecs int32     `bson:"spawnTimeSecs"`
+	AnimProgress  uint8     `bson:"animProgress"`
+	State         uint8     `bson:"state"`
+	ScriptName    string    `bson:"scriptName,omitempty"`
+}
+
+func (GameObjectSpawnEntity) CollectionName() string { return "gameobject" }
+
+// GameObjectLootTemplateEntity is the MongoDB document for the gameobjectLootTemplate collection.
+type GameObjectLootTemplateEntity struct {
+	Entry         uint32  `bson:"entry"`
+	Item          uint32  `bson:"item"`
+	Reference     int32   `bson:"reference"`
+	Chance        float32 `bson:"challenge"`
+	QuestRequired int8    `bson:"questRequired"`
+	LootMode      uint16  `bson:"lootMode"`
+	GroupID       uint8   `bson:"groupId"`
+	MinCount      uint8   `bson:"minCount"`
+	MaxCount      uint8   `bson:"maxCount"`
+}
+
+func (GameObjectLootTemplateEntity) CollectionName() string { return "gameobjectLootTemplate" }

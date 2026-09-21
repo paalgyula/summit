@@ -296,6 +296,11 @@ func (s *Store) Database() string {
 	return s.db.Name()
 }
 
+// DB returns the underlying MongoDB database (for creating sub-stores like WorldStore).
+func (s *Store) DB() *mongo.Database {
+	return s.db
+}
+
 // Close disconnects from MongoDB.
 func (s *Store) Close(ctx context.Context) error {
 	return s.client.Disconnect(ctx)
