@@ -102,7 +102,7 @@ func (dc *Converter) ConvertItems() ([]*basedata.ItemTemplate, error) {
 			Entry:         table.Uint32(r, 0),
 			DisplayID:     table.Uint32(r, displayCol),
 			InventoryType: wow.InventoryType(table.Uint32(r, typeCol)),
-			SheatheType:   uint8(table.Uint32(r, sheatheCol)),
+			SheatheType:   table.Uint32(r, sheatheCol),
 		})
 	}
 
