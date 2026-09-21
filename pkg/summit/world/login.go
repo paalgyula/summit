@@ -327,32 +327,31 @@ func (gc *WorldSession) sendCharacterLoginFailed() {
 
 // sendInitialSpells sends SMSG_INITIAL_SPELLS with the player's known spells.
 func (gc *WorldSession) sendInitialSpells(p *player.Player) {
+	// 3.3.5a layout: u8 talent spec, u16 count, (u32 spell, u16 unk) × count, u16 cooldown count
 	pkt := wow.NewPacket(wow.ServerInitialSpells)
 
-	_ = pkt.WriteOne(0) // Spell book (0 = spellbook)
+	_ = pkt.WriteOne(0)
+	_ = pkt.Write(uint16(len(p.KnownSpells)))
 
-	// Number of spells
-	_ = pkt.Write(uint32(len(p.KnownSpells)))
-
-	// Spell list (each: spell ID + slot)
-	for i, spellID := range p.KnownSpells {
+	for _, spellID := range p.KnownSpells {
 		_ = pkt.Write(uint32(spellID))
-		_ = pkt.Write(uint16(i)) // slot index
+		_ = pkt.Write(uint16(0))
 	}
 
-	// Cooldown count (0 = no cooldowns)
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(uint16(0)) // no cooldowns
 
 	gc.socket.Send(pkt)
 }
 
 // sendActionButtons sends SMSG_ACTION_BUTTONS with the player's action bar.
 func (gc *WorldSession) sendActionButtons(p *player.Player) {
+	// 3.3.5a layout: u8 packet type (1 = initial), then MAX_ACTION_BUTTONS (144) packed
+	// buttons: action id in the low 24 bits, type in the top byte
 	pkt := wow.NewPacket(wow.ServerActionButtons)
 
-	// Send all 120 action buttons (12 buttons x 3 bars + 12 stance buttons)
-	// Each button is 4 bytes: uint32 packed (action | type << 24)
-	for i := 0; i < 120; i++ {
+	_ = pkt.WriteOne(1)
+
+	for i := 0; i < MaxActionButtons; i++ {
 		var button uint32
 
 		if i < len(p.Actions) {
@@ -361,9 +360,6 @@ func (gc *WorldSession) sendActionButtons(p *player.Player) {
 
 		_ = pkt.Write(button)
 	}
-
-	// Knowned (client sends this back)
-	_ = pkt.WriteOne(0)
 
 	gc.socket.Send(pkt)
 }

@@ -6,8 +6,9 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/paalgyula/summit/internal/store/localdb"
+	"github.com/paalgyula/summit/internal/store/mongostore"
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/client"
@@ -43,8 +44,28 @@ type LoginServerConfig struct {
 	Pass          string
 }
 
-func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig) error {
-	db := localdb.InitYamlDatabase("summit.yaml")
+// ProxyStoreConfig configures the MongoDB store for the proxy.
+type ProxyStoreConfig struct {
+	URI      string
+	Database string
+}
+
+func StartProxy(ctx context.Context, listenAddress string, config LoginServerConfig, storeCfg ProxyStoreConfig) error {
+	if storeCfg.URI == "" {
+		storeCfg.URI = "mongodb://admin:admin@localhost:27017"
+	}
+	if storeCfg.Database == "" {
+		storeCfg.Database = "summit"
+	}
+
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	db, err := mongostore.Connect(connectCtx, storeCfg.URI, storeCfg.Database)
+	if err != nil {
+		return fmt.Errorf("cannot connect to MongoDB: %w", err)
+	}
+
 	ms := auth.NewManagementService(db)
 
 	//nolint:exhaustruct

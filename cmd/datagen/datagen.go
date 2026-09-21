@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/paalgyula/summit/pkg/converter/adt"
 	"github.com/paalgyula/summit/pkg/converter/blp"
 	"github.com/paalgyula/summit/pkg/converter/m2"
@@ -15,9 +16,41 @@ import (
 	"github.com/paalgyula/summit/pkg/converter/wmo"
 	"github.com/paalgyula/summit/pkg/summit/tools"
 	"github.com/paalgyula/summit/pkg/summit/tools/data"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
+
+func init() {
+	// godotenv loads .env into os.Environ — viper picks it up via BindEnv
+	_ = godotenv.Load()
+
+	// Bind DEBUG env var
+	viper.BindEnv("debug", "DEBUG") //nolint:errcheck
+
+	// Pretty console logger when DEBUG=1
+	setupLogger()
+}
+
+func setupLogger() {
+	debug := viper.GetBool("debug")
+	if !debug {
+		// Default: JSON logger for machines
+		log.Logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
+
+		return
+	}
+
+	// Pretty colored console output for humans
+	output := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05.000"}
+	log.Logger = zerolog.New(output).
+		With().
+		Timestamp().
+		Caller().
+		Logger().
+		Level(zerolog.DebugLevel)
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "datagen",

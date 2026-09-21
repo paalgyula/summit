@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	"github.com/rs/zerolog/log"
 )
 
@@ -16,14 +17,21 @@ type Store struct {
 
 	GameObjectTemplates map[uint32]*GameObjectTemplate
 	GameObjectSpawns    map[uint32]*GameObjectSpawn
-	GameObjectLoots     map[uint32][]*GameObjectLootEntry // keyed by loot entry ID
+
+	CreatureLoots   map[uint32][]loot.LootEntry // creature_loot_template keyed by entry
+	GameObjectLoots map[uint32][]loot.LootEntry // gameobject_loot_template keyed by entry
+	ItemLoots       map[uint32][]loot.LootEntry // item_loot_template keyed by entry
+	ReferenceLoots  map[uint32][]loot.LootEntry // reference_loot_template keyed by ref id
 
 	PlayerCreateInfo []*PlayerCreateInfo
 	Items            []*ItemTemplate
 
 	GOTemplates []*GameObjectTemplate  `bson:"gameobjectTemplates,omitempty" json:"gameobjectTemplates,omitempty"`
 	GOSpawns    []*GameObjectSpawn     `bson:"gameobjectSpawns,omitempty" json:"gameobjectSpawns,omitempty"`
-	GOLoots     []*GameObjectLootEntry `bson:"gameobjectLoots,omitempty" json:"gameobjectLoots,omitempty"`
+	GOLoots     []*loot.LootEntry      `bson:"gameobjectLoots,omitempty" json:"gameobjectLoots,omitempty"`
+	CreatureLootEntries  []*loot.LootEntry `bson:"creatureLoots,omitempty" json:"creatureLoots,omitempty"`
+	ItemLootEntries      []*loot.LootEntry `bson:"itemLoots,omitempty" json:"itemLoots,omitempty"`
+	ReferenceLootEntries []*loot.LootEntry `bson:"referenceLoots,omitempty" json:"referenceLoots,omitempty"`
 }
 
 // Index builds the lookup maps of the loaded tables.
@@ -54,11 +62,20 @@ func (bd *Store) Index() {
 		bd.GameObjectSpawns[s.GUID] = s
 	}
 
-	// GameObject loot (multiple items per entry)
-	bd.GameObjectLoots = make(map[uint32][]*GameObjectLootEntry, len(bd.GOLoots))
-	for _, l := range bd.GOLoots {
-		bd.GameObjectLoots[l.Entry] = append(bd.GameObjectLoots[l.Entry], l)
+	// Loot templates
+	bd.GameObjectLoots = indexLootEntries(bd.GOLoots)
+	bd.CreatureLoots = indexLootEntries(bd.CreatureLootEntries)
+	bd.ItemLoots = indexLootEntries(bd.ItemLootEntries)
+	bd.ReferenceLoots = indexLootEntries(bd.ReferenceLootEntries)
+}
+
+// indexLootEntries builds a map of entry → []LootEntry from a slice.
+func indexLootEntries(entries []*loot.LootEntry) map[uint32][]loot.LootEntry {
+	m := make(map[uint32][]loot.LootEntry, len(entries))
+	for _, e := range entries {
+		m[e.Entry] = append(m[e.Entry], *e)
 	}
+	return m
 }
 
 // LoadFromFile loads the base data from database.
@@ -110,8 +127,8 @@ func (bd *Store) LookupGameObjectSpawn(guid uint32) *GameObjectSpawn {
 	return bd.GameObjectSpawns[guid]
 }
 
-// LookupGameObjectLoot returns all loot entries for the given loot ID, or nil.
-func (bd *Store) LookupGameObjectLoot(lootID uint32) []GameObjectLootEntry {
+// LookupGameObjectLoot returns all loot entries for the given GO loot ID, or nil.
+func (bd *Store) LookupGameObjectLoot(lootID uint32) []loot.LootEntry {
 	if bd == nil {
 		return nil
 	}
@@ -121,11 +138,47 @@ func (bd *Store) LookupGameObjectLoot(lootID uint32) []GameObjectLootEntry {
 		return nil
 	}
 
-	result := make([]GameObjectLootEntry, len(entries))
+	return entries
+}
 
-	for i, e := range entries {
-		result[i] = *e
+// LookupCreatureLoot returns all loot entries for the given creature loot ID, or nil.
+func (bd *Store) LookupCreatureLoot(lootID uint32) []loot.LootEntry {
+	if bd == nil {
+		return nil
 	}
 
-	return result
+	entries := bd.CreatureLoots[lootID]
+	if len(entries) == 0 {
+		return nil
+	}
+
+	return entries
+}
+
+// LookupItemLoot returns all loot entries for the given item loot ID, or nil.
+func (bd *Store) LookupItemLoot(lootID uint32) []loot.LootEntry {
+	if bd == nil {
+		return nil
+	}
+
+	entries := bd.ItemLoots[lootID]
+	if len(entries) == 0 {
+		return nil
+	}
+
+	return entries
+}
+
+// LookupReferenceLoot returns all loot entries for the given reference ID, or nil.
+func (bd *Store) LookupReferenceLoot(refID uint32) []loot.LootEntry {
+	if bd == nil {
+		return nil
+	}
+
+	entries := bd.ReferenceLoots[refID]
+	if len(entries) == 0 {
+		return nil
+	}
+
+	return entries
 }

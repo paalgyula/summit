@@ -29,9 +29,6 @@ deps:
 ## Generates interface stubs
 gen: 
 	@echo "Generating database interface stubs"
-	@cd pkg/store/localdb && impl 'db *LocalStore' store.AccountRepo >> localstore.go 
-	@cd pkg/store/localdb && impl 'db *LocalStore' store.CharacterRepo >> localstore.go  
-	@cd pkg/store/localdb && impl 'db *LocalStore' store.WorldRepo >> localstore.go  
 
 	@cd pkg/store/mysqldb && impl 'store *AccountStore' store.AccountRepo >> accountstore.go 
 	@cd pkg/store/mysqldb && impl 'store *CharacterStore' store.CharacterRepo >> characterstore.go  

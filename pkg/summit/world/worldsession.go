@@ -6,11 +6,13 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/paalgyula/summit/pkg/summit/world/packets"
 	"io"
 	"math/big"
 	"net"
 	"os"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/paalgyula/summit/pkg/summit/world/object"
@@ -33,6 +35,12 @@ type WorldSession struct {
 	ID  string
 	n   net.Conn
 	log zerolog.Logger
+
+	closeOnce sync.Once
+
+	// opcodes maps client opcodes to this session's handlers. Handlers are
+	// closures over the session, so the table cannot be shared between sessions.
+	opcodes packets.Opcodes
 
 	// Server side generated seed for authentication proofing
 	serverSeed []byte
@@ -78,6 +86,7 @@ func NewWorldSession(n net.Conn, ws SessionManager, handlers ...PacketHandler) *
 	_, _ = rand.Read(gc.serverSeed)
 
 	// Register opcode handlers from handlers.go
+	gc.opcodes = packets.NewOpcodeTable()
 	gc.RegisterHandlers(handlers...)
 
 	go gc.handleConnection()
@@ -141,16 +150,61 @@ func (gc *WorldSession) handleConnection() {
 	gc.log.Trace().Msg("sending auth challenge")
 	gc.sendAuthChallenge()
 
-	// Handle packets from the channel.
+	// Handle packets from the channel; the socket closes it when the
+	// connection is gone, which must take the player out of the world too.
 	for pkt := range gc.socket.Packets() {
 		gc.Handle(pkt)
 	}
+
+	gc.close("connection closed")
 }
 
+// Close drops the client: saves and removes the player, then closes the socket.
 func (gc *WorldSession) Close() error {
-	gc.ws.Disconnected(gc, "closing GameClient")
+	gc.close("closing GameClient")
 
-	return gc.n.Close() //nolint:wrapcheck
+	return nil
+}
+
+// close runs the disconnect sequence once, whichever path triggers it first
+// (logout, read error, panic, server-side kick).
+func (gc *WorldSession) close(reason string) {
+	gc.closeOnce.Do(func() {
+		gc.ws.Disconnected(gc, reason)
+		_ = gc.socket.Close()
+		_ = gc.n.Close()
+	})
+}
+
+// HandleLogoutRequest handles CMSG_LOGOUT_REQUEST: saves the character and
+// sends the logout response. The client will disconnect after receiving the
+// response.
+func (gc *WorldSession) HandleLogoutRequest(data wow.PacketData) {
+	if gc.player == nil {
+		return
+	}
+
+	// Save the character before logout
+	if err := gc.ws.(*Server).charStore.UpdateCharacter(gc.player); err != nil {
+		gc.log.Error().Err(err).Str("name", gc.player.Name).
+			Msg("failed to save character on logout")
+	} else {
+		gc.log.Info().Str("name", gc.player.Name).Msg("character saved on logout")
+	}
+
+	// Send SMSG_LOGOUT_RESPONSE (uint32: 0 = OK, uint8: 0 = not instant)
+	pkt := wow.NewPacket(wow.ServerLogoutResponse)
+	_ = pkt.Write(uint32(0)) // LOGOUT_RESPONSE_OK
+	_ = pkt.WriteOne(0)      // not instant logout
+	gc.socket.Send(pkt)
+
+	// Send SMSG_LOGOUT_COMPLETE after a short delay to let the client process
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		pkt := wow.NewPacket(wow.ServerLogoutComplete)
+		gc.socket.Send(pkt)
+		gc.Close()
+	}()
 }
 
 // Send sends a packet to the game client.

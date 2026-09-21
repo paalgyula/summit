@@ -89,6 +89,7 @@ func (c *Conn) Close() error {
 	}
 	c.closed = true
 
+	// Best-effort close handshake; ignore errors if the connection is already broken
 	_ = c.ws.WriteMessage(websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	return c.ws.Close()

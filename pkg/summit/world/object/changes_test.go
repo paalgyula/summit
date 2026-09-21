@@ -103,14 +103,18 @@ func TestObject_FieldNotifyFlags(t *testing.T) {
 	obj := object.NewObject()
 	obj.InitValues(64)
 
+	// Dynamic fields are always notified, like AzerothCore's Object::Object()
+	base := uint16(object.UFFlagDynamic)
+	assert.Equal(t, base, obj.FieldNotifyFlags())
+
 	obj.SetFieldNotifyFlag(0x01)
-	assert.Equal(t, uint16(0x01), obj.FieldNotifyFlags())
+	assert.Equal(t, base|0x01, obj.FieldNotifyFlags())
 
 	obj.SetFieldNotifyFlag(0x04)
-	assert.Equal(t, uint16(0x05), obj.FieldNotifyFlags())
+	assert.Equal(t, base|0x05, obj.FieldNotifyFlags())
 
 	obj.RemoveFieldNotifyFlag(0x01)
-	assert.Equal(t, uint16(0x04), obj.FieldNotifyFlags())
+	assert.Equal(t, base|0x04, obj.FieldNotifyFlags())
 }
 
 func TestUpdateMask_SetAndGetBit(t *testing.T) {

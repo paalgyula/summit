@@ -192,6 +192,11 @@ func (gc *WorldSession) updatePlayerPosition(info *MovementInfo) {
 	// Update movement flags on player
 	gc.player.MoveFlags = wow.MovementFlag(info.Flags)
 
+	// Moving ends dances, sitting and the like
+	if info.Flags&uint32(wow.MovementFlagMoving) != 0 {
+		gc.clearEmotes()
+	}
+
 	// Check areatriggers after position update
 	gc.checkAreaTriggers()
 }

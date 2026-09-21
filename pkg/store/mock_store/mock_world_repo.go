@@ -10,6 +10,9 @@
 package mock_store
 
 import (
+	reflect "reflect"
+
+	store "github.com/paalgyula/summit/pkg/store"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -35,4 +38,184 @@ func NewMockWorldRepo(ctrl *gomock.Controller) *MockWorldRepo {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockWorldRepo) EXPECT() *MockWorldRepoMockRecorder {
 	return m.recorder
+}
+
+// GetAllCreatureQuestInvolvedRelations mocks base method.
+func (m *MockWorldRepo) GetAllCreatureQuestInvolvedRelations() (map[uint32][]uint32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAllCreatureQuestInvolvedRelations")
+	ret0, _ := ret[0].(map[uint32][]uint32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAllCreatureQuestInvolvedRelations indicates an expected call of GetAllCreatureQuestInvolvedRelations.
+func (mr *MockWorldRepoMockRecorder) GetAllCreatureQuestInvolvedRelations() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllCreatureQuestInvolvedRelations", reflect.TypeOf((*MockWorldRepo)(nil).GetAllCreatureQuestInvolvedRelations))
+}
+
+// GetAllCreatureQuestRelations mocks base method.
+func (m *MockWorldRepo) GetAllCreatureQuestRelations() (map[uint32][]uint32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAllCreatureQuestRelations")
+	ret0, _ := ret[0].(map[uint32][]uint32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAllCreatureQuestRelations indicates an expected call of GetAllCreatureQuestRelations.
+func (mr *MockWorldRepoMockRecorder) GetAllCreatureQuestRelations() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllCreatureQuestRelations", reflect.TypeOf((*MockWorldRepo)(nil).GetAllCreatureQuestRelations))
+}
+
+// GetCreatureQuestInvolvedRelations mocks base method.
+func (m *MockWorldRepo) GetCreatureQuestInvolvedRelations(creatureEntry uint32) ([]uint32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreatureQuestInvolvedRelations", creatureEntry)
+	ret0, _ := ret[0].([]uint32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCreatureQuestInvolvedRelations indicates an expected call of GetCreatureQuestInvolvedRelations.
+func (mr *MockWorldRepoMockRecorder) GetCreatureQuestInvolvedRelations(creatureEntry any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureQuestInvolvedRelations", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureQuestInvolvedRelations), creatureEntry)
+}
+
+// GetCreatureQuestRelations mocks base method.
+func (m *MockWorldRepo) GetCreatureQuestRelations(creatureEntry uint32) ([]uint32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreatureQuestRelations", creatureEntry)
+	ret0, _ := ret[0].([]uint32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCreatureQuestRelations indicates an expected call of GetCreatureQuestRelations.
+func (mr *MockWorldRepoMockRecorder) GetCreatureQuestRelations(creatureEntry any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureQuestRelations", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureQuestRelations), creatureEntry)
+}
+
+// GetCreatureSpawn mocks base method.
+func (m *MockWorldRepo) GetCreatureSpawn(spawnID uint64) (*store.CreatureSpawn, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreatureSpawn", spawnID)
+	ret0, _ := ret[0].(*store.CreatureSpawn)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCreatureSpawn indicates an expected call of GetCreatureSpawn.
+func (mr *MockWorldRepoMockRecorder) GetCreatureSpawn(spawnID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureSpawn", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureSpawn), spawnID)
+}
+
+// GetCreatureSpawns mocks base method.
+func (m *MockWorldRepo) GetCreatureSpawns(mapID uint32) ([]*store.CreatureSpawn, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreatureSpawns", mapID)
+	ret0, _ := ret[0].([]*store.CreatureSpawn)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCreatureSpawns indicates an expected call of GetCreatureSpawns.
+func (mr *MockWorldRepoMockRecorder) GetCreatureSpawns(mapID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureSpawns", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureSpawns), mapID)
+}
+
+// GetCreatureTemplate mocks base method.
+func (m *MockWorldRepo) GetCreatureTemplate(entry uint32) (*store.CreatureTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreatureTemplate", entry)
+	ret0, _ := ret[0].(*store.CreatureTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCreatureTemplate indicates an expected call of GetCreatureTemplate.
+func (mr *MockWorldRepoMockRecorder) GetCreatureTemplate(entry any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureTemplate", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureTemplate), entry)
+}
+
+// GetCreatureTemplates mocks base method.
+func (m *MockWorldRepo) GetCreatureTemplates() (map[uint32]*store.CreatureTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreatureTemplates")
+	ret0, _ := ret[0].(map[uint32]*store.CreatureTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCreatureTemplates indicates an expected call of GetCreatureTemplates.
+func (mr *MockWorldRepoMockRecorder) GetCreatureTemplates() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureTemplates", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureTemplates))
+}
+
+// GetPlayerCreateActions mocks base method.
+func (m *MockWorldRepo) GetPlayerCreateActions(race, class uint8) ([]store.PlayerCreateAction, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPlayerCreateActions", race, class)
+	ret0, _ := ret[0].([]store.PlayerCreateAction)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPlayerCreateActions indicates an expected call of GetPlayerCreateActions.
+func (mr *MockWorldRepoMockRecorder) GetPlayerCreateActions(race, class any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPlayerCreateActions", reflect.TypeOf((*MockWorldRepo)(nil).GetPlayerCreateActions), race, class)
+}
+
+// GetPlayerCreateSpells mocks base method.
+func (m *MockWorldRepo) GetPlayerCreateSpells(race, class uint8) ([]uint32, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPlayerCreateSpells", race, class)
+	ret0, _ := ret[0].([]uint32)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetPlayerCreateSpells indicates an expected call of GetPlayerCreateSpells.
+func (mr *MockWorldRepoMockRecorder) GetPlayerCreateSpells(race, class any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPlayerCreateSpells", reflect.TypeOf((*MockWorldRepo)(nil).GetPlayerCreateSpells), race, class)
+}
+
+// GetQuestTemplate mocks base method.
+func (m *MockWorldRepo) GetQuestTemplate(id uint32) (*store.QuestTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetQuestTemplate", id)
+	ret0, _ := ret[0].(*store.QuestTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetQuestTemplate indicates an expected call of GetQuestTemplate.
+func (mr *MockWorldRepoMockRecorder) GetQuestTemplate(id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetQuestTemplate", reflect.TypeOf((*MockWorldRepo)(nil).GetQuestTemplate), id)
+}
+
+// GetQuestTemplates mocks base method.
+func (m *MockWorldRepo) GetQuestTemplates() (map[uint32]*store.QuestTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetQuestTemplates")
+	ret0, _ := ret[0].(map[uint32]*store.QuestTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetQuestTemplates indicates an expected call of GetQuestTemplates.
+func (mr *MockWorldRepoMockRecorder) GetQuestTemplates() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetQuestTemplates", reflect.TypeOf((*MockWorldRepo)(nil).GetQuestTemplates))
 }

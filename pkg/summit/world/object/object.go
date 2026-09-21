@@ -46,6 +46,10 @@ type Object struct {
 	fieldNotifyFlags uint16
 
 	updateFlags wow.ObjectUpdateFlags
+
+	// visibilityOverrideType controls the visibility distance tier for this object.
+	// Matches AzerothCore's _visibilityDistanceOverrideType.
+	visibilityOverrideType VisibilityDistanceType
 }
 
 func NewObject() *Object {
@@ -56,6 +60,9 @@ func NewObject() *Object {
 
 		isInWorld: false,
 		isUpdated: false,
+
+		// Dynamic fields (NPC flags, dynamic flags) always go out, like AzerothCore's _fieldNotifyFlags
+		fieldNotifyFlags: uint16(UFFlagDynamic),
 	}
 }
 
@@ -86,6 +93,12 @@ func (o *Object) RemoveFromObjectUpdate() {
 		o.isUpdated = false
 		o.updater.RemoveUpdateObject(o)
 	}
+}
+
+// MarkUpdateSent resets the queued flag after the map drained the object from
+// its update set itself, so the next change queues it again.
+func (o *Object) MarkUpdateSent() {
+	o.isUpdated = false
 }
 
 // ClearUpdateMask clears the changes mask and removes the object from the
@@ -321,6 +334,24 @@ func (o *Object) ObjectTypeID() wow.TypeID {
 	return o.objectTypeID
 }
 
+// GetVisibilityOverrideType returns the visibility distance override type.
+// Matches AzerothCore's WorldObject::GetVisibilityOverrideType.
+func (o *Object) GetVisibilityOverrideType() VisibilityDistanceType {
+	return o.visibilityOverrideType
+}
+
+// SetVisibilityOverrideType sets the visibility distance override type.
+// Matches AzerothCore's WorldObject::SetVisibilityDistanceOverride.
+func (o *Object) SetVisibilityOverrideType(vd VisibilityDistanceType) {
+	o.visibilityOverrideType = vd
+}
+
+// IsFarVisible returns true if this object uses the far-visible grid container.
+// Matches AzerothCore's WorldObject::IsFarVisible.
+func (o *Object) IsFarVisible() bool {
+	return o.visibilityOverrideType.IsFarVisible()
+}
+
 // ChangesMask returns the change-tracking mask.
 func (o *Object) ChangesMask() *UpdateMask {
 	return &o.changesMask
@@ -379,19 +410,12 @@ func (o *Object) BuildFilteredUpdateMask(target *Object, isSelf bool) *UpdateMas
 		visibleFlag |= UFFlagPrivate
 	}
 
-	fieldFlags := o.getFieldFlags()
 	mask := &UpdateMask{}
 	mask.SetCount(uint32(len(o.values)))
 
 	for i := uint32(0); i < uint32(len(o.values)); i++ {
-		var f uint32
-		// fieldFlags is indexed relative to ObjectEnd, so subtract the offset.
-		fi := int(i) - int(ObjectEnd)
-		if fi >= 0 && fi < len(fieldFlags) {
-			f = fieldFlags[fi]
-		}
-
-		if f&visibleFlag != 0 {
+		f := o.fieldFlagAt(i)
+		if f&visibleFlag != 0 || (o.fieldNotifyFlags != 0 && f&uint32(o.fieldNotifyFlags) != 0) {
 			mask.SetBit(i)
 		}
 	}
@@ -409,16 +433,11 @@ func (o *Object) BuildIncrementalUpdateMask(target *Object) *UpdateMask {
 		visibleFlag |= UFFlagPrivate
 	}
 
-	fieldFlags := o.getFieldFlags()
 	mask := &UpdateMask{}
 	mask.SetCount(uint32(len(o.values)))
 
 	for i := uint32(0); i < uint32(len(o.values)); i++ {
-		var f uint32
-		fi := int(i) - int(ObjectEnd)
-		if fi >= 0 && fi < len(fieldFlags) {
-			f = fieldFlags[fi]
-		}
+		f := o.fieldFlagAt(i)
 
 		// Include if field has a notify flag set (always send these)
 		if o.fieldNotifyFlags != 0 && f&uint32(o.fieldNotifyFlags) != 0 {
@@ -433,6 +452,24 @@ func (o *Object) BuildIncrementalUpdateMask(target *Object) *UpdateMask {
 	}
 
 	return mask
+}
+
+// fieldFlagAt returns the visibility flags of field i: the shared object
+// header fields come from ObjectFieldFlags, the rest from the type's table
+// (which is indexed relative to ObjectEnd).
+func (o *Object) fieldFlagAt(i uint32) uint32 {
+	if i < uint32(ObjectEnd) {
+		return ObjectFieldFlags[i]
+	}
+
+	fieldFlags := o.getFieldFlags()
+	fi := int(i) - int(ObjectEnd)
+
+	if fi < len(fieldFlags) {
+		return fieldFlags[fi]
+	}
+
+	return 0
 }
 
 // getFieldFlags returns the per-field visibility flags array for this object's type.

@@ -773,7 +773,7 @@ docker run -d --name ac-mongo -p 27017:27017 mongo:7
 | `Player.ToCharacterEnum()` | ✅ Done | `pkg/summit/world/object/player/player.go:521` |
 | `Player.InitInventory()` | ✅ Done | `pkg/summit/world/object/player/player.go:238` |
 | `basedata.PlayerCreateInfo` | ✅ Done | `pkg/summit/world/basedata/character.go:13` |
-| YAML persistence | ✅ Done | `internal/store/localdb/localstore.go` |
+| MongoDB persistence | ✅ Done | `internal/store/mongostore/mongostore.go` |
 | `SessionManager` interface | ✅ Done | `pkg/summit/world/sessionmanager.go:10` |
 
 ### Missing / To Implement
@@ -829,4 +829,4 @@ The `datagen` tool can convert these DBCs to Go-compatible data. See
 | `pkg/summit/world/basedata/character.go` | `PlayerCreateInfo`, `LookupCharacterCreateInfo` |
 | `pkg/summit/world/basedata/store.go` | `LoadFromFile` |
 | `pkg/summit/world/sessionmanager.go` | `SessionManager` interface |
-| `internal/store/localdb/localstore.go` | `LocalStore` (YAML persistence) |
+| `internal/store/mongostore/mongostore.go` | `Store` (MongoDB persistence) |

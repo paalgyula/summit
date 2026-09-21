@@ -21,7 +21,6 @@ type WorldStore struct {
 	questTemplates      *mongo.Collection
 	creatureQuestRel    *mongo.Collection
 	creatureQuestInvRel *mongo.Collection
-	itemTemplates       *mongo.Collection
 }
 
 // NewWorldStore creates a new WorldStore using the given database.
@@ -33,7 +32,6 @@ func NewWorldStore(db *mongo.Database) *WorldStore {
 		questTemplates:      db.Collection("quest_template"),
 		creatureQuestRel:    db.Collection("creature_queststarter"),
 		creatureQuestInvRel: db.Collection("creature_questender"),
-		itemTemplates:       db.Collection("item_template"),
 	}
 }
 
@@ -463,50 +461,5 @@ func (w *WorldStore) GetPlayerCreateActions(race, class uint8) ([]store.PlayerCr
 	return actions, nil
 }
 
-// --- ItemTemplate ---
-
-// GetItemTemplate retrieves an item template by entry.
-func (w *WorldStore) GetItemTemplate(entry uint32) (*store.ItemTemplate, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	var result store.ItemTemplate
-
-	err := w.itemTemplates.FindOne(ctx, bson.M{"entry": entry}).Decode(&result)
-	if err != nil {
-		if err.Error() == "mongo: no documents in result" {
-			return nil, nil
-		}
-
-		return nil, fmt.Errorf("GetItemTemplate: %w", err)
-	}
-
-	return &result, nil
-}
-
-// GetItemTemplates retrieves all item templates.
-func (w *WorldStore) GetItemTemplates() (map[uint32]*store.ItemTemplate, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cursor, err := w.itemTemplates.Find(ctx, bson.M{})
-	if err != nil {
-		return nil, fmt.Errorf("GetItemTemplates: %w", err)
-	}
-
-	defer cursor.Close(ctx) //nolint:errcheck
-
-	var results []store.ItemTemplate
-
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, fmt.Errorf("GetItemTemplates decode: %w", err)
-	}
-
-	result := make(map[uint32]*store.ItemTemplate, len(results))
-
-	for i := range results {
-		result[results[i].Entry] = &results[i]
-	}
-
-	return result, nil
-}
+// Compile-time interface check.
+var _ store.WorldRepo = (*WorldStore)(nil)

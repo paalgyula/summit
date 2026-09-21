@@ -1,6 +1,7 @@
 package dbc
 
 import (
+	"fmt"
 	"os"
 	"path"
 
@@ -17,7 +18,7 @@ func LoadAll(dbcDirectoryPath string) {
 func Load[C any](fileName string, baseDir ...string) ([]C, error) {
 	f, err := os.Open(path.Join(append(baseDir, fileName)...))
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("open %s: %w", fileName, err)
 	}
 
 	r, err := NewReader[C](f)

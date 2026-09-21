@@ -15,3 +15,4 @@ summit-world.yaml
 summit-auth.yaml
 summit-client.yaml
 .dev/
+.env

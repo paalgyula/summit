@@ -13,7 +13,10 @@ import (
 )
 
 //nolint:gochecknoglobals
-var listenAddress, serverAddress, username, password string
+var (
+	listenAddress, serverAddress, username, password string
+	mongoURI, mongoDB                               string
+)
 
 //nolint:gochecknoinits
 func init() {
@@ -22,6 +25,8 @@ func init() {
 	flag.StringVar(&serverAddress, "server", "logon.warmane.com:3724", "address of the logon server in host:port format")
 	flag.StringVar(&username, "user", "test", "username")
 	flag.StringVar(&password, "pass", "test", "password")
+	flag.StringVar(&mongoURI, "mongo-uri", "mongodb://admin:admin@localhost:27017", "MongoDB connection URI")
+	flag.StringVar(&mongoDB, "mongo-db", "summit", "MongoDB database name")
 }
 
 func main() {
@@ -33,6 +38,9 @@ func main() {
 		ServerAddress: serverAddress,
 		User:          username,
 		Pass:          password,
+	}, serworm.ProxyStoreConfig{
+		URI:      mongoURI,
+		Database: mongoDB,
 	})
 	if err != nil {
 		panic(err)

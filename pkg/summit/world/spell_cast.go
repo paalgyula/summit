@@ -9,21 +9,42 @@ import (
 )
 
 // HandleCastSpell handles CMSG_CAST_SPELL from the client.
+// SpellCastTargets masks of CMSG_CAST_SPELL.
+const (
+	TargetFlagUnit   = 0x2
+	TargetFlagObject = 0x800
+)
+
 func (gc *WorldSession) HandleCastSpell(data wow.PacketData) {
 	if gc.player == nil || gc.player.IsGhost {
 		return
 	}
 
+	// 3.3.5a layout: u8 cast count, u32 spell, u8 cast flags, u32 target mask,
+	// then a packed GUID when the mask names a unit (0x2) or object (0x800).
 	reader := wow.NewPacketReader(data)
 
-	var castID uint32
-	_ = reader.Read(&castID)
+	var castCount uint8
+	_ = reader.Read(&castCount)
+
+	castID := uint32(castCount)
 
 	var spellID uint32
 	_ = reader.Read(&spellID)
 
-	var targetGUID uint64
-	_ = reader.Read(&targetGUID)
+	var castFlags uint8
+	_ = reader.Read(&castFlags)
+
+	var targetMask uint32
+	_ = reader.Read(&targetMask)
+
+	targetGUID := uint64(gc.player.GUID())
+
+	if targetMask&(TargetFlagUnit|TargetFlagObject) != 0 {
+		if guid, err := wow.ReadPackedGUID(reader); err == nil {
+			targetGUID = uint64(guid)
+		}
+	}
 
 	// Find the spell info from DBC data
 	server, ok := gc.ws.(*Server)

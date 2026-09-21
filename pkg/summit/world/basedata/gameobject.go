@@ -179,16 +179,3 @@ type GameObjectSpawn struct {
 	AnimProgress     uint8      `bson:"animProgress" json:"animProgress"`
 	State            uint8      `bson:"state" json:"state"`
 }
-
-// GameObjectLootEntry is a single row from gameobject_loot_template.
-type GameObjectLootEntry struct {
-	Entry         uint32  `bson:"entry" json:"entry"`
-	Item          uint32  `bson:"item" json:"item"`
-	Reference     int32   `bson:"reference" json:"reference"`
-	Chance        float32 `bson:"challenge" json:"challenge"`
-	QuestRequired bool    `bson:"questRequired" json:"questRequired"`
-	LootMode      uint16  `bson:"lootMode" json:"lootMode"`
-	GroupID       uint8   `bson:"groupId" json:"groupId"`
-	MinCount      uint8   `bson:"minCount" json:"minCount"`
-	MaxCount      uint8   `bson:"maxCount" json:"maxCount"`
-}

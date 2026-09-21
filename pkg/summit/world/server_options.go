@@ -3,11 +3,59 @@ package world
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/wow"
 )
+
+// ChatConfig holds configurable chat system settings.
+type ChatConfig struct {
+	// CrossFactionChat allows players of different factions to whisper
+	// and use channels together. Enabled by default.
+	CrossFactionChat bool
+
+	// SayLevelReq is the minimum level required to use say/yell/emote.
+	SayLevelReq int
+
+	// WhisperLevelReq is the minimum level required to whisper.
+	WhisperLevelReq int
+
+	// ChatMuteFirstLogin mutes new players for ChatMuteMinutes on first login.
+	ChatMuteFirstLogin bool
+	ChatMuteMinutes    int
+
+	// AddonChannel enables addon message traffic.
+	AddonChannel bool
+}
+
+// DefaultChatConfig returns the default chat configuration.
+// Cross-faction chat is enabled by default per user request.
+func DefaultChatConfig() ChatConfig {
+	return ChatConfig{
+		CrossFactionChat:   true,
+		SayLevelReq:        1,
+		WhisperLevelReq:    10,
+		ChatMuteFirstLogin: false,
+		ChatMuteMinutes:    0,
+		AddonChannel:       true,
+	}
+}
+
+// Team returns 1 for Alliance races, 2 for Horde races.
+func TeamFromRace(race wow.PlayerRace) int {
+	switch race {
+	case wow.RaceHuman, wow.RaceDwarf, wow.RaceNightElf, wow.RaceGnome, wow.RaceDraenei:
+		return 1 // Alliance
+	case wow.RaceOrc, wow.RaceUndead, wow.RaceTauren, wow.RaceTroll,
+		wow.RaceGoblin, wow.RaceBloodElf:
+		return 2 // Horde
+	default:
+		return 0 // neutral
+	}
+}
 
 type ServerOption func(s *Server) error
 
@@ -45,7 +93,7 @@ func WithStaticBaseData() ServerOption {
 }
 
 // WithBabySocket can set the babysocket server if needed.
-// The babysocket is socket based custom packet handler.
+// It is socket based custom packet handler.
 func WithBabySocket() ServerOption {
 	return func(s *Server) error {
 		bs, err := babysocket.NewServer("babysocket", s)
@@ -79,4 +127,38 @@ func WithSpellDBC(dbcPath string) ServerOption {
 
 		return nil
 	}
+}
+
+// WithChatConfig sets the chat system configuration.
+func WithChatConfig(cfg ChatConfig) ServerOption {
+	return func(s *Server) error {
+		s.chatConfig = cfg
+
+		return nil
+	}
+}
+
+// IsAlliance returns true if the race belongs to the Alliance faction.
+func IsAlliance(race wow.PlayerRace) bool {
+	return TeamFromRace(race) == 1
+}
+
+// IsHorde returns true if the race belongs to the Horde faction.
+func IsHorde(race wow.PlayerRace) bool {
+	return TeamFromRace(race) == 2
+}
+
+// SameFaction returns true if two races belong to the same faction.
+func SameFaction(race1, race2 wow.PlayerRace) bool {
+	return TeamFromRace(race1) == TeamFromRace(race2)
+}
+
+// NormalizePlayerName capitalizes the first letter and lowercases the rest.
+// WoW client sends player names with the first letter capitalized.
+func NormalizePlayerName(name string) string {
+	if len(name) == 0 {
+		return name
+	}
+
+	return strings.ToUpper(name[:1]) + strings.ToLower(name[1:])
 }

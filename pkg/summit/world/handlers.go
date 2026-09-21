@@ -107,6 +107,12 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	gc.opcodes.Handle(wow.ClientDestroyitem, gc.HandleDestroyItem)
 	gc.opcodes.Handle(wow.ClientItemQuerySingle, gc.HandleItemQuerySingle)
 
+	// Loot handlers
+	gc.opcodes.Handle(wow.ClientLoot, gc.HandleLoot)
+	gc.opcodes.Handle(wow.ClientAutostoreLootItem, gc.HandleAutostoreLootItem)
+	gc.opcodes.Handle(wow.ClientLootMoney, gc.HandleLootMoney)
+	gc.opcodes.Handle(wow.ClientLootRelease, gc.HandleLootRelease)
+
 	// Teleport/area trigger handlers
 	gc.opcodes.Handle(wow.ClientAreatrigger, gc.HandleAreaTriggerOpcode)
 	gc.opcodes.Handle(wow.MsgMoveWorldportAck, gc.HandleMoveWorldportAck)

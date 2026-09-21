@@ -1,6 +1,7 @@
 package dbc
 
 import (
+	"fmt"
 	"path"
 	"strings"
 )
@@ -76,17 +77,25 @@ type ItemDisplay struct {
 	Sheathe int `json:"sheathe,omitempty"`
 }
 
+// StartOutfitItem is an item equipped on a character starting outfit.
+type StartOutfitItem struct {
+	Slot          int   `json:"slot"`
+	DisplayID     int32 `json:"displayId"`
+	InventoryType int32 `json:"inventoryType"`
+}
+
 // CharacterData is everything the web client needs to dress a character:
 // the customization tables and the item display table.
 type CharacterData struct {
-	Races       map[int]Race `json:"races"`
-	Sections    []Section    `json:"sections"`
-	HairGeosets []HairGeoset `json:"hairGeosets"`
-	FacialHair  []FacialHair `json:"facialHair"`
+	Races         map[int]Race                 `json:"races"`
+	Sections      []Section                    `json:"sections"`
+	HairGeosets   []HairGeoset                 `json:"hairGeosets"`
+	FacialHair    []FacialHair                 `json:"facialHair"`
 	// HelmetGeosets maps a HelmetGeosetVisData id to its seven race masks:
 	// hair, facial 1-3, ears and two more groups hidden for race bit (race-1).
-	HelmetGeosets map[int][7]uint32   `json:"helmetGeosets"`
-	ItemDisplay   map[int]ItemDisplay `json:"itemDisplay"`
+	HelmetGeosets map[int][7]uint32            `json:"helmetGeosets"`
+	ItemDisplay   map[int]ItemDisplay          `json:"itemDisplay"`
+	Outfits       map[string][]StartOutfitItem `json:"outfits,omitempty"`
 }
 
 // Tables are the DBC files CharacterData is built from, by file name; any of
@@ -99,12 +108,13 @@ type Tables struct {
 	HelmetGeosetVisData *File
 	ItemDisplayInfo     *File
 	Item                *File
+	CharStartOutfit     *File
 }
 
 // CharacterTableNames lists the DBFilesClient files of Tables in field order.
 var CharacterTableNames = []string{
 	"ChrRaces.dbc", "CharSections.dbc", "CharHairGeosets.dbc", "CharacterFacialHairStyles.dbc",
-	"HelmetGeosetVisData.dbc", "ItemDisplayInfo.dbc", "Item.dbc",
+	"HelmetGeosetVisData.dbc", "ItemDisplayInfo.dbc", "Item.dbc", "CharStartOutfit.dbc",
 }
 
 // BuildCharacterData assembles the client's character data from the tables.
@@ -221,7 +231,83 @@ func BuildCharacterData(t Tables) *CharacterData {
 		}
 	}
 
+	if f := t.CharStartOutfit; f != nil {
+		// CharStartOutfit: 0 id, 1 packed (race, class, gender, outfit),
+		// 2..25 itemID (24 items), 26..49 displayItemID (24 items), 50..73 inventoryType (24 items)
+		out.Outfits = make(map[string][]StartOutfitItem)
+		for r := 0; r < f.Records; r++ {
+			v := f.Uint32(r, 1)
+			race := int(v & 0xff)
+			class := int((v >> 8) & 0xff)
+			gender := int((v >> 16) & 0xff)
+			key := fmt.Sprintf("%d_%d_%d", race, class, gender)
+
+			hasMainHand := false
+			var items []StartOutfitItem
+			for i := 0; i < 24; i++ {
+				dispID := int32(f.Uint32(r, 26+i))
+				invType := int32(f.Uint32(r, 50+i))
+				if dispID <= 0 || invType <= 0 {
+					continue
+				}
+				slot := slotForType(invType, hasMainHand)
+				if slot < 0 {
+					continue
+				}
+				if slot == 15 {
+					hasMainHand = true
+				}
+				items = append(items, StartOutfitItem{
+					Slot:          slot,
+					DisplayID:     dispID,
+					InventoryType: invType,
+				})
+			}
+			out.Outfits[key] = items
+		}
+	}
+
 	return out
+}
+
+func slotForType(invType int32, hasMainHand bool) int {
+	switch invType {
+	case 1: // Head
+		return 0
+	case 3: // Shoulders
+		return 2
+	case 4: // Shirt
+		return 3
+	case 5, 20: // Chest, Robe
+		return 4
+	case 6: // Waist
+		return 5
+	case 7: // Legs
+		return 6
+	case 8: // Feet
+		return 7
+	case 9: // Wrists
+		return 8
+	case 10: // Hands
+		return 9
+	case 16: // Cloak
+		return 14
+	case 13: // 1H Weapon
+		if hasMainHand {
+			return 16 // Off hand dual wield
+		}
+		return 15 // Main hand
+	case 17, 21: // 2H Weapon, Main Hand
+		return 15
+	case 14, 22, 23: // Shield, Off Hand, Holdable
+		return 16
+	case 15, 25, 26: // Ranged, Thrown, Ranged Right
+		return 17
+	case 19: // Tabard
+		return 18
+	default:
+		return -1
+	}
 }
 
 // trimStrings drops the trailing empty entries of a list (nil when all are).

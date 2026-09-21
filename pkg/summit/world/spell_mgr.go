@@ -127,7 +127,7 @@ func (sm *SpellMgr) LoadSpells(dbcPath string) error {
 
 func (sm *SpellMgr) loadSupportingDBC(dbcPath string) error {
 	// Load SpellCastTime.dbc
-	castTimes, err := dbc.Load[wotlk.SpellCastTimeEntry]("SpellCastTime.dbc", dbcPath)
+	castTimes, err := dbc.Load[wotlk.SpellCastTimeEntry]("SpellCastTimes.dbc", dbcPath)
 	if err != nil {
 		log.Warn().Err(err).Msg("failed to load SpellCastTime.dbc, using defaults")
 	} else {

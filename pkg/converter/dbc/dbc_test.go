@@ -85,6 +85,12 @@ func TestBuildCharacterData(t *testing.T) {
 	display[2][0] = 7 // icon only: dropped
 	items := [][]uint32{{25, 2, 7, 0, 1, 1542, 21, 3}}
 
+	outfit := make([]uint32, 74)
+	outfit[0] = 1                                // id
+	outfit[1] = 1 | (1 << 8) | (0 << 16)         // race 1 (Human), class 1 (Warrior), gender 0 (Male)
+	outfit[26] = 1542                            // displayId for first item
+	outfit[50] = 13                              // inventoryType 13 (1H weapon)
+
 	read := func(rows [][]uint32) *File {
 		f, err := Read(bytes.NewReader(buildDBC(rows, strs)))
 		if err != nil {
@@ -100,6 +106,7 @@ func TestBuildCharacterData(t *testing.T) {
 		HelmetGeosetVisData: read(helmets),
 		ItemDisplayInfo:     read(display),
 		Item:                read(items),
+		CharStartOutfit:     read([][]uint32{outfit}),
 	})
 
 	if data.Races[1] != (Race{Name: "Human", Prefix: "Hu"}) {
@@ -125,5 +132,10 @@ func TestBuildCharacterData(t *testing.T) {
 	}
 	if _, ok := data.ItemDisplay[7]; ok {
 		t.Error("icon-only display must be dropped")
+	}
+	if items, ok := data.Outfits["1_1_0"]; !ok || len(items) != 1 {
+		t.Errorf("outfit 1_1_0: %+v", data.Outfits["1_1_0"])
+	} else if items[0] != (StartOutfitItem{Slot: 15, DisplayID: 1542, InventoryType: 13}) {
+		t.Errorf("outfit item: %+v", items[0])
 	}
 }

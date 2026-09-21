@@ -9,6 +9,33 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
+// DuelState mirrors AC's DuelState enum (Player.h:355).
+type DuelState uint8
+
+const (
+	DuelStateChallenged DuelState = 0
+	DuelStateCountdown  DuelState = 1
+	DuelStateInProgress DuelState = 2
+	DuelStateCompleted  DuelState = 3
+)
+
+// Attack states.
+const (
+	AttackStateIdle     = 0
+	AttackStateSwinging = 1
+)
+
+// DuelInfo holds duel state for a player.
+type DuelInfo struct {
+	Opponent        *Player
+	Initiator       *Player
+	IsMounted       bool
+	State           DuelState
+	StartTime       time.Time
+	OutOfBoundsTime time.Time
+	FlagGUID        wow.GUID
+}
+
 // PacketSender is the interface used by the map update system to send
 // packets to a player's session.
 type PacketSender interface {
@@ -217,17 +244,37 @@ type Player struct {
 	Actions [48]uint32
 
 	// Attack state
+	// Target is the selected unit (CMSG_SET_SELECTION), 0 for none
+	Target uint64
+
 	AttackTarget   uint64 // GUID of current attack target
 	AttackState    int    // 0 = idle, 1 = swinging
 	NextAttackTime int64  // when next swing happens (Unix ms)
 	BaseDamage     float32
 
+	// Loot state
+	LootGUID   uint64     // GUID of the object being looted
+	ActiveLoot interface{} // *lootSource from loot_handler.go (avoids import cycle)
+
 	// Regen state
 	NextRegenTime int64 // when next regen tick happens (Unix ms)
 
-	// Death state
-	IsGhost   bool
-	DeathTime int64 // when player died (Unix ms)
+	// Combat state
+	FactionID   uint32   // faction template ID (from ChrRaces.dbc)
+	Mounted     bool     // player is mounted (can't attack)
+	InCombat    bool     // player is in combat
+	CombatTime  int64    // when combat started (Unix ms), for 5s rule
+	CombatEnd   int64    // when combat should end (Unix ms)
+	Attackers   map[uint64]bool // GUIDs of units attacking this player
+	IsPVP       bool     // PvP flag enabled
+	IsFFAPVP    bool     // FFA PvP zone
+	IsSanctuary bool     // sanctuary zone (can't PvP)
+	IsGhost     bool     // dead/ghost state
+	DeathTime   int64    // when player died (Unix ms)
+
+	// Chat flood throttle
+	ChatFloodCount   int
+	ChatFloodResetAt time.Time
 
 	// CurrentMap is the map the player is currently on (interface to avoid circular import)
 	CurrentMap interface{}
@@ -236,11 +283,40 @@ type Player struct {
 	// it to send update packets back to the client.
 	Sender PacketSender
 
+	// Quest state — map[uint32]*quest.QuestStatusData stored as interface{}
+	// to avoid circular import with the quest package.
+	QuestStatus interface{}
+
+	// Rewarded quest IDs — map[uint32]bool stored as interface{}
+	RewardedQuests interface{}
+
 	// CurrentMapID is the map ID the player is on
 	CurrentMapID uint32
 
 	// CurrentInstanceID is the instance ID (0 for non-instanced maps)
 	CurrentInstanceID uint32
+
+	// Duel state — stored as interface{} to avoid circular import with world package.
+	// The world package casts this to *world.DuelInfo when needed.
+	Duel interface{}
+
+	// Victim is the current attack target (set when entering combat).
+	// Stored as interface{} to avoid circular import.
+	Victim interface{}
+
+	// Combat stats (populated on login from character data)
+	Strength     uint32
+	Agility      uint32
+	Stamina      uint32
+	Intellect    uint32
+	Spirit       uint32
+	Armor        uint32
+	AttackPower  uint32
+	BaseAttackSpeed time.Duration
+
+	// Weapon damage ranges (min, max) for mainhand and offhand
+	MainHandDamageMin, MainHandDamageMax uint32
+	OffHandDamageMin, OffHandDamageMax   uint32
 }
 
 // InitInventory fills a new character's inventory with its starting outfit
@@ -301,6 +377,14 @@ func (p *Player) Init() {
 		p.Unit = object.NewUnit()
 	}
 
+	// The update system reads the type and update flags off p.Object, which
+	// is a plain object: make it describe a player (living unit with a
+	// stationary position, like Unit::Unit in AzerothCore).
+	p.Object.SetGUID(p.GUID())
+	p.Object.SetObjectTypeID(wow.TypeIDPlayer)
+	p.Object.SetObjectType(wow.TypeMaskObject | wow.TypeMaskPlayer)
+	p.Object.AddUpdateFlags(wow.UpdateFlagLiving | wow.UpdateFlagStationaryPosition)
+
 	// Set default health/mana based on class
 	p.MaxHealth = 100
 	p.Health = 100
@@ -333,6 +417,15 @@ func (p *Player) Init() {
 
 	if p.Inventory == nil {
 		p.Inventory = NewInventory()
+	}
+
+	// Initialize quest state maps
+	if p.QuestStatus == nil {
+		p.QuestStatus = make(map[uint32]interface{})
+	}
+
+	if p.RewardedQuests == nil {
+		p.RewardedQuests = make(map[uint32]bool)
 	}
 
 	// Initialize update field values array
@@ -672,6 +765,278 @@ func (p *Player) IsAlive() bool {
 // IsDead returns true if the player has 0 health.
 func (p *Player) IsDead() bool {
 	return p.Health == 0
+}
+
+// --- CombatUnit interface implementation ---
+
+// IsPlayer returns true (player is always a player).
+func (p *Player) IsPlayer() bool { return true }
+
+// IsCreature returns false for players.
+func (p *Player) IsCreature() bool { return false }
+
+// IsPet returns false for players.
+func (p *Player) IsPet() bool { return false }
+
+// IsTotem returns false for players.
+func (p *Player) IsTotem() bool { return false }
+
+// GetPositionX returns the player's X coordinate.
+func (p *Player) GetPositionX() float32 { return p.Location.X }
+
+// GetPositionY returns the player's Y coordinate.
+func (p *Player) GetPositionY() float32 { return p.Location.Y }
+
+// GetPositionZ returns the player's Z coordinate.
+func (p *Player) GetPositionZ() float32 { return p.Location.Z }
+
+// GetAttackPower returns the player's melee attack power.
+func (p *Player) GetAttackPower() uint32 { return p.AttackPower }
+
+// GetWeaponDamage returns (min, max) damage for the given attack type.
+// attackType: 0=BaseAttack, 1=OffAttack, 2=RangedAttack
+func (p *Player) GetWeaponDamage(attackType uint8) (uint32, uint32) {
+	switch attackType {
+	case 1: // OffAttack
+		return p.OffHandDamageMin, p.OffHandDamageMax
+	default: // BaseAttack
+		return p.MainHandDamageMin, p.MainHandDamageMax
+	}
+}
+
+// GetWeaponSpeed returns the base attack speed for the given attack type.
+func (p *Player) GetWeaponSpeed(_ uint8) time.Duration {
+	if p.BaseAttackSpeed > 0 {
+		return p.BaseAttackSpeed
+	}
+	return 2000 * time.Millisecond // default 2.0s
+}
+
+// GetCombatRating returns the player's combat rating value.
+func (p *Player) GetCombatRating(_ uint8) uint32 {
+	// TODO: load from player ratings table
+	return 0
+}
+
+// GetArmor returns the player's total armor value.
+func (p *Player) GetArmor() uint32 { return p.Armor }
+
+// GetBlockChance returns the player's block chance (0-100).
+func (p *Player) GetBlockChance() float32 {
+	// TODO: calculate from block skill + rating
+	return 0
+}
+
+// GetDodgeChance returns the player's dodge chance (0-100).
+func (p *Player) GetDodgeChance() float32 {
+	// TODO: calculate from agility + defense skill
+	return 0
+}
+
+// GetParryChance returns the player's parry chance (0-100).
+func (p *Player) GetParryChance() float32 {
+	// TODO: calculate from defense skill + rating
+	return 0
+}
+
+// GetCritChance returns the player's melee crit chance (0-100).
+func (p *Player) GetCritChance() float32 {
+	// TODO: calculate from agility + rating
+	return 5.0 // base 5% crit
+}
+
+// GetVictim returns the current combat target.
+func (p *Player) GetVictim() interface{} { return p.Victim }
+
+// SetVictim sets the current combat target.
+func (p *Player) SetVictim(v interface{}) { p.Victim = v }
+
+// AddThreat adds threat from an attacker (placeholder for future threat system).
+func (p *Player) AddThreat(_ interface{}, _ float32) {}
+
+// CombatStop stops all combat actions.
+func (p *Player) CombatStop() {
+	p.AttackState = 0
+	p.AttackTarget = 0
+	p.Victim = nil
+}
+
+// OnDamageTaken is called when this player takes damage.
+func (p *Player) OnDamageTaken(_ interface{}, _ uint32) {}
+
+// OnDamageDealt is called when this player deals damage.
+func (p *Player) OnDamageDealt(_ interface{}, _ uint32) {}
+
+// GetDuelInfo returns the player's duel info.
+func (p *Player) GetDuelInfo() interface{} { return p.Duel }
+
+// SetDuelInfo sets the player's duel info.
+func (p *Player) SetDuelInfo(info interface{}) { p.Duel = info }
+
+// IsMounted returns true if the player is mounted.
+func (p *Player) IsMounted() bool { return p.Mounted }
+
+// IsInSameMap returns true if the other unit is on the same map.
+func (p *Player) IsInSameMap(other interface{}) bool {
+	if other == nil {
+		return false
+	}
+	type mapGetter interface {
+		GetMapID() uint32
+	}
+	if mg, ok := other.(mapGetter); ok {
+		return p.CurrentMapID == mg.GetMapID()
+	}
+	return false
+}
+
+// IsHostileTo returns true if the player is hostile to the other unit.
+func (p *Player) IsHostileTo(other interface{}) bool {
+	if other == nil {
+		return false
+	}
+	// Duel opponents are always hostile
+	if p.Duel != nil {
+		if di, ok := p.Duel.(*DuelInfo); ok && di.Opponent != nil {
+			type guidGetter interface {
+				GetGUID() wow.GUID
+			}
+			if gg, ok := other.(guidGetter); ok {
+				if di.Opponent.GUID() == gg.GetGUID() {
+					return true
+				}
+			}
+		}
+	}
+	// TODO: proper faction template system
+	return false
+}
+
+// IsFriendlyTo returns true if the player is friendly to the other unit.
+func (p *Player) IsFriendlyTo(other interface{}) bool {
+	return !p.IsHostileTo(other)
+}
+
+// IsValidAttackTarget checks if this player can attack the target.
+func (p *Player) IsValidAttackTarget(target interface{}) bool {
+	if target == nil {
+		return false
+	}
+
+	type guidGetter interface {
+		GetGUID() wow.GUID
+	}
+	type aliveChecker interface {
+		IsAlive() bool
+	}
+
+	gg, ok := target.(guidGetter)
+	if !ok {
+		return false
+	}
+
+	ac, ok := target.(aliveChecker)
+	if !ok {
+		return false
+	}
+
+	// Can't attack self
+	if p.GUID() == gg.GetGUID() {
+		return false
+	}
+
+	// Can't attack dead targets
+	if !ac.IsAlive() {
+		return false
+	}
+
+	// Can't attack while mounted
+	if p.Mounted {
+		return false
+	}
+
+	// Can't attack in sanctuary (PvP)
+	if p.IsSanctuary {
+		return false
+	}
+
+	// Duel exception — always allow attacking duel opponent
+	if p.Duel != nil {
+		if di, ok := p.Duel.(*DuelInfo); ok && di.Opponent != nil {
+			if di.Opponent.GUID() == gg.GetGUID() && di.State == DuelStateInProgress {
+				return true
+			}
+		}
+	}
+
+	// PvP checks
+	if p.IsPVP {
+		if pvper, ok := target.(interface{ IsPvP() bool }); ok && pvper.IsPvP() {
+			return true
+		}
+	}
+
+	// TODO: faction reputation checks
+	return !p.IsFriendlyTo(target)
+}
+
+// AddAttacker adds a GUID to the attacker set.
+func (p *Player) AddAttacker(guid wow.GUID) {
+	if p.Attackers == nil {
+		p.Attackers = make(map[uint64]bool)
+	}
+	p.Attackers[uint64(guid)] = true
+}
+
+// RemoveAttacker removes a GUID from the attacker set.
+func (p *Player) RemoveAttacker(guid wow.GUID) {
+	if p.Attackers != nil {
+		delete(p.Attackers, uint64(guid))
+	}
+}
+
+// HasAttacker returns true if the given GUID is in the attacker set.
+func (p *Player) HasAttacker(guid wow.GUID) bool {
+	if p.Attackers == nil {
+		return false
+	}
+	return p.Attackers[uint64(guid)]
+}
+
+// GetAttackers returns the attacker set.
+func (p *Player) GetAttackers() map[uint64]bool {
+	return p.Attackers
+}
+
+// SetInCombat puts the player into combat state.
+func (p *Player) SetInCombat() {
+	p.InCombat = true
+	// TODO: set combat timer (5s rule)
+}
+
+// ClearInCombat removes the player from combat state.
+func (p *Player) ClearInCombat() {
+	p.InCombat = false
+	p.Attackers = nil
+}
+
+// IsInCombatState returns true if the player is in combat.
+func (p *Player) IsInCombatState() bool {
+	return p.InCombat
+}
+
+// Attack initiates combat against a target.
+// The actual implementation is in the world package to avoid circular imports.
+// This is a placeholder that will be called by the world package.
+func (p *Player) Attack(_ interface{}, _ bool) {}
+
+// AttackStop stops the current attack.
+// The actual implementation is in the world package to avoid circular imports.
+func (p *Player) AttackStop() {
+	p.AttackTarget = 0
+	p.AttackState = AttackStateIdle
+	p.NextAttackTime = 0
+	p.Victim = nil
 }
 
 // KnowsSpell returns true if the player knows the given spell.
@@ -1059,4 +1424,20 @@ func GetItemInventoryType(entry uint32) wow.InventoryType {
 	default:
 		return wow.InventoryType(0)
 	}
+}
+
+// ModifyMoney adds (or subtracts if negative) money to the player's coinage.
+func (p *Player) ModifyMoney(amount int32) {
+	newMoney := int64(p.Money) + int64(amount)
+	if newMoney < 0 {
+		newMoney = 0
+	}
+
+	// Cap at 2^32 - 1 (max uint32)
+	if newMoney > 0xFFFFFFFF {
+		newMoney = 0xFFFFFFFF
+	}
+
+	p.Money = uint32(newMoney)
+	p.Object.SetUInt32Value(object.PlayerFieldCoinage, p.Money)
 }

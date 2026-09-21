@@ -100,6 +100,7 @@ func (gc *WorldSession) CreateCharacter(data wow.PacketData) {
 	}
 
 	p.InitInventory(pci.Inventory)
+	gc.initStartingSpells(&p)
 
 	// TODO: error check
 	_ = gc.ws.CreateCharacter(gc.AccountName, &p)
@@ -111,4 +112,34 @@ func (gc *WorldSession) CreateCharacter(data wow.PacketData) {
 	// Send response, then the new character list
 	gc.socket.Send(pkt)
 	gc.SendCharacterEnum()
+}
+
+// initStartingSpells gives a new character the spells and action bar of its
+// race / class (playercreateinfo_spell / playercreateinfo_action).
+func (gc *WorldSession) initStartingSpells(p *player.Player) {
+	server, ok := gc.ws.(*Server)
+	if !ok || server.worldStore == nil {
+		return
+	}
+
+	spells, err := server.worldStore.GetPlayerCreateSpells(uint8(p.Race), uint8(p.Class))
+	if err != nil {
+		gc.log.Warn().Err(err).Msg("cannot load starting spells")
+	} else {
+		p.KnownSpells = spells
+	}
+
+	actions, err := server.worldStore.GetPlayerCreateActions(uint8(p.Race), uint8(p.Class))
+	if err != nil {
+		gc.log.Warn().Err(err).Msg("cannot load starting action bar")
+
+		return
+	}
+
+	for _, a := range actions {
+		if int(a.Button) < len(p.Actions) {
+			// ACTION_BUTTON packing: action id in the low 24 bits, type in the top byte
+			p.Actions[a.Button] = a.Action&0x00FFFFFF | uint32(a.Type)<<24
+		}
+	}
 }

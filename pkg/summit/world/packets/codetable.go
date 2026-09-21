@@ -9,20 +9,19 @@ import (
 
 // TODO: #1 this file should be generated
 
-//nolint:gochecknoinits
-func init() {
-	OpcodeTable = make(Opcodes, int(wow.NumMsgTypes))
+// NewOpcodeTable returns a table with every opcode present and no handler
+// installed. Handlers are closures bound to one session, so every
+// WorldSession owns a table of its own.
+func NewOpcodeTable() Opcodes {
+	table := make(Opcodes, int(wow.NumMsgTypes))
 
 	for i := 0; i < int(wow.NumMsgTypes); i++ {
-		OpcodeTable[i] = &Handler{
+		table[i] = &Handler{
 			Name:    fmt.Sprintf("%v", wow.OpCode(i)),
 			State:   STATUS_NEVER,
 			Handler: "none",
 		}
 	}
-}
 
-// OpcodeTable Correspondence between opcodes and their names.
-//
-//nolint:gochecknoglobals
-var OpcodeTable = Opcodes{}
+	return table
+}

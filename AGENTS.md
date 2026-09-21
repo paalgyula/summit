@@ -47,12 +47,12 @@ Viper-based. Config file: `server.yaml` (or `summit.yaml` in repo root). Env pre
 
 ## Architecture
 
-- **Store layer**: `pkg/store/` defines interfaces (`AccountRepo`, `CharacterRepo`, `WorldRepo`). Implementations: `internal/store/localdb` (YAML-based, uses `summit-store.yaml`), `internal/store/mysqldb`.
+- **Store layer**: `pkg/store/` defines interfaces (`AccountRepo`, `CharacterRepo`, `WorldRepo`). Implementations: `internal/store/mongostore` (MongoDB), `internal/store/mysqldb` (stub).
 - **Auth server**: `pkg/summit/auth/` — SRP6 auth, realm list, gRPC management API.
 - **World server**: `pkg/summit/world/` — game session handling, packet handlers, object manager.
 - **WoW protocol**: `pkg/wow/` — packet types, opcodes (generated), SRP6 crypto, player/object models.
 - **Proto**: `proto/auth/v1/` → generated to `pkg/pb/proto/`.
-- **Config**: `summit.yaml` (runtime config), `summit-store.yaml` (account/character data).
+- **Config**: `summit.yaml` (runtime config).
 - **Web Client**: `client/` — browser-based WoW 3.3.5a client using React, Three.js, Zustand, and WebSockets (see [client/AGENTS.md](file:///Users/paalgyula/Workspace/wow/summit/client/AGENTS.md)).
 
 ## Linting
@@ -69,6 +69,6 @@ golangci-lint. Config `.golangci.yaml`: skips `*_string.go` files and tests. Pre
 
 - `go.mod` declares `go 1.25.0` but CI uses `1.21.0` — version mismatch is intentional per codebase state.
 - `docs/version.go` defines build info vars (`Version`, `Branch`, `Gitsha`, etc.) injected via `-ldflags` in Makefile.
-- Store init in `cmd/summit` uses `localdb.InitYamlDatabase("summit-store.yaml")` — YAML file must exist.
+- Store init in `cmd/summit` uses `mongostore.Connect()` with MongoDB URI from config.
 - `//nolint:all` appears on entry point files — don't add more of these unless intentional.
 - `cmd/worldbaby/` and `cmd/summitbot/` are dev/test tools, not production binaries.

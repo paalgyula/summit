@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -227,7 +228,7 @@ func TestStore_LookupGameObjectSpawn(t *testing.T) {
 
 func TestStore_LookupGameObjectLoot(t *testing.T) {
 	s := &basedata.Store{
-		GOLoots: []*basedata.GameObjectLootEntry{
+		GOLoots: []*loot.LootEntry{
 			{Entry: 5001, Item: 2589, Chance: 50.0},
 			{Entry: 5001, Item: 2590, Chance: 30.0},
 			{Entry: 6001, Item: 3000, Chance: 100.0},

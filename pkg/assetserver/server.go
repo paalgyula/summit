@@ -59,6 +59,10 @@ type Server struct {
 	mpqs     []*mpq.Archive
 	mpqLock  sync.RWMutex
 	inFlight sync.Map
+	// creatures caches the parsed creature DBCs for the display manifests.
+	creatures creatureTables
+	// spells caches Spell.dbc and its lookup tables for the spell manifests.
+	spells spellTables
 }
 
 // NewServer initializes the Echo asset server with standard middlewares.
@@ -305,7 +309,25 @@ func (s *Server) handleAsset(c echo.Context) error {
 		}
 	}
 
-	// 5. Database tables as JSON
+	// 5. Creature display manifests (CreatureDisplayInfo + CreatureModelData)
+	if id, ok := creatureDisplayID(relPath); ok {
+		if err := s.tryJITCreatureDisplay(id, cachedPath); err != nil {
+			s.log.Debug().Err(err).Uint32("display", id).Msg("creature display unavailable")
+			return echo.ErrNotFound
+		}
+		return c.File(cachedPath)
+	}
+
+	// 5a. Spell manifests (Spell.dbc + SpellIcon / SpellCastTimes / SpellRange)
+	if id, ok := spellID(relPath); ok {
+		if err := s.tryJITSpell(id, cachedPath); err != nil {
+			s.log.Debug().Err(err).Uint32("spell", id).Msg("spell unavailable")
+			return echo.ErrNotFound
+		}
+		return c.File(cachedPath)
+	}
+
+	// 5b. Database tables as JSON
 	if relPath == CharacterDataPath {
 		if err := s.tryJITCharacterData(cachedPath); err == nil {
 			return c.File(cachedPath)
@@ -456,7 +478,7 @@ func (s *Server) tryJITCharacterData(cachedPath string) error {
 	var tables dbc.Tables
 	slots := []**dbc.File{
 		&tables.ChrRaces, &tables.CharSections, &tables.CharHairGeosets, &tables.FacialHairStyles,
-		&tables.HelmetGeosetVisData, &tables.ItemDisplayInfo, &tables.Item,
+		&tables.HelmetGeosetVisData, &tables.ItemDisplayInfo, &tables.Item, &tables.CharStartOutfit,
 	}
 	loaded := 0
 	for i, name := range dbc.CharacterTableNames {

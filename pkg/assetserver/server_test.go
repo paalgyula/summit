@@ -1,15 +1,19 @@
 package assetserver
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/paalgyula/summit/pkg/converter/blp"
+	"github.com/paalgyula/summit/pkg/converter/dbc"
 )
 
 func TestAssetServerHealthAndCORS(t *testing.T) {
@@ -64,8 +68,8 @@ func TestAssetServerJITWebP(t *testing.T) {
 	copy(blpData[148:], []byte{0x00, 0xF8, 0x00, 0x00, 0, 0, 0, 0})
 
 	texDir := filepath.Join(tmpDir, "Textures")
-	_ = os.MkdirAll(texDir, 0755)
-	if err := os.WriteFile(filepath.Join(texDir, "Grass.blp"), blpData, 0644); err != nil {
+	_ = os.MkdirAll(texDir, 0o755)
+	if err := os.WriteFile(filepath.Join(texDir, "Grass.blp"), blpData, 0o644); err != nil {
 		t.Fatalf("failed to write test BLP: %v", err)
 	}
 
@@ -112,8 +116,10 @@ func TestAssetServerJITWebP(t *testing.T) {
 
 func TestMPQLoadOrder(t *testing.T) {
 	want := []int{0, 0, 0, 1, 2, 2, 2, 3, 3}
-	got := []string{"Data/common.MPQ", "Data/common-2.MPQ", "Data/lichking.MPQ", "Data/enUS/locale-enUS.MPQ",
-		"Data/patch.MPQ", "Data/patch-2.MPQ", "Data/patch-3.MPQ", "Data/enUS/patch-enUS.MPQ", "Data/enUS/patch-enUS-2.MPQ"}
+	got := []string{
+		"Data/common.MPQ", "Data/common-2.MPQ", "Data/lichking.MPQ", "Data/enUS/locale-enUS.MPQ",
+		"Data/patch.MPQ", "Data/patch-2.MPQ", "Data/patch-3.MPQ", "Data/enUS/patch-enUS.MPQ", "Data/enUS/patch-enUS-2.MPQ",
+	}
 	for i, p := range got {
 		if mpqRank(p) != want[i] {
 			t.Errorf("rank(%s) = %d, want %d", p, mpqRank(p), want[i])
@@ -141,10 +147,10 @@ func TestAssetServerCharacterData(t *testing.T) {
 		file = binary.LittleEndian.AppendUint32(file, v)
 	}
 	file = append(append(file, row...), strs...)
-	if err := os.MkdirAll(filepath.Join(tmpDir, "DBFilesClient"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(tmpDir, "DBFilesClient"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "DBFilesClient", "ChrRaces.dbc"), file, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "DBFilesClient", "ChrRaces.dbc"), file, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,4 +176,97 @@ func TestAssetServerCharacterData(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tmpDir, ".cache", "dbc", "character.json")); err != nil {
 		t.Fatalf("character data not cached: %v", err)
 	}
+}
+
+func TestDebugCreatureDBC(t *testing.T) {
+	srv, err := NewServer(Config{
+		AssetDir: "../../client/assets",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("creature displays count: %d", len(srv.creatures.displays))
+	// Trigger load
+	_, _ = srv.CreatureDisplay(1)
+	t.Logf("load err: %v, displays count: %d, models: %d, extras: %d", srv.creatures.err, len(srv.creatures.displays), len(srv.creatures.models), len(srv.creatures.extras))
+	count := 0
+	for id, row := range srv.creatures.displays {
+		t.Logf("display sample ID: %d, row: %+v", id, row)
+		count++
+		if count > 5 {
+			break
+		}
+	}
+	count = 0
+	for id, row := range srv.creatures.models {
+		t.Logf("model sample ID: %d, row: %+v", id, row)
+		count++
+		if count > 5 {
+			break
+		}
+	}
+	var zeroModelDisplays []uint32
+	var extraWithZeroModel []uint32
+	for id, row := range srv.creatures.displays {
+		if row.modelID == 0 {
+			zeroModelDisplays = append(zeroModelDisplays, id)
+			if row.extraID != 0 {
+				extraWithZeroModel = append(extraWithZeroModel, id)
+			}
+		}
+	}
+	t.Logf("displays with modelID == 0: %d, with extra: %d", len(zeroModelDisplays), len(extraWithZeroModel))
+	// Print raw columns for display 612 and some other displays
+	cdiData, _ := srv.readSource("DBFilesClient/CreatureDisplayInfo.dbc")
+	cdiFile, _ := dbc.Read(bytes.NewReader(cdiData))
+	t.Logf("CDI fields: %d, records: %d, recordSize: %d", cdiFile.Fields, cdiFile.Records, cdiFile.RecordSize)
+	for r := 0; r < 3; r++ {
+		var cols []string
+		for c := 0; c < cdiFile.Fields; c++ {
+			u := cdiFile.Uint32(r, c)
+			s := cdiFile.String(r, c)
+			if s != "" {
+				cols = append(cols, fmt.Sprintf("c%d:str(%s)", c, s))
+			} else {
+				cols = append(cols, fmt.Sprintf("c%d:%d", c, u))
+			}
+		}
+		t.Logf("CDI row %d: %s", r, strings.Join(cols, ", "))
+	}
+
+	// Check texture formats across all displays
+	var examplesWithSlash []string
+	var examplesWithBackslash []string
+	var examplesWithExt []string
+	var examplesEmptyModel []uint32
+	for id, row := range srv.creatures.displays {
+		if _, ok := srv.creatures.models[row.modelID]; !ok {
+			examplesEmptyModel = append(examplesEmptyModel, id)
+		}
+		for _, tex := range row.textures {
+			if tex == "" {
+				continue
+			}
+			if strings.Contains(tex, "/") {
+				examplesWithSlash = append(examplesWithSlash, tex)
+			}
+			if strings.Contains(tex, "\\") {
+				examplesWithBackslash = append(examplesWithBackslash, tex)
+			}
+			if strings.Contains(tex, ".") {
+				examplesWithExt = append(examplesWithExt, tex)
+			}
+		}
+	}
+	t.Logf("textures with /: %d (e.g. %v)", len(examplesWithSlash), head(examplesWithSlash, 3))
+	t.Logf("textures with \\: %d (e.g. %v)", len(examplesWithBackslash), head(examplesWithBackslash, 3))
+	t.Logf("textures with .: %d (e.g. %v)", len(examplesWithExt), head(examplesWithExt, 3))
+	t.Logf("displays missing model: %d", len(examplesEmptyModel))
+}
+
+func head(s []string, n int) []string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }

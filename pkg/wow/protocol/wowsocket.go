@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
@@ -25,6 +26,7 @@ func NewWoWSocket(conn io.ReadWriteCloser) *WoWSocket {
 
 		sendChan:    make(chan *wow.Packet),
 		receiveChan: make(chan *wow.Packet),
+		done:        make(chan struct{}),
 
 		input: wow.NewConnectionReader(conn),
 
@@ -44,6 +46,10 @@ type WoWSocket struct {
 
 	sendChan    chan *wow.Packet
 	receiveChan chan *wow.Packet
+	// done is closed once by Close; Send and the goroutines watch it so a
+	// packet sent to a closed session is dropped instead of panicking.
+	done      chan struct{}
+	closeOnce sync.Once
 
 	input      *wow.PacketReader
 	connection io.ReadWriteCloser
@@ -62,12 +68,13 @@ func (ws *WoWSocket) EnableCrypt() {
 	ws.cryptEnabled = true
 }
 
-// Close closes the socket, and the send/receive channels.
+// Close shuts the connection down. Safe to call more than once and from any
+// goroutine; receiveChan is closed by the reader when it exits.
 func (ws *WoWSocket) Close() error {
-	ws.connection.Close()
-
-	close(ws.receiveChan)
-	close(ws.sendChan)
+	ws.closeOnce.Do(func() {
+		close(ws.done)
+		_ = ws.connection.Close()
+	})
 
 	return nil
 }
@@ -77,9 +84,12 @@ func (ws *WoWSocket) Packets() <-chan *wow.Packet {
 	return ws.receiveChan
 }
 
-// Send sends out the packet.
+// Send queues the packet; it is dropped when the socket is already closed.
 func (ws *WoWSocket) Send(pkt *wow.Packet) {
-	ws.sendChan <- pkt
+	select {
+	case <-ws.done:
+	case ws.sendChan <- pkt:
+	}
 }
 
 func (ws *WoWSocket) SendPayload(pkt *wow.Packet) {
@@ -139,30 +149,39 @@ func (ws *WoWSocket) makeHeader(opcode wow.OpCode, dataSize int) ([]byte, error)
 
 // goroutine for sending out the packets from the receive channel.
 func (ws *WoWSocket) connectionWriter() {
-	for p := range ws.sendChan {
-		ws.SendPayload(p)
+	for {
+		select {
+		case <-ws.done:
+			return
+		case p := <-ws.sendChan:
+			ws.SendPayload(p)
+		}
 	}
 }
 
 // goroutine for reading packets and send it to the
 // receiveChan channel for processing.
 func (ws *WoWSocket) connectionReader() {
+	// The reader is the only sender on receiveChan, so it owns closing it
+	defer close(ws.receiveChan)
+
 	for {
 		// Read the incoming packet data and
 		// decode the header when crypt is enabled
 		opCode, data, err := ws.readPacket()
 		if err != nil {
+			// Any read error leaves the byte stream unsynchronised (a header or
+			// payload was cut short), so the session cannot continue. Retrying
+			// on a closed WebSocket spins forever and floods the log.
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-				ws.log.Error().Msg("connection closed")
-
-				_ = ws.Close()
-
-				return
+				ws.log.Info().Msg("connection closed")
+			} else {
+				ws.log.Error().Err(err).Msg("packet read error, closing connection")
 			}
 
-			ws.log.Error().Err(err).Msg("packet read error occured")
+			_ = ws.Close()
 
-			continue
+			return
 		}
 
 		ws.log.Trace().
@@ -176,7 +195,11 @@ func (ws *WoWSocket) connectionReader() {
 		//  ws.bs.SendPacketToBabies(gc.ID, int(opCode), data)
 		// }
 
-		ws.receiveChan <- wow.NewPacketWithData(opCode, data)
+		select {
+		case <-ws.done:
+			return
+		case ws.receiveChan <- wow.NewPacketWithData(opCode, data):
+		}
 	}
 }
 

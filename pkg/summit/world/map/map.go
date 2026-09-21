@@ -2,6 +2,7 @@ package mapmanager
 
 import (
 	"sync"
+	"time"
 
 	"github.com/paalgyula/summit/pkg/summit/world/areatrigger"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
@@ -32,6 +33,9 @@ type Map struct {
 
 	// visibilityRange is the default visibility range for this map.
 	visibilityRange float32
+
+	// grids is the spatial grid for this map (key: gy*64+gx).
+	grids map[uint32]*MapGrid
 
 	// AreaTriggers on this map
 	areaTriggers []*areatrigger.AreaTrigger
@@ -124,6 +128,39 @@ func (m *Map) GetPlayersCount() int {
 	return len(m.players)
 }
 
+// AddNPC adds an NPC to the map.
+func (m *Map) AddNPC(npc interface{}) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	type guidGetter interface {
+		GetGUID() wow.GUID
+	}
+	type positionProvider interface {
+		GetPosition() *player.WorldLocation
+	}
+	type objectProvider interface {
+		GetNPCObject() *object.Object
+	}
+
+	g, ok := npc.(guidGetter)
+	if !ok {
+		return
+	}
+
+	m.npcs[uint32(g.GetGUID())] = npc
+
+	// Also add to grid for spatial queries
+	if pos, ok := npc.(positionProvider); ok {
+		if obj, ok := npc.(objectProvider); ok {
+			loc := pos.GetPosition()
+			if loc != nil && obj.GetNPCObject() != nil {
+				m.AddObjectToGrid(obj.GetNPCObject(), loc.X, loc.Y, loc.Z)
+			}
+		}
+	}
+}
+
 // HavePlayers returns true if there are players on the map.
 func (m *Map) HavePlayers() bool {
 	m.mutex.RLock()
@@ -177,7 +214,7 @@ func (m *Map) UpdateObjectVisibility(obj *object.Object) {
 			player.Location.X, player.Location.Y,
 		)
 
-		sightRange := GetSightRange(player)
+		sightRange := GetEffectiveSightRange(player, m)
 		if dist <= sightRange {
 			// Player is in range - they should see the update
 			// The value update system will handle sending the changed fields
@@ -209,11 +246,21 @@ func (m *Map) sendCreateToPlayer(source, target *player.Player) {
 	flags := source.Object.UpdateFlags() | wow.UpdateFlagStationaryPosition
 	_ = buf.Write(flags)
 
-	// Stationary position
-	_ = buf.Write(source.Location.X)
-	_ = buf.Write(source.Location.Y)
-	_ = buf.Write(source.Location.Z)
-	_ = buf.Write(source.Location.O)
+	mv := &object.MovementBlock{
+		Flags:   source.MoveFlags &^ wow.MovementFlagOnTransport,
+		Time:    uint32(time.Now().UnixMilli()),
+		X:       source.Location.X,
+		Y:       source.Location.Y,
+		Z:       source.Location.Z,
+		O:       source.Location.O,
+		LowGUID: 0x08,
+	}
+	if source.Unit != nil {
+		mv.Speeds = source.Unit.Speed
+	} else {
+		mv.Speeds = object.DefaultUnitSpeeds()
+	}
+	object.WriteMovementBlock(buf, flags, mv)
 
 	// Values update - full mask for create
 	mask := source.Object.BuildFilteredUpdateMask(target.Object, false)
@@ -274,31 +321,11 @@ func (m *Map) sendNPCCreateToPlayer(npc interface{}, target *player.Player) {
 	flags := wow.UpdateFlagLowGUID | wow.UpdateFlagLiving | wow.UpdateFlagStationaryPosition
 	_ = buf.Write(flags)
 
-	// Movement flags
-	_ = buf.Write(wow.MovementFlagNone)
-	_ = buf.WriteOne(0)  // extra movement flags
-	_ = buf.Write(uint32(0)) // time
-
-	// Stationary position - get from NPC
-	// For now, use zeros - will be improved when NPC has position
-	_ = buf.Write(float32(0)) // X
-	_ = buf.Write(float32(0)) // Y
-	_ = buf.Write(float32(0)) // Z
-	_ = buf.Write(float32(0)) // O
-
-	// Unit speeds
-	_ = buf.Write(float32(2.5))  // walk
-	_ = buf.Write(float32(7.0))  // run
-	_ = buf.Write(float32(4.5))  // run back
-	_ = buf.Write(float32(4.7))  // swim
-	_ = buf.Write(float32(2.5))  // swim back
-	_ = buf.Write(float32(7.0))  // flight
-	_ = buf.Write(float32(4.5))  // flight back
-	_ = buf.Write(float32(7.0))  // turn rate
-	_ = buf.Write(float32(0))    // pitch rate
-
-	// Low GUID
-	_ = buf.WriteUint32(0x0B)
+	mv := &object.MovementBlock{Speeds: object.DefaultUnitSpeeds(), LowGUID: 0x0B}
+	if pos := m.getNPCPosition(npc); pos != nil {
+		mv.X, mv.Y, mv.Z, mv.O = pos.X, pos.Y, pos.Z, pos.O
+	}
+	object.WriteMovementBlock(buf, flags, mv)
 
 	// Values update - full mask for create
 	obj := npcObj.GetNPCObject()
@@ -395,10 +422,19 @@ func (m *Map) SendObjectUpdatesLocked() {
 		}
 	}
 
-	// Build and send updates for each dirty object
+	// Take the dirty set: ClearUpdateMask re-enters the map lock through
+	// RemoveUpdateObject, so it must not run while iterating m.updateObjects.
+	dirty := make([]*object.Object, 0, len(m.updateObjects))
 	for obj := range m.updateObjects {
+		dirty = append(dirty, obj)
+	}
+
+	m.updateObjects = make(map[*object.Object]struct{})
+
+	for _, obj := range dirty {
 		m.sendUpdateForObject(obj, players)
-		obj.ClearUpdateMask()
+		obj.ClearChanges()
+		obj.MarkUpdateSent()
 	}
 }
 
@@ -463,7 +499,7 @@ func (m *Map) updatePlayerVisibilityLocked(p *player.Player) {
 		return
 	}
 
-	sightRange := GetSightRange(p)
+	sightRange := GetEffectiveSightRange(p, m)
 	playerGUID := p.GUID()
 
 	// Check all other players
@@ -509,8 +545,16 @@ func (m *Map) updatePlayerVisibilityLocked(p *player.Player) {
 			npcPos.X, npcPos.Y,
 		)
 
+		// Use the NPC's visibility range if it has an override,
+		// otherwise use the player's sight range.
+		objVisibilityRange := GetVisibilityRange(npcObj, m)
+		effectiveRange := sightRange
+		if objVisibilityRange > effectiveRange {
+			effectiveRange = objVisibilityRange
+		}
+
 		isVisible := m.visibilityTracker.IsVisible(playerGUID, npcObj.GUID())
-		inRange := dist <= sightRange
+		inRange := dist <= effectiveRange
 
 		if inRange && !isVisible {
 			// NPC just came into range - send create

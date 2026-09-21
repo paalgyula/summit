@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/paalgyula/summit/docs"
-	"github.com/paalgyula/summit/internal/store/localdb"
 	"github.com/paalgyula/summit/internal/store/mongostore"
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/auth"
@@ -23,12 +23,16 @@ import (
 )
 
 func init() {
+	// godotenv loads .env into os.Environ — viper picks it up via AutomaticEnv
+	_ = godotenv.Load()
+
 	viper.SetConfigName("server")        // name of config file (without extension)
 	viper.SetConfigType("yaml")          // REQUIRED if the config file does not have the extension in the name
 	viper.AddConfigPath("/etc/summit/")  // path to look for the config file in
 	viper.AddConfigPath("$HOME/.summit") // call multiple times to add many search paths
 	viper.AddConfigPath(".")             // optionally look for config in the working directory
 
+	viper.SetDefault("debug", false)
 	viper.SetDefault("log.level", -1)      // -1 Trace
 	viper.SetDefault("log.format", "json") // Pretty log
 
@@ -47,9 +51,8 @@ func init() {
 	// Seconds a realm stays "online" in the list without a status report.
 	viper.SetDefault("auth.realm_ttl", 30)
 
-	// Store backend: "yaml" (local file) or "mongodb"
-	viper.SetDefault("store.backend", "yaml")
-	viper.SetDefault("store.mongodb.uri", "mongodb://localhost:27017")
+	// MongoDB store configuration
+	viper.SetDefault("store.mongodb.uri", "mongodb://admin:admin@localhost:27017")
 	viper.SetDefault("store.mongodb.database", "summit")
 
 	// Roles: the same binary runs the login server, the world server, or both.
@@ -65,16 +68,35 @@ func init() {
 	viper.SetDefault("world.realm.address", "")
 	viper.SetDefault("world.realm.max_players", 1000)
 
-	// TODO: gRPC transport authentication
-	// viper.SetDefault("auth.management.user", "root")
-	// viper.SetDefault("auth.management.pass", "oauth_token_here")
-
 	// We have some defaults, so we can ignore the config read error.
 	_ = viper.ReadInConfig() // Find and read the config file
 
 	viper.SetEnvPrefix("summit")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // SUMMIT_AUTH_PUBLIC_URL -> auth.public_url
 	viper.AutomaticEnv()
+
+	// Bind DEBUG env var (no prefix — reads plain DEBUG from .env)
+	viper.BindEnv("debug", "DEBUG") //nolint:errcheck
+
+	setupLogger()
+}
+
+func setupLogger() {
+	debug := viper.GetBool("debug")
+	if !debug {
+		log.Logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
+
+		return
+	}
+
+	// Pretty colored console output for humans
+	output := zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05.000"}
+	log.Logger = zerolog.New(output).
+		With().
+		Timestamp().
+		Caller().
+		Logger().
+		Level(zerolog.DebugLevel)
 }
 
 // realmConfig is one entry of the "realms" list in summit.yaml.
@@ -131,52 +153,29 @@ func main() {
 		Str("version", docs.Version).
 		Msg("Starting summit wow server")
 
-	// Initialize store backend
-	backend := strings.ToLower(viper.GetString("store.backend"))
+	// Initialize MongoDB store
+	uri := viper.GetString("store.mongodb.uri")
+	dbName := viper.GetString("store.mongodb.database")
 
-	var (
-		accRepo   store.AccountRepo
-		charRepo  store.CharacterRepo
-		cleanupFn func()
-	)
+	log.Info().Str("uri", uri).Str("db", dbName).Msg("connecting to MongoDB")
 
-	switch backend {
-	case "mongodb", "mongo":
-		uri := viper.GetString("store.mongodb.uri")
-		dbName := viper.GetString("store.mongodb.database")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-		log.Info().Str("uri", uri).Str("db", dbName).Msg("connecting to MongoDB")
+	ms, err := mongostore.Connect(ctx, uri, dbName)
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot connect to MongoDB")
+	}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	accRepo := store.AccountRepo(ms)
+	charRepo := store.CharacterRepo(ms)
+	worldRepo := store.WorldRepo(mongostore.NewWorldStore(ms.DB()))
+
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		ms, err := mongostore.Connect(ctx, uri, dbName)
-		if err != nil {
-			log.Fatal().Err(err).Msg("cannot connect to MongoDB")
-		}
-
-		accRepo = ms
-		charRepo = ms
-		cleanupFn = func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = ms.Close(ctx)
-		}
-
-		log.Info().Msg("using MongoDB store backend")
-
-	default: // "yaml" or anything else
-		yamlStore := localdb.InitYamlDatabase("summit-store.yaml")
-		accRepo = yamlStore
-		charRepo = yamlStore
-		cleanupFn = func() { yamlStore.SaveAll() }
-
-		log.Info().Msg("using YAML file store backend")
-	}
-
-	if cleanupFn != nil {
-		defer cleanupFn()
-	}
+		_ = ms.Close(ctx)
+	}()
 
 	ams := auth.NewManagementService(accRepo)
 	// Static realms are listed as offline until their world server reports in.
@@ -236,7 +235,7 @@ func main() {
 			realmAddress = viper.GetString("world.ws_listen")
 		}
 
-		worldSrv, err := world.NewServer(
+		worldOptions := []world.ServerOption{
 			world.WithEndpoint(viper.GetString("world.listen")),
 			world.WithAuthManagement(management),
 			world.WithRealmIdentity(world.RealmIdentity{
@@ -249,13 +248,22 @@ func main() {
 			}),
 			world.WithBabySocket(),
 			world.WithStaticBaseData(),
-		)
+		}
+
+		// Spell.dbc & friends: without them no spell can be cast
+		if dbcPath := viper.GetString("world.dbc_path"); dbcPath != "" {
+			worldOptions = append(worldOptions, world.WithSpellDBC(dbcPath))
+		} else {
+			log.Warn().Msg("world.dbc_path is not set: spell data unavailable, casts will fail")
+		}
+
+		worldSrv, err := world.NewServer(worldOptions...)
 		if err != nil {
 			log.Fatal().Err(err).
 				Msgf("cannot start world server: %s", err.Error())
 		}
 
-		if err := worldSrv.StartServer(accRepo, charRepo); err != nil {
+		if err := worldSrv.StartServer(worldRepo, charRepo); err != nil {
 			panic(err)
 		}
 

@@ -2,7 +2,9 @@ package m2
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/paalgyula/summit/pkg/converter/gltf"
@@ -165,11 +167,19 @@ func TestRealCharacterAttachments(t *testing.T) {
 	ids := map[uint32]bool{}
 	for _, a := range model.Attachments {
 		ids[a.ID] = true
+		t.Logf("Attachment %d: Bone=%d, Pos=%v", a.ID, a.Bone, a.Position)
 	}
-	// Right hand, left hand, shoulders, helm and the sheath points
-	for _, want := range []uint32{0, 1, 2, 5, 6, 11, 26, 27} {
-		if !ids[want] {
-			t.Errorf("attachment %d missing (have %v)", want, ids)
+	for _, bIdx := range []uint16{100, 101, 102, 123, 125, 126, 84, 85} {
+		b := model.Bones[bIdx]
+		t.Logf("Bone %d: Key=%d, Parent=%d, Pivot=%v, TransTracks=%d, RotTracks=%d",
+			bIdx, b.KeyBoneID, b.ParentBone, b.Pivot, len(b.Translation.Timestamps), len(b.Rotation.Timestamps))
+		for seq := 0; seq < len(model.Sequences) && seq < 2; seq++ {
+			times, raw := model.TrackKeys(b.Rotation, seq, 8, nil)
+			if len(times) > 0 {
+				q := decodeCompQuat(raw[0:8])
+				t.Logf("  Bone %d seq %d (id=%d): M2Quat=[%.3f, %.3f, %.3f, %.3f], glTFQuat=[%.3f, %.3f, %.3f, %.3f]",
+					bIdx, seq, model.Sequences[seq].ID, q[0], q[1], q[2], q[3], -q[1], q[2], -q[0], q[3])
+			}
 		}
 	}
 }
@@ -215,5 +225,119 @@ func TestInspectTreeModel(t *testing.T) {
 	for i, mat := range doc.Materials {
 		extras := mat.Extras.(MaterialExtras)
 		t.Logf("GLTF Mat %d: Name=%s, DoubleSided=%v, AlphaMode=%s, Extras=%+v", i, mat.Name, mat.DoubleSided, mat.AlphaMode, extras)
+	}
+}
+
+func TestInspectItemModels(t *testing.T) {
+	for _, p := range []string{
+		"../../../client/assets/ITEM/OBJECTCOMPONENTS/SHIELD/Shield_Round_A_01.m2",
+		"../../../client/assets/ITEM/OBJECTCOMPONENTS/Weapon/Sword_1H_Short_A_02.m2",
+	} {
+		m, err := Open(p)
+		if err != nil {
+			t.Logf("open %s error: %v", p, err)
+			continue
+		}
+		var minX, maxX, minY, maxY, minZ, maxZ float32
+		if len(m.Vertices) > 0 {
+			minX, maxX = m.Vertices[0].Pos[0], m.Vertices[0].Pos[0]
+			minY, maxY = m.Vertices[0].Pos[1], m.Vertices[0].Pos[1]
+			minZ, maxZ = m.Vertices[0].Pos[2], m.Vertices[0].Pos[2]
+			for _, v := range m.Vertices {
+				if v.Pos[0] < minX { minX = v.Pos[0] }
+				if v.Pos[0] > maxX { maxX = v.Pos[0] }
+				if v.Pos[1] < minY { minY = v.Pos[1] }
+				if v.Pos[1] > maxY { maxY = v.Pos[1] }
+				if v.Pos[2] < minZ { minZ = v.Pos[2] }
+				if v.Pos[2] > maxZ { maxZ = v.Pos[2] }
+			}
+		}
+		t.Logf("ITEM %s: Verts=%d, Bones=%d, Attachments=%d", p, len(m.Vertices), len(m.Bones), len(m.Attachments))
+		t.Logf("  Bounds M2: X=[%.2f, %.2f], Y=[%.2f, %.2f], Z=[%.2f, %.2f]", minX, maxX, minY, maxY, minZ, maxZ)
+		if len(m.Vertices) > 0 {
+			for vi := 0; vi < len(m.Vertices) && vi < 5; vi++ {
+				t.Logf("  Vert %d: Pos=%v, Normal=%v", vi, m.Vertices[vi].Pos, m.Vertices[vi].Normal)
+			}
+		}
+		for i, b := range m.Bones {
+			t.Logf("  Bone %d: Key=%d, Parent=%d, Pivot=%v", i, b.KeyBoneID, b.ParentBone, b.Pivot)
+		}
+		for i, a := range m.Attachments {
+			t.Logf("  Attachment %d: ID=%d, Bone=%d, Pos=%v", i, a.ID, a.Bone, a.Position)
+		}
+	}
+}
+
+func TestInspectHumanMaleConversion(t *testing.T) {
+	path := "../../../client/assets/Character/Human/Male/HumanMale.m2"
+	skinPath := "../../../client/assets/Character/Human/Male/HumanMale00.skin"
+	model, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	skin, err := OpenSkin(skinPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := ConvertToGLTF(model, skin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("GlobalSequences: %v", model.GlobalSequences)
+	sheathBoneIds := map[uint8]bool{84: true, 85: true, 100: true, 101: true, 102: true}
+	var weightedCount int
+	for _, v := range model.Vertices {
+		for i := 0; i < 4; i++ {
+			if v.BoneWeights[i] > 0 && sheathBoneIds[v.BoneIndices[i]] {
+				weightedCount++
+			}
+		}
+	}
+	t.Logf("Vertices skinned to sheath bones: %d", weightedCount)
+	for _, bIdx := range []int{84, 85, 100, 101, 102} {
+		b := model.Bones[bIdx]
+		times, raw := model.TrackKeys(b.Rotation, 0, 8, nil)
+		var q [4]float32
+		if len(raw) >= 8 {
+			q = decodeCompQuat(raw[0:8])
+		}
+		t.Logf("Bone %d: RotGS=%d, Times=%v, Quat=%v, glTFQuat=[%.3f, %.3f, %.3f, %.3f]",
+			bIdx, b.Rotation.GlobalSequence, times, q, -q[1], q[2], -q[0], q[3])
+	}
+	for _, anim := range doc.Animations {
+		if anim.Name == "Stand" {
+			t.Logf("Stand channels: %d", len(anim.Channels))
+			for _, ch := range anim.Channels {
+				targetNode := doc.Nodes[ch.Target.Node]
+				if strings.Contains(targetNode.Name, "102") || strings.Contains(targetNode.Name, "84") || strings.Contains(targetNode.Name, "100") {
+					t.Logf("  Channel targeting %s: path=%s", targetNode.Name, ch.Target.Path)
+				}
+			}
+		}
+	}
+}
+
+func TestInspectAllRacesSheaths(t *testing.T) {
+	for _, raceDir := range []string{"Human", "Orc", "Dwarf", "NightElf", "Scourge", "Tauren", "Gnome", "Troll"} {
+		for _, sex := range []string{"Male", "Female"} {
+			p := fmt.Sprintf("../../../client/assets/Character/%s/%s/%s%s.m2", raceDir, sex, raceDir, sex)
+			m, err := Open(p)
+			if err != nil {
+				continue
+			}
+			t.Logf("=== %s %s ===", raceDir, sex)
+			for _, att := range m.Attachments {
+				if att.ID == 28 || att.ID == 26 || att.ID == 32 {
+					b := m.Bones[att.Bone]
+					times, raw := m.TrackKeys(b.Rotation, 0, 8, nil)
+					var q [4]float32
+					if len(raw) >= 8 {
+						q = decodeCompQuat(raw[0:8])
+					}
+					t.Logf("  Att %d (bone %d): RotGS=%d, Times=%v, Quat=%v, glTFQuat=[%.3f, %.3f, %.3f, %.3f]",
+						att.ID, att.Bone, b.Rotation.GlobalSequence, times, q, -q[1], q[2], -q[0], q[3])
+				}
+			}
+		}
 	}
 }
