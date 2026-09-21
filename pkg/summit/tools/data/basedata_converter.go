@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 
+	cdbc "github.com/paalgyula/summit/pkg/converter/dbc"
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc"
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
@@ -74,6 +76,39 @@ func (dc *Converter) ConvertPlayerCreateInfo() ([]*basedata.PlayerCreateInfo, er
 	return playerCreateInfo, nil
 }
 
+// ConvertItems reads the item templates of Item.dbc: the 8-column client
+// table (id, class, subclass, sound, material, display, inventory type,
+// sheathe) or the 4-column dump (id, display, inventory type, sheathe).
+func (dc *Converter) ConvertItems() ([]*basedata.ItemTemplate, error) {
+	f, err := os.Open(path.Join(dc.dbcBase, "Item.dbc"))
+	if err != nil {
+		return nil, fmt.Errorf("%w: Item.dbc: %w", ErrDBCFileError, err)
+	}
+	defer f.Close()
+
+	table, err := cdbc.Read(f)
+	if err != nil {
+		return nil, fmt.Errorf("%w: Item.dbc: %w", ErrDBCFileError, err)
+	}
+
+	displayCol, typeCol, sheatheCol := 5, 6, 7
+	if table.Fields == 4 {
+		displayCol, typeCol, sheatheCol = 1, 2, 3
+	}
+
+	items := make([]*basedata.ItemTemplate, 0, table.Records)
+	for r := 0; r < table.Records; r++ {
+		items = append(items, &basedata.ItemTemplate{
+			Entry:         table.Uint32(r, 0),
+			DisplayID:     table.Uint32(r, displayCol),
+			InventoryType: wow.InventoryType(table.Uint32(r, typeCol)),
+			SheatheType:   uint8(table.Uint32(r, sheatheCol)),
+		})
+	}
+
+	return items, nil
+}
+
 func (dc *Converter) LoadSpawnData() []*SpawnRecord {
 	r := csv.NewReader(bytes.NewReader(spawnData))
 
@@ -123,6 +158,13 @@ func (dc *Converter) CreateSummitBaseData() error {
 	var err error
 
 	store.PlayerCreateInfo, err = dc.ConvertPlayerCreateInfo()
+	if err != nil {
+		return err
+	}
+
+	log.Info().Msg("Converting item templates")
+
+	store.Items, err = dc.ConvertItems()
 	if err != nil {
 		return err
 	}

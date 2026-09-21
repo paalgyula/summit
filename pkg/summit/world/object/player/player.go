@@ -9,6 +9,12 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
+// PacketSender is the interface used by the map update system to send
+// packets to a player's session.
+type PacketSender interface {
+	Send(pkt *wow.Packet)
+}
+
 type WorldLocation struct {
 	X, Y, Z, O float32
 	Map        uint32
@@ -226,6 +232,10 @@ type Player struct {
 	// CurrentMap is the map the player is currently on (interface to avoid circular import)
 	CurrentMap interface{}
 
+	// Sender is set when the player is added to a session. The map uses
+	// it to send update packets back to the client.
+	Sender PacketSender
+
 	// CurrentMapID is the map ID the player is on
 	CurrentMapID uint32
 
@@ -233,8 +243,10 @@ type Player struct {
 	CurrentInstanceID uint32
 }
 
-// Initializes the inventory. The slots can be nil, in this case it will be initialized as
-// an empty inventory.
+// InitInventory fills a new character's inventory with its starting outfit
+// (CharStartOutfit.dbc): equippable items go to the slot their inventory type
+// selects, the rest (food, drink, ammo) to the backpack. The slots can be
+// nil, in this case the inventory is left empty.
 func (p *Player) InitInventory(slots []*basedata.InventorySlot) {
 	if p.Inventory != nil {
 		return
@@ -242,22 +254,33 @@ func (p *Player) InitInventory(slots []*basedata.InventorySlot) {
 
 	p.Inventory = NewInventory()
 
-	if slots == nil {
-		return
-	}
-
-	for i, slot := range slots {
-		if i >= EquipmentSlotEnd {
-			continue
-		}
-
-		if slot.ItemID <= 0 {
+	for _, slot := range slots {
+		if slot == nil || slot.ItemID <= 0 {
 			continue
 		}
 
 		item := NewItem(uint32(slot.ItemID), p.GUID())
 		item.SetEnchant(0, 0)
-		p.Inventory.SetEquipment(i, item)
+
+		equipSlot := FindEquipSlot(slot.InventoryType)
+		if equipSlot == EquipmentSlotMainHand && p.Inventory.GetEquipment(equipSlot) != nil &&
+			slot.InventoryType == wow.InventoryTypeWeapon {
+			equipSlot = EquipmentSlotOffHand // second one-hander: dual wield
+		}
+
+		if equipSlot >= 0 && p.Inventory.GetEquipment(equipSlot) == nil {
+			p.Inventory.SetEquipment(equipSlot, item)
+
+			continue
+		}
+
+		for i := InventorySlotItemStart; i < InventorySlotItemEnd; i++ {
+			if p.Inventory.GetItem(i) == nil {
+				p.Inventory.SetItem(i, item)
+
+				break
+			}
+		}
 	}
 }
 
@@ -485,7 +508,7 @@ func (p *Player) BuildCreateUpdateForPlayer(target *Player) {
 	}
 
 	//nolint:revive,staticcheck
-	if flags&wow.UpdateFlagHasPosition != 0 {
+	if flags&wow.UpdateFlagStationaryPosition != 0 {
 		// UPDATETYPE_CREATE_OBJECT2 dynamic objects, corpses...
 		// if isType(TYPEMASK_DYNAMICOBJECT) || isType(TYPEMASK_CORPSE) || isType(TYPEMASK_PLAYER) {
 		// 	updatetype = wow.UpdateTypeCreateObject2
@@ -1008,11 +1031,14 @@ func (p *Player) UnequipItem(slot int) *Item {
 	return item
 }
 
-// GetItemInventoryType returns the inventory type for an item entry.
-// This is a placeholder - actual implementation would look up item_template.
+// GetItemInventoryType returns the inventory type for an item entry: from
+// the item templates of the base data, with a range-based fallback for the
+// test items when they are not loaded.
 func GetItemInventoryType(entry uint32) wow.InventoryType {
-	// TODO: Look up from item_template database
-	// For now, return based on entry ranges (hardcoded for testing)
+	if tpl := basedata.GetInstance().LookupItem(entry); tpl != nil {
+		return tpl.InventoryType
+	}
+
 	switch {
 	case entry >= 25000 && entry < 25010:
 		return wow.InventoryTypeHead

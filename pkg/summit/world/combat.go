@@ -231,40 +231,8 @@ func (gc *WorldSession) broadcastHealthUpdate(target *player.Player) {
 		return
 	}
 
-	// Build a values update with just the health field
 	upd := &Updater{}
-	upd.updateFlags = uint8(wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagLiving | wow.UpdateFlagHasPosition)
-
-	// Create update mask with only health
-	mask := &object.UpdateMask{}
-	mask.SetCount(uint32(target.Object.ValuesCount()))
-	mask.SetBit(uint32(object.UnitFieldHealth))
-
-	// Build the values block
-	pkt := wow.NewPacket(wow.ServerUpdateObject)
-
-	_ = pkt.WriteUint32(1) // block count
-	_ = pkt.WriteOne(0)    // has transport
-
-	// Update type
-	_ = pkt.WriteOne(wow.UpdateTypeValues)
-	_ = pkt.Write(target.GUID())
-
-	// Write mask
-	blockCount := mask.GetUpdateBlockCount()
-	for i := uint32(0); i < blockCount; i++ {
-		val := uint32(0)
-		for b := uint32(0); b < 32; b++ {
-			idx := i*32 + b
-			if mask.GetBit(idx) {
-				val |= 1 << b
-			}
-		}
-		_ = pkt.Write(val)
-	}
-
-	// Write health value
-	_ = pkt.Write(target.GetHealth())
+	pkt := upd.BuildValuesUpdateObject(target, target)
 
 	// Send to all
 	for _, other := range server.GetOnlineSessions() {
@@ -283,11 +251,13 @@ func (gc *WorldSession) onTargetDied(target *player.Player) {
 	// Kill the target player
 	target.Die()
 
-	// Send death packet to the dead player
+	// Send death packet and DestroyObject with death animation to all players
 	server, ok := gc.ws.(*Server)
 	if ok {
 		for _, other := range server.GetOnlineSessions() {
 			if other.player != nil && other.player.IsInWorld {
+				// Send DestroyObject with onDeath=true for death animation
+				other.sendDestroyObjectWithDeath(target)
 				other.broadcastPlayerStats()
 			}
 		}

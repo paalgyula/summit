@@ -33,6 +33,10 @@ type RaceClassGenderKey struct {
 func (bd *Store) LookupCharacterCreateInfo(race wow.PlayerRace,
 	class wow.PlayerClass, gender wow.PlayerGender,
 ) *PlayerCreateInfo {
+	if bd == nil {
+		return nil
+	}
+
 	info := bd.playerCreateInfo[RaceClassGenderKey{
 		Race:   race,
 		Class:  class,

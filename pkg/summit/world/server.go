@@ -219,6 +219,14 @@ func (ws *Server) Disconnected(gc *WorldSession, reason string) {
 				other.sendDestroyObject(gc.player.GUID())
 			}
 		}
+
+		// Remove player from map
+		if ws.mapManager != nil {
+			m := ws.mapManager.FindBaseMap(gc.player.Location.Map)
+			if m != nil {
+				m.RemovePlayer(gc.player.ID)
+			}
+		}
 	}
 
 	ws.clients.Delete(gc.ID)

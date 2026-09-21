@@ -94,3 +94,25 @@ func TestDecodeDXT5(t *testing.T) {
 		t.Fatalf("expected full opacity red pixel, got %+v", c)
 	}
 }
+
+func TestDecodePalettedWithoutAlphaIsOpaque(t *testing.T) {
+	// A 2x2 paletted texture with alpha depth 0: the palette's alpha bytes are
+	// zero (as in the character skins), yet the pixels must come out opaque
+	rawBLP := buildTestBLPHeader(2, 2, EncodingUncompressed, 0, 8, 4)
+	// Palette entry 0: BGRA = (10, 20, 30, 0)
+	rawBLP[148+0], rawBLP[148+1], rawBLP[148+2], rawBLP[148+3] = 10, 20, 30, 0
+	// The mip data follows the palette; the header points it at 148, so
+	// rebuild the offset to skip the 1024-byte palette
+	rawBLP = append(rawBLP[:148], append(make([]byte, 1024), 0, 0, 0, 0)...)
+	binary.LittleEndian.PutUint32(rawBLP[20:24], 148+1024)
+	rawBLP[148+0], rawBLP[148+1], rawBLP[148+2], rawBLP[148+3] = 10, 20, 30, 0
+
+	img, err := Decode(bytes.NewReader(rawBLP))
+	if err != nil {
+		t.Fatalf("Decode paletted failed: %v", err)
+	}
+	c := img.At(1, 1).(color.NRGBA)
+	if c != (color.NRGBA{R: 30, G: 20, B: 10, A: 255}) {
+		t.Fatalf("expected opaque (30, 20, 10), got %+v", c)
+	}
+}

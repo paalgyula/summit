@@ -37,19 +37,29 @@ func (um *UpdateMask) GetBit(index uint32) bool {
 	return false
 }
 
-// GetUpdateBlockCount returns the number of update blocks in the UpdateMask.
-//
-// No parameters.
-// uint32.
+// GetUpdateBlockCount returns the number of 32-bit update blocks that
+// contain at least one set bit. This is the value the client uses to
+// determine how many uint32 mask words to read.
 func (um *UpdateMask) GetUpdateBlockCount() uint32 {
-	var x uint32
-	for x = um.blocks - 1; x > 0; x-- {
-		if um.updateMask[x] != 0 {
+	if um.blocks == 0 {
+		return 0
+	}
+
+	// Walk backwards through the byte array to find the last non-zero byte.
+	var lastNonZero int = -1
+	for i := int(um.blocks*4) - 1; i >= 0; i-- {
+		if um.updateMask[i] != 0 {
+			lastNonZero = i
 			break
 		}
 	}
 
-	return (x + 1)
+	if lastNonZero < 0 {
+		return 0
+	}
+
+	// Convert byte index to 32-bit block index (+1 for count).
+	return uint32(lastNonZero/4) + 1
 }
 
 func (um *UpdateMask) BlockCount() uint32 {

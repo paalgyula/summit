@@ -4,7 +4,9 @@ import (
 	"sync"
 
 	"github.com/paalgyula/summit/pkg/summit/world/areatrigger"
+	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog"
 )
 
@@ -20,6 +22,16 @@ type Map struct {
 	players map[uint32]*player.Player
 	npcs    map[uint32]interface{} // NPC interface
 	objects map[uint32]interface{} // GameObject interface
+
+	// updateObjects holds objects that have dirty fields and need
+	// value updates sent to visible players on the next tick.
+	updateObjects map[*object.Object]struct{}
+
+	// visibilityTracker tracks which objects each player can see.
+	visibilityTracker *VisibilityTracker
+
+	// visibilityRange is the default visibility range for this map.
+	visibilityRange float32
 
 	// AreaTriggers on this map
 	areaTriggers []*areatrigger.AreaTrigger
@@ -46,13 +58,16 @@ type MapEntry struct {
 // NewMap creates a new map instance.
 func NewMap(id, instanceID uint32, entry *MapEntry) *Map {
 	return &Map{
-		ID:         id,
-		InstanceID: instanceID,
-		Entry:      entry,
-		players:    make(map[uint32]*player.Player),
-		npcs:       make(map[uint32]interface{}),
-		objects:    make(map[uint32]interface{}),
-		log:        zerolog.Logger{},
+		ID:                id,
+		InstanceID:        instanceID,
+		Entry:             entry,
+		players:           make(map[uint32]*player.Player),
+		npcs:              make(map[uint32]interface{}),
+		objects:           make(map[uint32]interface{}),
+		updateObjects:     make(map[*object.Object]struct{}),
+		visibilityTracker: NewVisibilityTracker(),
+		visibilityRange:   DefaultVisibilityDistance,
+		log:               zerolog.Logger{},
 	}
 }
 
@@ -63,6 +78,7 @@ func (m *Map) AddPlayer(p *player.Player) {
 
 	m.players[p.ID] = p
 	p.IsInWorld = true
+	p.Object.SetUpdater(m)
 }
 
 // RemovePlayer removes a player from the map.
@@ -72,6 +88,9 @@ func (m *Map) RemovePlayer(guid uint32) {
 
 	if p, ok := m.players[guid]; ok {
 		p.IsInWorld = false
+		p.Object.SetUpdater(nil)
+		p.Object.RemoveFromObjectUpdate()
+		m.visibilityTracker.ClearPlayer(p.GUID())
 		delete(m.players, guid)
 	}
 }
@@ -113,16 +132,394 @@ func (m *Map) HavePlayers() bool {
 	return len(m.players) > 0
 }
 
+// UpdatePlayerVisibility checks all objects within range of a player and
+// sends create/destroy packets as needed. This mirrors AzerothCore's
+// Player::UpdateVisibilityForPlayer. Acquires the map lock.
+func (m *Map) UpdatePlayerVisibility(p *player.Player) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.updatePlayerVisibilityLocked(p)
+}
+
+// UpdateObjectVisibility notifies all players within range about changes to an object.
+// This mirrors AzerothCore's WorldObject::UpdateObjectVisibility.
+// Call this when an object's visibility state changes (stealth, faction, etc.)
+func (m *Map) UpdateObjectVisibility(obj *object.Object) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if obj == nil {
+		return
+	}
+
+	// Get object position - for now, only handle players
+	// TODO: Support NPC/GO position lookup
+	var objX, objY float32
+
+	// Check if this is a player object
+	for _, p := range m.players {
+		if p.Object == obj {
+			objX = p.Location.X
+			objY = p.Location.Y
+			break
+		}
+	}
+
+	// Notify all players within range about the change
+	for _, player := range m.players {
+		if !player.IsInWorld || player.Sender == nil {
+			continue
+		}
+
+		dist := Distance2DPositions(
+			objX, objY,
+			player.Location.X, player.Location.Y,
+		)
+
+		sightRange := GetSightRange(player)
+		if dist <= sightRange {
+			// Player is in range - they should see the update
+			// The value update system will handle sending the changed fields
+			// Force the object to be queued for update
+			obj.AddToObjectUpdateIfNeeded()
+		}
+	}
+}
+
+// sendCreateToPlayer sends a create object packet for a player to another player.
+func (m *Map) sendCreateToPlayer(source, target *player.Player) {
+	if target.Sender == nil {
+		return
+	}
+
+	// Build create object packet
+	buf := object.NewUpdateBlockBuffer()
+
+	// Update type: CreateObject
+	_ = buf.WriteOne(int(wow.UpdateTypeCreateObject))
+
+	// GUID
+	_ = buf.Write(source.GUID())
+
+	// Object type ID
+	_ = buf.WriteOne(int(wow.TypeIDPlayer))
+
+	// Update flags
+	flags := source.Object.UpdateFlags() | wow.UpdateFlagStationaryPosition
+	_ = buf.Write(flags)
+
+	// Stationary position
+	_ = buf.Write(source.Location.X)
+	_ = buf.Write(source.Location.Y)
+	_ = buf.Write(source.Location.Z)
+	_ = buf.Write(source.Location.O)
+
+	// Values update - full mask for create
+	mask := source.Object.BuildFilteredUpdateMask(target.Object, false)
+	block := source.Object.BuildValuesUpdateBlock(mask, target.Object)
+	buf.WriteBytes(block)
+
+	// Build packet
+	ud := object.NewUpdateData()
+	ud.AddUpdateBlock(buf.Bytes())
+	pkt := ud.BuildPacket()
+
+	target.Sender.Send(pkt)
+}
+
+// sendDestroyToPlayer sends a destroy object packet for a player to another player.
+func (m *Map) sendDestroyToPlayer(source *player.Player, target *player.Player) {
+	if target.Sender == nil {
+		return
+	}
+
+	// Build destroy packet
+	pkt := wow.NewPacket(wow.ServerDestroyObject)
+	_ = pkt.Write(source.GUID())
+	_ = pkt.WriteOne(0) // not despawn animation
+	target.Sender.Send(pkt)
+}
+
+// sendNPCCreateToPlayer sends a create object packet for an NPC to a player.
+func (m *Map) sendNPCCreateToPlayer(npc interface{}, target *player.Player) {
+	if target.Sender == nil {
+		return
+	}
+
+	// Type assert to get NPC methods
+	type npcProvider interface {
+		GetGUID() wow.GUID
+		GetNPCObject() *object.Object
+	}
+
+	npcObj, ok := npc.(npcProvider)
+	if !ok {
+		return
+	}
+
+	// Build create object packet
+	buf := object.NewUpdateBlockBuffer()
+
+	// Update type: CreateObject
+	_ = buf.WriteOne(int(wow.UpdateTypeCreateObject))
+
+	// GUID
+	_ = buf.Write(npcObj.GetGUID())
+
+	// Object type ID
+	_ = buf.WriteOne(int(wow.TypeIDUnit))
+
+	// Update flags
+	flags := wow.UpdateFlagLowGUID | wow.UpdateFlagLiving | wow.UpdateFlagStationaryPosition
+	_ = buf.Write(flags)
+
+	// Movement flags
+	_ = buf.Write(wow.MovementFlagNone)
+	_ = buf.WriteOne(0)  // extra movement flags
+	_ = buf.Write(uint32(0)) // time
+
+	// Stationary position - get from NPC
+	// For now, use zeros - will be improved when NPC has position
+	_ = buf.Write(float32(0)) // X
+	_ = buf.Write(float32(0)) // Y
+	_ = buf.Write(float32(0)) // Z
+	_ = buf.Write(float32(0)) // O
+
+	// Unit speeds
+	_ = buf.Write(float32(2.5))  // walk
+	_ = buf.Write(float32(7.0))  // run
+	_ = buf.Write(float32(4.5))  // run back
+	_ = buf.Write(float32(4.7))  // swim
+	_ = buf.Write(float32(2.5))  // swim back
+	_ = buf.Write(float32(7.0))  // flight
+	_ = buf.Write(float32(4.5))  // flight back
+	_ = buf.Write(float32(7.0))  // turn rate
+	_ = buf.Write(float32(0))    // pitch rate
+
+	// Low GUID
+	_ = buf.WriteUint32(0x0B)
+
+	// Values update - full mask for create
+	obj := npcObj.GetNPCObject()
+	if obj != nil {
+		mask := obj.BuildFilteredUpdateMask(target.Object, false)
+		block := obj.BuildValuesUpdateBlock(mask, target.Object)
+		buf.WriteBytes(block)
+	}
+
+	// Build packet
+	ud := object.NewUpdateData()
+	ud.AddUpdateBlock(buf.Bytes())
+	pkt := ud.BuildPacket()
+
+	target.Sender.Send(pkt)
+}
+
+// sendNPCDestroyToPlayer sends a destroy object packet for an NPC to a player.
+func (m *Map) sendNPCDestroyToPlayer(obj *object.Object, target *player.Player) {
+	if target.Sender == nil || obj == nil {
+		return
+	}
+
+	// Build destroy packet - use a minimal player-like struct for the GUID
+	pkt := wow.NewPacket(wow.ServerDestroyObject)
+	_ = pkt.Write(obj.GUID())
+	_ = pkt.WriteOne(0) // not despawn animation
+	target.Sender.Send(pkt)
+}
+
+// getNPCObject extracts the Object from an NPC interface.
+func (m *Map) getNPCObject(npc interface{}) *object.Object {
+	type objectProvider interface {
+		GetObject() *object.Object
+	}
+
+	if provider, ok := npc.(objectProvider); ok {
+		return provider.GetObject()
+	}
+	return nil
+}
+
+// getNPCPosition extracts the position from an NPC interface.
+func (m *Map) getNPCPosition(npc interface{}) *player.WorldLocation {
+	type positionProvider interface {
+		GetPosition() *player.WorldLocation
+	}
+
+	if provider, ok := npc.(positionProvider); ok {
+		return provider.GetPosition()
+	}
+	return nil
+}
+
+// AddUpdateObject implements object.ObjectUpdater. It queues an object
+// for value updates on the next tick.
+func (m *Map) AddUpdateObject(obj *object.Object) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.updateObjects[obj] = struct{}{}
+}
+
+// RemoveUpdateObject implements object.ObjectUpdater. It removes an
+// object from the update queue.
+func (m *Map) RemoveUpdateObject(obj *object.Object) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	delete(m.updateObjects, obj)
+}
+
+// SendObjectUpdates drains the update queue and sends value updates to
+// all visible players for each dirty object. Mirrors AzerothCore's
+// Map::SendObjectUpdates. Acquires the map lock.
+func (m *Map) SendObjectUpdates() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.SendObjectUpdatesLocked()
+}
+
+// SendObjectUpdatesLocked is the internal version that assumes the lock is held.
+func (m *Map) SendObjectUpdatesLocked() {
+	if len(m.updateObjects) == 0 {
+		return
+	}
+
+	// Collect players snapshot for building updates outside the lock
+	players := make([]*player.Player, 0, len(m.players))
+	for _, p := range m.players {
+		if p.IsInWorld {
+			players = append(players, p)
+		}
+	}
+
+	// Build and send updates for each dirty object
+	for obj := range m.updateObjects {
+		m.sendUpdateForObject(obj, players)
+		obj.ClearUpdateMask()
+	}
+}
+
+// sendUpdateForObject builds value update packets for a single object
+// and sends them to all visible players.
+func (m *Map) sendUpdateForObject(obj *object.Object, players []*player.Player) {
+	for _, target := range players {
+		if target.Sender == nil {
+			continue
+		}
+
+		// Build incremental values update (only changed + visible fields)
+		mask := obj.BuildIncrementalUpdateMask(target.Object)
+		if mask.GetUpdateBlockCount() == 0 {
+			continue
+		}
+
+		block := obj.BuildValuesUpdateBlock(mask, target.Object)
+
+		// Wrap in SMSG_UPDATE_OBJECT with UPDATETYPE_VALUES
+		ud := object.NewUpdateData()
+		buf := object.NewUpdateBlockBuffer()
+
+		// Update type: Values
+		_ = buf.WriteOne(0) // UPDATETYPE_VALUES = 0
+
+		// GUID
+		_ = buf.Write(obj.GUID())
+
+		// Values block
+		buf.WriteBytes(block)
+
+		ud.AddUpdateBlock(buf.Bytes())
+
+		pkt := ud.BuildPacket()
+		target.Sender.Send(pkt)
+	}
+}
+
 // Update processes map updates.
 func (m *Map) Update(diff uint32) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	// Process player updates
+	// Update visibility for all players (check range, send create/destroy)
 	for _, p := range m.players {
 		if p.IsInWorld {
-			// Player update logic would go here
-			_ = p
+			// Update visibility for this player (check range, send create/destroy)
+			// This is done inside the lock to avoid race conditions
+			m.updatePlayerVisibilityLocked(p)
+		}
+	}
+
+	// Send queued value updates to visible players
+	m.SendObjectUpdatesLocked()
+}
+
+// updatePlayerVisibilityLocked checks all objects within range of a player and
+// sends create/destroy packets as needed. Must be called with m.mutex held.
+func (m *Map) updatePlayerVisibilityLocked(p *player.Player) {
+	if p == nil || !p.IsInWorld || p.Sender == nil {
+		return
+	}
+
+	sightRange := GetSightRange(p)
+	playerGUID := p.GUID()
+
+	// Check all other players
+	for _, other := range m.players {
+		if other.ID == p.ID || !other.IsInWorld {
+			continue
+		}
+
+		// Calculate distance between players
+		dist := Distance2DPositions(
+			p.Location.X, p.Location.Y,
+			other.Location.X, other.Location.Y,
+		)
+
+		isVisible := m.visibilityTracker.IsVisible(playerGUID, other.GUID())
+		inRange := dist <= sightRange
+
+		if inRange && !isVisible {
+			// Player just came into range - send create
+			m.visibilityTracker.SetVisible(playerGUID, other.GUID())
+			m.sendCreateToPlayer(other, p)
+		} else if !inRange && isVisible {
+			// Player went out of range - send destroy
+			m.visibilityTracker.ClearVisible(playerGUID, other.GUID())
+			m.sendDestroyToPlayer(other, p)
+		}
+	}
+
+	// Check all NPCs
+	for _, npc := range m.npcs {
+		npcObj := m.getNPCObject(npc)
+		if npcObj == nil {
+			continue
+		}
+
+		npcPos := m.getNPCPosition(npc)
+		if npcPos == nil {
+			continue
+		}
+
+		dist := Distance2DPositions(
+			p.Location.X, p.Location.Y,
+			npcPos.X, npcPos.Y,
+		)
+
+		isVisible := m.visibilityTracker.IsVisible(playerGUID, npcObj.GUID())
+		inRange := dist <= sightRange
+
+		if inRange && !isVisible {
+			// NPC just came into range - send create
+			m.visibilityTracker.SetVisible(playerGUID, npcObj.GUID())
+			m.sendNPCCreateToPlayer(npc, p)
+		} else if !inRange && isVisible {
+			// NPC went out of range - send destroy
+			m.visibilityTracker.ClearVisible(playerGUID, npcObj.GUID())
+			m.sendNPCDestroyToPlayer(npcObj, p)
 		}
 	}
 }

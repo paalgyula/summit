@@ -3,6 +3,7 @@ package assetserver
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/paalgyula/summit/pkg/converter/adt"
 	"github.com/paalgyula/summit/pkg/converter/blp"
+	"github.com/paalgyula/summit/pkg/converter/dbc"
 	"github.com/paalgyula/summit/pkg/converter/m2"
 	"github.com/paalgyula/summit/pkg/converter/mpq"
 	"github.com/paalgyula/summit/pkg/converter/wmo"
@@ -31,7 +33,12 @@ func init() {
 	_ = mime.AddExtensionType(".gltf", "model/gltf+json")
 	_ = mime.AddExtensionType(".webp", "image/webp")
 	_ = mime.AddExtensionType(".bin", "application/octet-stream")
+	_ = mime.AddExtensionType(".json", "application/json")
 }
+
+// CharacterDataPath is the URL path of the client's character data: the
+// customization and item display tables of the DBCs as one JSON document.
+const CharacterDataPath = "dbc/character.json"
 
 type Config struct {
 	ListenAddr string
@@ -298,7 +305,15 @@ func (s *Server) handleAsset(c echo.Context) error {
 		}
 	}
 
-	// 5. Raw file from MPQs (or upstream) - cache it so future requests never hit them again
+	// 5. Database tables as JSON
+	if relPath == CharacterDataPath {
+		if err := s.tryJITCharacterData(cachedPath); err == nil {
+			return c.File(cachedPath)
+		}
+		return echo.ErrNotFound
+	}
+
+	// 6. Raw file from MPQs (or upstream) - cache it so future requests never hit them again
 	if data, err := s.readSource(relPath); err == nil {
 		if err := writeCacheFile(cachedPath, func(f io.Writer) error {
 			_, err := f.Write(data)
@@ -433,6 +448,43 @@ func (s *Server) tryJITGLB(relPath, cachedPath string) error {
 	}
 
 	return errors.New("source model (M2, WMO or ADT) not found")
+}
+
+// tryJITCharacterData builds the client's character data from the DBC files
+// of the client database (DBFilesClient\*.dbc).
+func (s *Server) tryJITCharacterData(cachedPath string) error {
+	var tables dbc.Tables
+	slots := []**dbc.File{
+		&tables.ChrRaces, &tables.CharSections, &tables.CharHairGeosets, &tables.FacialHairStyles,
+		&tables.HelmetGeosetVisData, &tables.ItemDisplayInfo, &tables.Item,
+	}
+	loaded := 0
+	for i, name := range dbc.CharacterTableNames {
+		data, err := s.readSource("DBFilesClient/" + name)
+		if err != nil {
+			s.log.Warn().Str("file", name).Msg("DBC unavailable for character data")
+			continue
+		}
+		f, err := dbc.Read(bytes.NewReader(data))
+		if err != nil {
+			s.log.Error().Err(err).Str("file", name).Msg("failed to read DBC")
+			continue
+		}
+		*slots[i] = f
+		loaded++
+	}
+	if loaded == 0 {
+		return errors.New("no DBC files available")
+	}
+
+	if err := writeCacheFile(cachedPath, func(f io.Writer) error {
+		return json.NewEncoder(f).Encode(dbc.BuildCharacterData(tables))
+	}); err != nil {
+		s.log.Error().Err(err).Msg("failed to save character data to cache")
+		return err
+	}
+	s.log.Debug().Int("tables", loaded).Msg("built character data from DBCs (cached)")
+	return nil
 }
 
 // writeCacheFile writes a converted asset atomically: into a temporary file

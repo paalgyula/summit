@@ -1,6 +1,9 @@
 package player
 
-import "github.com/paalgyula/summit/pkg/wow"
+import (
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/wow"
+)
 
 // Equipment slot indices (matching C++ EQUIPMENT_SLOT_* constants).
 const (
@@ -153,24 +156,43 @@ func (inv *Inventory) CountItems() int {
 	return count
 }
 
-// ToCharacterEnum writes inventory item display data for the character enum packet.
+// CharEnumSlots is the number of item slots SMSG_CHAR_ENUM describes for a
+// character: the equipment and the four bags (INVENTORY_SLOT_BAG_END).
+const CharEnumSlots = InventorySlotBagEnd - 4
+
+// ToCharacterEnum writes inventory item display data for the character enum
+// packet: the display id and inventory type of the item template in every
+// equipment and bag slot, and its enchant's visual.
 //
 //nolint:errcheck
 func (inv *Inventory) ToCharacterEnum(w *wow.Packet) {
-	for i := 0; i < EquipmentSlotEnd; i++ {
-		var item *Item
-		if i < len(inv.Slots) {
-			item = inv.Slots[i]
+	for i := 0; i < CharEnumSlots; i++ {
+		slot := i
+		if i >= EquipmentSlotEnd {
+			slot = InventorySlotBagStart + (i - EquipmentSlotEnd)
 		}
-		if item == nil {
+
+		var item *Item
+		if slot < len(inv.Slots) {
+			item = inv.Slots[slot]
+		}
+
+		tpl := (*basedata.ItemTemplate)(nil)
+		if item != nil {
+			tpl = basedata.GetInstance().LookupItem(item.ItemEntry)
+		}
+
+		if item == nil || tpl == nil {
 			w.Write(uint32(0)) // DisplayInfoID
 			w.Write(wow.InventoryType(0))
 			w.Write(uint32(0)) // EnchantSlot
-		} else {
-			w.Write(item.ItemEntry)
-			w.Write(SlotToInventoryType(i))
-			w.Write(item.GetEnchant(0))
+
+			continue
 		}
+
+		w.Write(tpl.DisplayID)
+		w.Write(tpl.InventoryType)
+		w.Write(item.GetEnchant(0))
 	}
 }
 
@@ -228,7 +250,7 @@ func FindEquipSlot(inventoryType wow.InventoryType) int {
 		return EquipmentSlotShoulder
 	case wow.InventoryTypeBody:
 		return EquipmentSlotBody
-	case wow.InventoryTypeChest:
+	case wow.InventoryTypeChest, wow.InventoryTypeRobe:
 		return EquipmentSlotChest
 	case wow.InventoryTypeWaist:
 		return EquipmentSlotWaist
@@ -246,13 +268,13 @@ func FindEquipSlot(inventoryType wow.InventoryType) int {
 		return EquipmentSlotTrinket1 // TODO: check if trinket2 is empty
 	case wow.InventoryTypeCloak:
 		return EquipmentSlotBack
-	case wow.InventoryTypeWeaponMainHand:
+	case wow.InventoryTypeWeaponMainHand, wow.InventoryTypeWeapon, wow.InventoryType2hweapon:
 		return EquipmentSlotMainHand
 	case wow.InventoryTypeWeaponOffHand:
 		return EquipmentSlotOffHand
 	case wow.InventoryTypeShield, wow.InventoryTypeHoldable:
 		return EquipmentSlotOffHand
-	case wow.InventoryTypeRanged, wow.InventoryTypeRelic:
+	case wow.InventoryTypeRanged, wow.InventoryTypeRangedRight, wow.InventoryTypeThrown, wow.InventoryTypeRelic:
 		return EquipmentSlotRanged
 	case wow.InventoryTypeTabard:
 		return EquipmentSlotTabard

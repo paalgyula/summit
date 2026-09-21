@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"net"
 	"os"
 	"os/signal"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/paalgyula/summit/docs"
 	"github.com/paalgyula/summit/internal/store/localdb"
+	"github.com/paalgyula/summit/internal/store/mongostore"
+	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	authws "github.com/paalgyula/summit/pkg/summit/auth/ws"
 	"github.com/paalgyula/summit/pkg/summit/world"
@@ -43,6 +46,11 @@ func init() {
 	viper.SetDefault("auth.management.token", "")
 	// Seconds a realm stays "online" in the list without a status report.
 	viper.SetDefault("auth.realm_ttl", 30)
+
+	// Store backend: "yaml" (local file) or "mongodb"
+	viper.SetDefault("store.backend", "yaml")
+	viper.SetDefault("store.mongodb.uri", "mongodb://localhost:27017")
+	viper.SetDefault("store.mongodb.database", "summit")
 
 	// Roles: the same binary runs the login server, the world server, or both.
 	viper.SetDefault("auth.enabled", true)
@@ -123,10 +131,54 @@ func main() {
 		Str("version", docs.Version).
 		Msg("Starting summit wow server")
 
-	store := localdb.InitYamlDatabase("summit-store.yaml")
-	defer store.SaveAll()
+	// Initialize store backend
+	backend := strings.ToLower(viper.GetString("store.backend"))
 
-	ams := auth.NewManagementService(store)
+	var (
+		accRepo   store.AccountRepo
+		charRepo  store.CharacterRepo
+		cleanupFn func()
+	)
+
+	switch backend {
+	case "mongodb", "mongo":
+		uri := viper.GetString("store.mongodb.uri")
+		dbName := viper.GetString("store.mongodb.database")
+
+		log.Info().Str("uri", uri).Str("db", dbName).Msg("connecting to MongoDB")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		ms, err := mongostore.Connect(ctx, uri, dbName)
+		if err != nil {
+			log.Fatal().Err(err).Msg("cannot connect to MongoDB")
+		}
+
+		accRepo = ms
+		charRepo = ms
+		cleanupFn = func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = ms.Close(ctx)
+		}
+
+		log.Info().Msg("using MongoDB store backend")
+
+	default: // "yaml" or anything else
+		yamlStore := localdb.InitYamlDatabase("summit-store.yaml")
+		accRepo = yamlStore
+		charRepo = yamlStore
+		cleanupFn = func() { yamlStore.SaveAll() }
+
+		log.Info().Msg("using YAML file store backend")
+	}
+
+	if cleanupFn != nil {
+		defer cleanupFn()
+	}
+
+	ams := auth.NewManagementService(accRepo)
 	// Static realms are listed as offline until their world server reports in.
 	ams.SetRealmRegistry(auth.NewRealmRegistry(loadRealms(), time.Duration(viper.GetInt("auth.realm_ttl"))*time.Second))
 
@@ -196,13 +248,14 @@ func main() {
 				Timezone:   8,
 			}),
 			world.WithBabySocket(),
+			world.WithStaticBaseData(),
 		)
 		if err != nil {
 			log.Fatal().Err(err).
 				Msgf("cannot start world server: %s", err.Error())
 		}
 
-		if err := worldSrv.StartServer(store, store); err != nil {
+		if err := worldSrv.StartServer(accRepo, charRepo); err != nil {
 			panic(err)
 		}
 

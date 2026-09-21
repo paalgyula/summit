@@ -14,11 +14,20 @@ var DefaultSequences = map[uint16]string{
 	1:  "Death",
 	4:  "Walk",
 	5:  "Run",
+	6:  "Dead",
 	13: "WalkBackwards",
 	16: "AttackUnarmed",
+	17: "Attack1H",
+	18: "Attack2H",
+	25: "ReadyUnarmed",
+	26: "Ready1H",
+	27: "Ready2H",
 	37: "JumpStart",
 	38: "Jump",
 	39: "JumpEnd",
+	40: "Fall",
+	41: "SwimIdle",
+	42: "Swim",
 }
 
 // ConvertOptions tunes ConvertToGLTF.

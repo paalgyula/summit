@@ -53,6 +53,7 @@ Viper-based. Config file: `server.yaml` (or `summit.yaml` in repo root). Env pre
 - **WoW protocol**: `pkg/wow/` — packet types, opcodes (generated), SRP6 crypto, player/object models.
 - **Proto**: `proto/auth/v1/` → generated to `pkg/pb/proto/`.
 - **Config**: `summit.yaml` (runtime config), `summit-store.yaml` (account/character data).
+- **Web Client**: `client/` — browser-based WoW 3.3.5a client using React, Three.js, Zustand, and WebSockets (see [client/AGENTS.md](file:///Users/paalgyula/Workspace/wow/summit/client/AGENTS.md)).
 
 ## Linting
 

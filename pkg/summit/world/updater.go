@@ -10,12 +10,144 @@ import (
 )
 
 type Updater struct {
-	UpdateData  []any
-	updateFlags uint8
+	updateFlags wow.ObjectUpdateFlags
+}
+
+// BuildCreateObject builds a visibility-aware SMSG_UPDATE_OBJECT with a
+// CreateObject or CreateObject2 block for the given player to the target.
+func (upd *Updater) BuildCreateObject(source *player.Player, target *player.Player) *wow.Packet {
+	isSelf := source.GUID() == target.GUID()
+
+	ud := object.NewUpdateData()
+	upd.buildCreateObjectBlock(source, target, isSelf, ud)
+
+	return ud.BuildPacket()
+}
+
+// buildCreateObjectBlock writes a single UPDATETYPE_CREATE_OBJECT(2) block
+// using visibility-filtered fields. Determines CREATE_OBJECT vs CREATE_OBJECT2
+// based on AzerothCore's logic: self, pets, dynamic objects, corpses,
+// specific game object types, and owned game objects use CREATE_OBJECT2.
+func (upd *Updater) buildCreateObjectBlock(source *player.Player, target *player.Player, isSelf bool, ud *object.UpdateData) {
+	updateType := wow.UpdateTypeCreateObject
+
+	flags := source.Object.UpdateFlags()
+	if isSelf {
+		flags |= wow.UpdateFlagSelf
+		updateType = wow.UpdateTypeCreateObject2
+	}
+
+	// Determine CREATE_OBJECT2 based on object type and relationship
+	// (mirrors AzerothCore's BuildCreateUpdateBlockForPlayer logic)
+	if flags&wow.UpdateFlagStationaryPosition != 0 {
+		typeID := source.Object.ObjectTypeID()
+
+		// DynamicObject, Corpse → CREATE_OBJECT2
+		if typeID == wow.TypeIDDynamicoObject || typeID == wow.TypeIDCorpse {
+			updateType = wow.UpdateTypeCreateObject2
+		}
+
+		// TODO: Pet detection — when target's pet GUID matches source GUID
+		// if target.GetPetGUID() == source.GUID() {
+		//     updateType = wow.UpdateTypeCreateObject2
+		// }
+
+		// GameObject type-based decisions
+		if typeID == wow.TypeIDGameObject {
+			goType := source.Object.GameObjectType()
+			switch goType {
+			case wow.GameObjectTypeTrap, wow.GameObjectTypeDuelArbiter,
+				wow.GameObjectTypeFlagStand, wow.GameObjectTypeFlagDrop:
+				updateType = wow.UpdateTypeCreateObject2
+			default:
+				// TODO: if go has an owner, use CREATE_OBJECT2
+				// if source.GetOwner() != nil {
+				//     updateType = wow.UpdateTypeCreateObject2
+				// }
+			}
+		}
+
+		// Units with an attack target get UPDATEFLAG_HAS_TARGET
+		if source.Object.ObjectTypeID() == wow.TypeIDUnit || source.Object.ObjectTypeID() == wow.TypeIDPlayer {
+			if source.AttackTarget != 0 {
+				flags |= wow.UpdateFlagHasTarget
+			}
+		}
+	}
+
+	// Build the block in a temporary buffer
+	buf := object.NewUpdateBlockBuffer()
+
+	// Update type
+	_ = buf.WriteOne(updateType)
+
+	// GUID
+	_ = buf.Write(source.GUID())
+
+	// Object type ID
+	_ = buf.WriteOne(int(source.Object.ObjectTypeID()))
+
+	// Update flags
+	_ = buf.Write(flags)
+
+	// Movement update (flag, position, speeds, etc.)
+	upd.buildMovementUpdate(source, flags, buf)
+
+	// Values update — visibility-filtered
+	upd.buildValuesUpdateFiltered(source, target, isSelf, buf)
+
+	ud.AddUpdateBlock(buf.Bytes())
+}
+
+// buildValuesUpdateFiltered writes a values block using BuildFilteredUpdateMask
+// so only fields visible to the target are included.
+func (upd *Updater) buildValuesUpdateFiltered(source *player.Player, target *player.Player, isSelf bool, buf *object.UpdateBlockBuffer) {
+	mask := source.Object.BuildFilteredUpdateMask(target.Object, isSelf)
+	block := source.Object.BuildValuesUpdateBlock(mask, target.Object)
+	buf.WriteBytes(block)
+}
+
+// BuildValuesUpdateObject builds an incremental SMSG_UPDATE_OBJECT with a
+// Values-only block containing only changed fields visible to the target.
+func (upd *Updater) BuildValuesUpdateObject(source *player.Player, target *player.Player) *wow.Packet {
+	ud := object.NewUpdateData()
+
+	buf := object.NewUpdateBlockBuffer()
+
+	// Update type: Values
+	_ = buf.WriteOne(wow.UpdateTypeValues)
+
+	// GUID
+	_ = buf.Write(source.GUID())
+
+	// Values update — incremental, visibility-filtered
+	mask := source.Object.BuildIncrementalUpdateMask(target.Object)
+	block := source.Object.BuildValuesUpdateBlock(mask, target.Object)
+	buf.WriteBytes(block)
+
+	ud.AddUpdateBlock(buf.Bytes())
+
+	return ud.BuildPacket()
+}
+
+// BuildDestroyObject builds an SMSG_DESTROY_OBJECT packet.
+func BuildDestroyObject(obj *player.Player, onDeath bool) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerDestroyObject)
+
+	_ = pkt.Write(obj.GUID())
+
+	// If true, client calls CGUnit_C::OnDeath() (death animation)
+	if onDeath {
+		_ = pkt.WriteOne(1)
+	} else {
+		_ = pkt.WriteOne(0)
+	}
+
+	return pkt
 }
 
 //nolint:funlen,wsl,cyclop,errcheck
-func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
+func (upd *Updater) buildMovementUpdate(unit any, flags wow.ObjectUpdateFlags, buf *object.UpdateBlockBuffer) {
 	var o *object.Object
 
 	var u *object.Unit
@@ -33,260 +165,221 @@ func (upd *Updater) buildMovementUpdate(unit any, pkt *wow.Packet) {
 		panic(fmt.Sprintf("unknown type: %T", unit))
 	}
 
-	pkt.Write(wow.UpdateTypeMovement)
-	pkt.Write(o.GUID())
+	_ = flags
 
-	moveFlags := wow.MovementFlagNone
+	if flags&wow.UpdateFlagLiving != 0 {
+		moveFlags := o.MovementFlags()
 
-	pkt.Write(upd.updateFlags) // update flags
-
-	if upd.updateFlags&wow.UpdateFlagLiving != 0 {
 		//nolint:exhaustive
 		switch o.GUID().TypeID() {
 		case wow.TypeIDUnit:
-			{
-				moveFlags = o.MovementFlags()
+			moveFlags &= ^wow.MovementFlagOnTransport
+		case wow.TypeIDPlayer:
+			if p != nil && p.Transport() != nil {
+				moveFlags |= wow.MovementFlagOnTransport
+			} else {
 				moveFlags &= ^wow.MovementFlagOnTransport
 			}
-		case wow.TypeIDPlayer:
-			{
-				moveFlags = o.MovementFlags()
+		}
 
-				if p.Transport() != nil {
-					moveFlags |= wow.MovementFlagOnTransport
-				} else {
-					moveFlags &= ^wow.MovementFlagOnTransport
-				}
+		_ = buf.Write(moveFlags)                      // movement flags
+		_ = buf.WriteOne(0)                           // extra movement flags
+		_ = buf.Write(uint32(time.Now().UnixMilli())) // time (in milliseconds)
+
+		// Transport data (when MOVEMENTFLAG_ONTRANSPORT is set)
+		if moveFlags&wow.MovementFlagOnTransport != 0 {
+			if p != nil && p.Transport() != nil {
+				// TODO: write transport packed GUID + offsets (X/Y/Z/O)
+				// For now write zeros as placeholder
+				_ = buf.WriteOne(0) // transport GUID (packed, empty)
+				_ = buf.Write(float32(0)) // offset X
+				_ = buf.Write(float32(0)) // offset Y
+				_ = buf.Write(float32(0)) // offset Z
+				_ = buf.Write(float32(0)) // offset O
+				_ = buf.Write(uint32(0))  // transport seat
 			}
 		}
 
-		pkt.Write(moveFlags)                      // movement flags
-		pkt.WriteOne(0)                           // movemoveFlags
-		pkt.Write(uint32(time.Now().UnixMilli())) // time (in milliseconds)
-	}
-
-	if upd.updateFlags&wow.UpdateFlagHasPosition != 0 {
-		//nolint:gocritic
-		if upd.updateFlags&wow.UpdateFlagTransport != 0 &&
-			o.GameObjectType() == wow.GameObjectTypeMoTransport {
-			pkt.Write(float32(0))
-			pkt.Write(float32(0))
-			pkt.Write(float32(0))
-			// *data << float(((WorldObject*)this)->GetOrientation());
-			pkt.Write(float32(0)) // Orientation
-		} else {
-			// *data << float(((WorldObject*)this)->GetPositionX());
-			pkt.Write(float32(0))
-			// *data << float(((WorldObject*)this)->GetPositionY());
-			pkt.Write(float32(0))
-			// *data << float(((WorldObject*)this)->GetPositionZ());
-			pkt.Write(float32(0))
-			// *data << float(((WorldObject*)this)->GetOrientation());
-			pkt.Write(float32(0))
+		// Swimming / flying pitch (when SWIMMING or FLYING2)
+		if moveFlags&(wow.MovementFlagSwimming|wow.MovementFlagFlying2) != 0 {
+			// TODO: read actual pitch from movement state
+			_ = buf.Write(float32(0)) // pitch
 		}
-	}
 
-	// // 0x20
-	if upd.updateFlags&wow.UpdateFlagLiving != 0 {
-		// {
-		//     // 0x00000200
-		//     if (moveFlags & MOVEMENTFLAG_ONTRANSPORT)
-		//     {
-		//         if (GetTypeId() == TYPEID_PLAYER)
-		//         {
-		//             *data << (uint64)ToPlayer()->GetTransport()->GetGUID();
-		//             *data << (float)ToPlayer()->GetTransOffsetX();
-		//             *data << (float)ToPlayer()->GetTransOffsetY();
-		//             *data << (float)ToPlayer()->GetTransOffsetZ();
-		//             *data << (float)ToPlayer()->GetTransOffsetO();
-		//             *data << (uint32)ToPlayer()->GetTransTime();
-		//         }
-		//         //Oregon currently not have support for other than player on transport
-		//     }
-
-		//     // 0x02200000
-		//     if (moveFlags & (MOVEMENTFLAG_SWIMMING | MOVEMENTFLAG_FLYING2))
-		//     {
-		//         if (GetTypeId() == TYPEID_PLAYER)
-		//             *data << (float)ToPlayer()->m_movementInfo.s_pitch;
-		//         else
-		//             *data << float(0);             // is't part of movement packet, we must store and send it...
-		//     }
-
+		// Fall time — always written for players
 		if o.GUID().TypeID() == wow.TypeIDPlayer {
-			//         *data << (uint32)ToPlayer()->m_movementInfo.GetFallTime();
-			//     else
-			//         *data << uint32(0);                             // last fall time
-			pkt.Write(uint32(0))
+			// TODO: read actual fall time from movement state
+			_ = buf.Write(uint32(0)) // fallTime
 
-			//     // 0x00001000
-			//     if (moveFlags & MOVEMENTFLAG_FALLING)
-			//     {
-			//         if (GetTypeId() == TYPEID_PLAYER)
-			//         {
-			//             *data << float(ToPlayer()->m_movementInfo.j_velocity);
-			//             *data << float(ToPlayer()->m_movementInfo.j_sinAngle);
-			//             *data << float(ToPlayer()->m_movementInfo.j_cosAngle);
-			//             *data << float(ToPlayer()->m_movementInfo.j_xyspeed);
-			//         }
-			//         else
-			//         {
-			//             *data << float(0);
-			//             *data << float(0);
-			//             *data << float(0);
-			//             *data << float(0);
-			//         }
-			//     }
-
-			//     // 0x04000000
-			//     if (moveFlags & MOVEMENTFLAG_SPLINE_ELEVATION)
-			//     {
-			//         if (GetTypeId() == TYPEID_PLAYER)
-			//             *data << float(ToPlayer()->m_movementInfo.u_unk1);
-			//         else
-			//             *data << float(0);
-			//     }
-
-			//     // Unit speeds
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_WALK);
-			pkt.Write(u.GetSpeed(wow.MoveTypeWalk))
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_RUN);
-			pkt.Write(u.GetSpeed(wow.MoveTypeRun))
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_RUN_BACK);
-			pkt.Write(u.GetSpeed(wow.MoveTypeRunBack))
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_SWIM);
-			pkt.Write(u.GetSpeed(wow.MoveTypeSwim))
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_SWIM_BACK);
-			pkt.Write(u.GetSpeed(wow.MoveTypeSwimBack))
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_FLIGHT);
-			pkt.Write(u.GetSpeed(wow.MoveTypeFlight))
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_FLIGHT_BACK);
-			pkt.Write(u.GetSpeed(wow.MoveTypeFlightBack))
-			//     *data << ((Unit*)this)->GetSpeed(MOVE_TURN_RATE);
-			pkt.Write(u.GetSpeed(wow.MoveTypeTurnRate))
-
-			//     // 0x08000000
-			//     if (moveFlags & MOVEMENTFLAG_SPLINE_ENABLED)
-			//         Movement::PacketBuilder::WriteCreate(*((Unit*)this)->movespline, *data);
-		}
-	}
-
-	// // 0x8
-	if upd.updateFlags&wow.UpdateFlagLowGUID != 0 {
-		switch o.GUID().TypeID() {
-		case wow.TypeIDObject, wow.TypeIDItem, wow.TypeIDContainer,
-			wow.TypeIDGameObject, wow.TypeIDDynamicoObject, wow.TypeIDCorpse:
-			pkt.Write(o.GUID().Entry()) // GetGUIDLow()
-		case wow.TypeIDUnit:
-			// *data << uint32(0x0000000B); // unk, can be 0xB or 0xC
-			pkt.WriteUint32(0x0B)
-		case wow.TypeIDPlayer:
-			if upd.updateFlags&wow.UpdateFlagSelf != 0 {
-				// *data << uint32(0x00000015); // unk, can be 0x15 or 0x22
-				pkt.WriteUint32(0x15)
-			} else {
-				// *data << uint32(0x00000008); // unk, can be 0x7 or 0x8
-				pkt.WriteUint32(0x8)
+			// Falling data (velocity, sin/cos angle, xyspeed)
+			if moveFlags&(wow.MovementFlagFalling|wow.MovementFlagFallingFar) != 0 {
+				// TODO: read actual fall data from movement state
+				_ = buf.Write(float32(0)) // velocity Z
+				_ = buf.Write(float32(0)) // sinAngle
+				_ = buf.Write(float32(0)) // cosAngle
+				_ = buf.Write(float32(0)) // xyspeed
 			}
-		default:
-			// *data << uint32(0x00000000); // unk
-			pkt.WriteUint32(0x00000000)
+
+			// Spline elevation
+			if moveFlags&wow.MovementFlagSplineElevation != 0 {
+				// TODO: read actual spline elevation from movement state
+				_ = buf.Write(float32(0)) // u_unk1
+			}
+		}
+
+		// Unit speeds
+		if u != nil {
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeWalk))
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeRun))
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeRunBack))
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeSwim))
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeSwimBack))
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeFlight))
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeFlightBack))
+			_ = buf.Write(u.GetSpeed(wow.MoveTypeTurnRate))
+			_ = buf.Write(float32(0)) // pitch rate (not implemented)
+		}
+
+		// Spline data
+		if moveFlags&wow.MovementFlagSplineEnabled != 0 {
+			// TODO: write spline data from MoveSpline
+			// PacketBuilder::WriteCreate(*unit->movespline, *data)
+			_ = buf.Write(uint32(0)) // spline facing
+			_ = buf.Write(float32(0)) // spline x
+			_ = buf.Write(float32(0)) // spline y
+			_ = buf.Write(float32(0)) // spline z
+			_ = buf.Write(uint32(0)) // spline time
+			_ = buf.Write(uint32(0)) // spline id
 		}
 	}
 
-	// // 0x10
-	if upd.updateFlags&wow.UpdateFlagHighGUID != 0 {
+	// UPDATEFLAG_POSITION (0x100) — transport-attached position
+	if flags&wow.UpdateFlagPosition != 0 {
+		// Transport GUID
+		if p != nil && p.Transport() != nil {
+			// TODO: write transport packed GUID
+			_ = buf.WriteOne(0)
+		} else {
+			_ = buf.WriteOne(0)
+		}
+
+		// Position
+		if p != nil {
+			_ = buf.Write(p.Location.X)
+			_ = buf.Write(p.Location.Y)
+			_ = buf.Write(p.Location.Z)
+		} else {
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+		}
+
+		// Transport offsets or position
+		if p != nil && p.Transport() != nil {
+			// TODO: write transport offsets
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+		} else if p != nil {
+			_ = buf.Write(p.Location.X)
+			_ = buf.Write(p.Location.Y)
+			_ = buf.Write(p.Location.Z)
+		} else {
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+		}
+
+		// Orientation
+		if p != nil {
+			_ = buf.Write(p.Location.O)
+		} else {
+			_ = buf.Write(float32(0))
+		}
+
+		// Corpse orientation (written for corpses, 0 for others)
+		if o.ObjectTypeID() == wow.TypeIDCorpse {
+			if p != nil {
+				_ = buf.Write(p.Location.O)
+			} else {
+				_ = buf.Write(float32(0))
+			}
+		} else {
+			_ = buf.Write(float32(0))
+		}
+	} else if flags&wow.UpdateFlagStationaryPosition != 0 {
+		// Write stationary position from the object's stored position.
+		if p != nil {
+			_ = buf.Write(p.Location.X)
+			_ = buf.Write(p.Location.Y)
+			_ = buf.Write(p.Location.Z)
+			_ = buf.Write(p.Location.O)
+		} else {
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+			_ = buf.Write(float32(0))
+		}
+	}
+
+	// UPDATEFLAG_UNKNOWN (0x8)
+	if flags&wow.UpdateFlagUnknown != 0 {
+		_ = buf.WriteUint32(0)
+	}
+
+	// Low GUID
+	if flags&wow.UpdateFlagLowGUID != 0 {
 		//nolint:exhaustive
 		switch o.GUID().TypeID() {
 		case wow.TypeIDObject, wow.TypeIDItem, wow.TypeIDContainer,
 			wow.TypeIDGameObject, wow.TypeIDDynamicoObject, wow.TypeIDCorpse:
-			pkt.Write(o.GUID().High()) // GetGUIDHigh()
+			_ = buf.Write(o.GUID().Entry())
+		case wow.TypeIDUnit:
+			_ = buf.WriteUint32(0x0B)
+		case wow.TypeIDPlayer:
+			if flags&wow.UpdateFlagSelf != 0 {
+				_ = buf.WriteUint32(0x15)
+			} else {
+				_ = buf.WriteUint32(0x08)
+			}
 		default:
-			pkt.WriteUint32(0x00) // unk
+			_ = buf.WriteUint32(0x00)
 		}
 	}
 
-	// // 0x4
-	// if (updateFlags & UPDATEFLAG_HAS_ATTACKING_TARGET)  // packed guid (probably target guid)
-	// {
-	//     if (Unit const* me = ToUnit())
-	//     {
-	//         if (me->GetVictim())
-	//             *data << me->GetVictim()->GetPackGUID();
-	//         else
-	//             *data << uint8(0);
-	//     }
-	//     else
-	//         *data << uint8(0);
-	// }
-
-	// // 0x2
-	// if (updateFlags & UPDATEFLAG_TRANSPORT)
-	// {
-	//     *data << uint32(getMSTime());                       // ms time
-	// }
-}
-
-func (upd *Updater) BuildUpdateObject(player *player.Player) *wow.Packet {
-	p := wow.NewPacket(wow.ServerUpdateObject)
-
-	_ = p.WriteUint32(1) // block count (1 object)
-	_ = p.WriteOne(0)    // Has transport
-
-	// Write the create object block
-	upd.buildCreateObjectBlock(player, p)
-
-	return p
-}
-
-// buildCreateObjectBlock writes a single UPDATETYPE_CREATE_OBJECT(2) block.
-func (upd *Updater) buildCreateObjectBlock(p *player.Player, pkt *wow.Packet) {
-	// Update type
-	if upd.updateFlags&wow.UpdateFlagSelf != 0 {
-		_ = pkt.WriteOne(wow.UpdateTypeCreateObject2)
-	} else {
-		_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
+	// UPDATEFLAG_HAS_TARGET (0x4) — packed GUID of attack target
+	if flags&wow.UpdateFlagHasTarget != 0 {
+		// TODO: write victim's packed GUID
+		// For now write empty GUID (1 byte zero)
+		_ = buf.WriteOne(0)
 	}
 
-	// GUID
-	_ = pkt.Write(p.GUID())
+	// UPDATEFLAG_TRANSPORT (0x2) — transport path progress
+	if flags&wow.UpdateFlagTransport != 0 {
+		// TODO: write transport path progress (uint32 ms)
+		_ = buf.WriteUint32(0)
+	}
 
-	// Object type ID
-	_ = pkt.WriteOne(int(wow.TypeIDPlayer))
-
-	// Update flags
-	_ = pkt.Write(upd.updateFlags)
-
-	// Movement update (flag, position, speeds, etc.)
-	upd.buildMovementUpdate(p, pkt)
-
-	// Values update (update mask + values block)
-	upd.buildValuesUpdate(p, pkt)
-}
-
-// buildValuesUpdate writes the update mask and values for the player.
-func (upd *Updater) buildValuesUpdate(p *player.Player, pkt *wow.Packet) {
-	mask := p.Object.BuildFullUpdateMask()
-	blockCount := mask.GetUpdateBlockCount()
-
-	// Write update mask (4 bytes per block)
-	for i := uint32(0); i < blockCount; i++ {
-		val := uint32(0)
-		for b := uint32(0); b < 32; b++ {
-			idx := i*32 + b
-			if mask.GetBit(idx) {
-				val |= 1 << b
+	// UPDATEFLAG_VEHICLE (0x80) — vehicle ID + orientation
+	if flags&wow.UpdateFlagVehicle != 0 {
+		// TODO: write vehicle ID from VehicleKit
+		_ = buf.WriteUint32(0)
+		// Write orientation (or transport offset O if on transport)
+		if moveFlags := o.MovementFlags(); moveFlags&wow.MovementFlagOnTransport != 0 {
+			_ = buf.Write(float32(0)) // transport offset O
+		} else {
+			if p != nil {
+				_ = buf.Write(p.Location.O)
+			} else {
+				_ = buf.Write(float32(0))
 			}
 		}
-
-		_ = pkt.Write(val)
 	}
 
-	// Write values (only the fields that are set in the mask)
-	for i := uint32(0); i < blockCount*32; i++ {
-		if mask.GetBit(i) && int(i) < p.Object.ValuesCount() {
-			_ = pkt.Write(p.Object.GetUInt32Value(object.UpdateField(i)))
-		}
+	// UPDATEFLAG_ROTATION (0x200) — packed world rotation for game objects
+	if flags&wow.UpdateFlagRotation != 0 {
+		// TODO: write packed world rotation (int64)
+		_ = buf.Write(int64(0))
 	}
 }
 
@@ -296,97 +389,66 @@ func (upd *Updater) BuildItemCreateObject(item *player.Item, target *player.Play
 		return nil
 	}
 
-	p := wow.NewPacket(wow.ServerUpdateObject)
+	ud := object.NewUpdateData()
+	buf := object.NewUpdateBlockBuffer()
 
-	_ = p.WriteUint32(1) // block count (1 object)
-	_ = p.WriteOne(0)    // Has transport
-
-	// Write the create object block for the item
-	upd.buildItemCreateBlock(item, p)
-
-	return p
-}
-
-// buildItemCreateBlock writes a single UPDATETYPE_CREATE_OBJECT block for an item.
-func (upd *Updater) buildItemCreateBlock(item *player.Item, pkt *wow.Packet) {
 	// Update type
-	_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
+	_ = buf.WriteOne(wow.UpdateTypeCreateObject)
 
 	// GUID
-	_ = pkt.Write(item.GUID())
+	_ = buf.Write(item.GUID())
 
 	// Object type ID
-	_ = pkt.WriteOne(int(wow.TypeIDItem))
+	_ = buf.WriteOne(int(wow.TypeIDItem))
 
-	// Update flags for items: HighGUID | LowGUID | HasPosition (no Living)
-	flags := uint8(wow.UpdateFlagHighGUID | wow.UpdateFlagLowGUID | wow.UpdateFlagHasPosition)
-	_ = pkt.Write(flags)
+	// Update flags for items: LowGUID | StationaryPosition (items don't move)
+	flags := wow.ObjectUpdateFlags(wow.UpdateFlagLowGUID | wow.UpdateFlagStationaryPosition)
+	_ = buf.Write(flags)
 
-	// Movement update (stationary position)
-	_ = pkt.Write(float32(0)) // X
-	_ = pkt.Write(float32(0)) // Y
-	_ = pkt.Write(float32(0)) // Z
-	_ = pkt.Write(float32(0)) // O
+	// Stationary position (items don't move)
+	_ = buf.Write(float32(0)) // X
+	_ = buf.Write(float32(0)) // Y
+	_ = buf.Write(float32(0)) // Z
+	_ = buf.Write(float32(0)) // O
 
 	// Low GUID
-	_ = pkt.Write(item.GUID().Entry())
+	_ = buf.Write(item.GUID().Entry())
 
 	// High GUID
-	_ = pkt.WriteUint32(0) // Item high GUID is 0
+	_ = buf.WriteUint32(0)
 
-	// Values update (update mask + values block)
-	upd.buildItemValuesUpdate(item, pkt)
+	// Values update — visibility-filtered
+	mask := item.Object.BuildFilteredUpdateMask(target.Object, false)
+	block := item.Object.BuildValuesUpdateBlock(mask, target.Object)
+	buf.WriteBytes(block)
+
+	ud.AddUpdateBlock(buf.Bytes())
+
+	return ud.BuildPacket()
 }
 
-// buildItemValuesUpdate writes the update mask and values for an item.
-func (upd *Updater) buildItemValuesUpdate(item *player.Item, pkt *wow.Packet) {
-	mask := item.Object.BuildFullUpdateMask()
-	blockCount := mask.GetUpdateBlockCount()
-
-	// Write update mask (4 bytes per block)
-	for i := uint32(0); i < blockCount; i++ {
-		val := uint32(0)
-		for b := uint32(0); b < 32; b++ {
-			idx := i*32 + b
-			if mask.GetBit(idx) {
-				val |= 1 << b
-			}
-		}
-
-		_ = pkt.Write(val)
-	}
-
-	// Write values (only the fields that are set in the mask)
-	for i := uint32(0); i < blockCount*32; i++ {
-		if mask.GetBit(i) && int(i) < item.Object.ValuesCount() {
-			_ = pkt.Write(item.Object.GetUInt32Value(object.UpdateField(i)))
-		}
-	}
-}
-
-// BuildInventoryUpdate builds an SMSG_UPDATE_OBJECT with values update for player inventory fields.
+// BuildInventoryUpdate builds an SMSG_UPDATE_OBJECT with a values update
+// for the player's inventory fields. Uses the changesMask to only send
+// fields that actually changed.
 func (upd *Updater) BuildInventoryUpdate(p *player.Player) *wow.Packet {
 	if p == nil || p.Object == nil {
 		return nil
 	}
 
-	pkt := wow.NewPacket(wow.ServerUpdateObject)
-
-	_ = pkt.WriteUint32(1) // block count (1 object)
-	_ = pkt.WriteOne(0)    // Has transport
+	ud := object.NewUpdateData()
+	buf := object.NewUpdateBlockBuffer()
 
 	// Update type
-	_ = pkt.WriteOne(wow.UpdateTypeValues)
+	_ = buf.WriteOne(wow.UpdateTypeValues)
 
 	// GUID
-	_ = pkt.Write(p.GUID())
+	_ = buf.Write(p.GUID())
 
-	// Values update mask for inventory fields only
-	// We need to mark the inventory-related fields as dirty
+	// Build mask for inventory-related fields
 	mask := &object.UpdateMask{}
 	mask.SetCount(uint32(p.Object.ValuesCount()))
 
-	// Mark PlayerFieldInvSlotHead through PlayerFieldInvSlotHead + 45 (23 slots * 2)
+	// Mark PlayerFieldInvSlotHead through + 45 (23 slots * 2)
 	for i := 0; i < 46; i++ {
 		field := int(object.PlayerFieldInvSlotHead) + i
 		if field < p.Object.ValuesCount() {
@@ -394,7 +456,7 @@ func (upd *Updater) BuildInventoryUpdate(p *player.Player) *wow.Packet {
 		}
 	}
 
-	// Mark PlayerFieldPackSlot_1 through PlayerFieldPackSlot_1 + 31 (16 slots * 2)
+	// Mark PlayerFieldPackSlot_1 through + 31 (16 slots * 2)
 	for i := 0; i < 32; i++ {
 		field := int(object.PlayerFieldPackSlot_1) + i
 		if field < p.Object.ValuesCount() {
@@ -402,27 +464,105 @@ func (upd *Updater) BuildInventoryUpdate(p *player.Player) *wow.Packet {
 		}
 	}
 
-	blockCount := mask.GetUpdateBlockCount()
+	block := p.Object.BuildValuesUpdateBlock(mask, p.Object)
+	buf.WriteBytes(block)
 
-	// Write update mask
-	for i := uint32(0); i < blockCount; i++ {
-		val := uint32(0)
-		for b := uint32(0); b < 32; b++ {
-			idx := i*32 + b
-			if mask.GetBit(idx) {
-				val |= 1 << b
-			}
-		}
+	ud.AddUpdateBlock(buf.Bytes())
 
-		_ = pkt.Write(val)
-	}
+	return ud.BuildPacket()
+}
 
-	// Write values
-	for i := uint32(0); i < blockCount*32; i++ {
-		if mask.GetBit(i) && int(i) < p.Object.ValuesCount() {
-			_ = pkt.Write(p.Object.GetUInt32Value(object.UpdateField(i)))
-		}
-	}
+// BuildNPCCreateObject builds an SMSG_UPDATE_OBJECT with a create block for an NPC.
+func BuildNPCCreateObject(npc *NPC) *wow.Packet {
+	ud := object.NewUpdateData()
+	buf := object.NewUpdateBlockBuffer()
 
-	return pkt
+	// Update type
+	_ = buf.WriteOne(wow.UpdateTypeCreateObject)
+
+	// GUID
+	_ = buf.Write(npc.GetGUID())
+
+	// Object type ID
+	_ = buf.WriteOne(int(wow.TypeIDUnit))
+
+	// Update flags
+	flags := wow.ObjectUpdateFlags(wow.UpdateFlagLowGUID | wow.UpdateFlagLiving | wow.UpdateFlagStationaryPosition)
+	_ = buf.Write(flags)
+
+	// Movement flags
+	_ = buf.Write(wow.MovementFlagNone)
+	_ = buf.WriteOne(0)                           // extra movement flags
+	_ = buf.Write(uint32(0))                      // time
+
+	// Stationary position
+	_ = buf.Write(float32(npc.X))
+	_ = buf.Write(float32(npc.Y))
+	_ = buf.Write(float32(npc.Z))
+	_ = buf.Write(float32(npc.O))
+
+	// Unit speeds
+	_ = buf.Write(float32(2.5))  // walk
+	_ = buf.Write(float32(7.0))  // run
+	_ = buf.Write(float32(4.5))  // run back
+	_ = buf.Write(float32(4.7))  // swim
+	_ = buf.Write(float32(2.5))  // swim back
+	_ = buf.Write(float32(7.0))  // flight
+	_ = buf.Write(float32(4.5))  // flight back
+	_ = buf.Write(float32(7.0))  // turn rate
+
+	// Low GUID
+	_ = buf.WriteUint32(0x0B)
+
+	// High GUID
+	_ = buf.WriteUint32(0x00)
+
+	// Values update — full mask (create block)
+	mask := npc.Object.BuildFullUpdateMask()
+	block := npc.Object.BuildValuesUpdateBlock(mask, nil)
+	buf.WriteBytes(block)
+
+	ud.AddUpdateBlock(buf.Bytes())
+
+	return ud.BuildPacket()
+}
+
+// BuildGameObjectCreateObject builds an SMSG_UPDATE_OBJECT with a create block for a game object.
+func BuildGameObjectCreateObject(gobj *GameObject) *wow.Packet {
+	ud := object.NewUpdateData()
+	buf := object.NewUpdateBlockBuffer()
+
+	// Update type
+	_ = buf.WriteOne(wow.UpdateTypeCreateObject)
+
+	// GUID
+	_ = buf.Write(gobj.GetGUID())
+
+	// Object type ID
+	_ = buf.WriteOne(int(wow.TypeIDGameObject))
+
+	// Update flags
+	flags := wow.ObjectUpdateFlags(wow.UpdateFlagLowGUID | wow.UpdateFlagStationaryPosition | wow.UpdateFlagRotation)
+	_ = buf.Write(flags)
+
+	// Stationary position
+	_ = buf.Write(float32(gobj.X))
+	_ = buf.Write(float32(gobj.Y))
+	_ = buf.Write(float32(gobj.Z))
+	_ = buf.Write(float32(gobj.O))
+
+	// Low GUID
+	_ = buf.WriteUint32(0x0B)
+
+	// High GUID
+	_ = buf.WriteUint32(0x00)
+
+	// Values update — full mask (create block)
+	mask := gobj.Object.BuildFullUpdateMask()
+	block := gobj.Object.BuildValuesUpdateBlock(mask, nil)
+	buf.WriteBytes(block)
+
+	ud.AddUpdateBlock(buf.Bytes())
+
+	return ud.BuildPacket()
 }

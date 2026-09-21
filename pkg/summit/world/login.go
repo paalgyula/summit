@@ -3,7 +3,6 @@ package world
 import (
 	"time"
 
-	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -53,6 +52,7 @@ func (gc *WorldSession) HandlePlayerLogin(data wow.PacketData) {
 
 	// Store player in session
 	gc.player = p
+	p.Sender = gc
 
 	// Initialize player values (health, power, display, update fields)
 	p.Init()
@@ -196,6 +196,13 @@ func (gc *WorldSession) addPlayerToMap(p *player.Player) {
 	// Mark player as in world
 	p.IsInWorld = true
 
+	// Add player to the map for update queue tracking
+	server, ok := gc.ws.(*Server)
+	if ok && server.mapManager != nil {
+		m := server.mapManager.CreateBaseMap(p.Location.Map)
+		m.AddPlayer(p)
+	}
+
 	// Send existing players to the new player, and the new player to existing players
 	gc.sendVisiblePlayers(p)
 
@@ -239,87 +246,13 @@ func (gc *WorldSession) sendVisiblePlayers(p *player.Player) {
 // for the given player to the target session.
 func (gc *WorldSession) sendCreateObjectForPlayer(source *player.Player, target *player.Player) {
 	upd := &Updater{}
-
-	// Build update flags for the source player
-	flags := uint8(wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagLiving | wow.UpdateFlagHasPosition)
-	if source.GUID() == target.GUID() {
-		flags |= wow.UpdateFlagSelf
-	}
-	upd.updateFlags = flags
-
-	pkt := upd.BuildUpdateObject(source)
+	pkt := upd.BuildCreateObject(source, target)
 	gc.socket.Send(pkt)
 }
 
 // sendCreateObjectForNPC sends SMSG_UPDATE_OBJECT with a create block for an NPC.
 func (gc *WorldSession) sendCreateObjectForNPC(npc *NPC) {
-	pkt := wow.NewPacket(wow.ServerUpdateObject)
-
-	_ = pkt.WriteUint32(1) // block count
-	_ = pkt.WriteOne(0)    // has transport
-
-	// Update type
-	_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
-
-	// GUID
-	_ = pkt.Write(npc.GetGUID())
-
-	// Object type ID
-	_ = pkt.WriteOne(int(wow.TypeIDUnit))
-
-	// Update flags
-	flags := uint8(wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagLiving | wow.UpdateFlagHasPosition)
-	_ = pkt.Write(flags)
-
-	// Movement flags
-	_ = pkt.Write(wow.MovementFlagNone)
-	_ = pkt.WriteOne(0)                           // extra movement flags
-	_ = pkt.Write(uint32(0))                      // time
-	_ = pkt.Write(float32(npc.X))                 // X
-	_ = pkt.Write(float32(npc.Y))                 // Y
-	_ = pkt.Write(float32(npc.Z))                 // Z
-	_ = pkt.Write(float32(npc.O))                 // O
-
-	// Unit speeds
-	_ = pkt.Write(float32(2.5))  // walk
-	_ = pkt.Write(float32(7.0))  // run
-	_ = pkt.Write(float32(4.5))  // run back
-	_ = pkt.Write(float32(4.7))  // swim
-	_ = pkt.Write(float32(2.5))  // swim back
-	_ = pkt.Write(float32(7.0))  // flight
-	_ = pkt.Write(float32(4.5))  // flight back
-	_ = pkt.Write(float32(7.0))  // turn rate
-
-	// Low GUID
-	_ = pkt.WriteUint32(0x0B) // unk for units
-
-	// High GUID
-	_ = pkt.WriteUint32(0x00) // unk
-
-	// Values update
-	mask := npc.Object.BuildFullUpdateMask()
-	blockCount := mask.GetUpdateBlockCount()
-
-	// Write mask
-	for i := uint32(0); i < blockCount; i++ {
-		val := uint32(0)
-		for b := uint32(0); b < 32; b++ {
-			idx := i*32 + b
-			if mask.GetBit(idx) {
-				val |= 1 << b
-			}
-		}
-
-		_ = pkt.Write(val)
-	}
-
-	// Write values
-	for i := uint32(0); i < blockCount*32; i++ {
-		if mask.GetBit(i) && int(i) < npc.Object.ValuesCount() {
-			_ = pkt.Write(npc.Object.GetUInt32Value(object.UpdateField(i)))
-		}
-	}
-
+	pkt := BuildNPCCreateObject(npc)
 	gc.socket.Send(pkt)
 }
 
@@ -444,78 +377,12 @@ func (gc *WorldSession) sendInitialTalents(_ *player.Player) {
 // sendPlayerCreate sends the initial SMSG_UPDATE_OBJECT for the player's own creation.
 func (gc *WorldSession) sendPlayerCreate(p *player.Player) {
 	upd := &Updater{}
-
-	// Build update flags
-	flags := uint8(wow.UpdateFlagSelf | wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagLiving | wow.UpdateFlagHasPosition)
-	upd.updateFlags = flags
-
-	// Build update object
-	pkt := upd.BuildUpdateObject(p)
-
+	pkt := upd.BuildCreateObject(p, p)
 	gc.socket.Send(pkt)
 }
 
 // sendCreateObjectForGameObject sends SMSG_UPDATE_OBJECT with a create block for a game object.
 func (gc *WorldSession) sendCreateObjectForGameObject(gobj *GameObject) {
-	pkt := wow.NewPacket(wow.ServerUpdateObject)
-
-	_ = pkt.WriteUint32(1) // block count
-	_ = pkt.WriteOne(0)    // has transport
-
-	// Update type
-	_ = pkt.WriteOne(wow.UpdateTypeCreateObject)
-
-	// GUID
-	_ = pkt.Write(gobj.GetGUID())
-
-	// Object type ID
-	_ = pkt.WriteOne(int(wow.TypeIDGameObject))
-
-	// Update flags for game object
-	flags := uint8(wow.UpdateFlagLowGUID | wow.UpdateFlagHighGUID | wow.UpdateFlagHasPosition)
-	_ = pkt.Write(flags)
-
-	// Stationary position (game objects don't move)
-	_ = pkt.Write(float32(gobj.X))
-	_ = pkt.Write(float32(gobj.Y))
-	_ = pkt.Write(float32(gobj.Z))
-	_ = pkt.Write(float32(gobj.O))
-
-	// Rotation quaternion (0, 0, 0, 1 = no rotation)
-	_ = pkt.Write(float32(0))
-	_ = pkt.Write(float32(0))
-	_ = pkt.Write(float32(0))
-	_ = pkt.Write(float32(1))
-
-	// Low GUID
-	_ = pkt.WriteUint32(0x0B) // unk for game objects
-
-	// High GUID
-	_ = pkt.WriteUint32(0x00) // unk
-
-	// Values update
-	mask := gobj.Object.BuildFullUpdateMask()
-	blockCount := mask.GetUpdateBlockCount()
-
-	// Write mask
-	for i := uint32(0); i < blockCount; i++ {
-		val := uint32(0)
-		for b := uint32(0); b < 32; b++ {
-			idx := i*32 + b
-			if mask.GetBit(idx) {
-				val |= 1 << b
-			}
-		}
-
-		_ = pkt.Write(val)
-	}
-
-	// Write values
-	for i := uint32(0); i < blockCount*32; i++ {
-		if mask.GetBit(i) && int(i) < gobj.Object.ValuesCount() {
-			_ = pkt.Write(gobj.Object.GetUInt32Value(object.UpdateField(i)))
-		}
-	}
-
+	pkt := BuildGameObjectCreateObject(gobj)
 	gc.socket.Send(pkt)
 }

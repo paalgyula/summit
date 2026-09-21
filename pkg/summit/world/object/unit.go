@@ -14,9 +14,8 @@ func NewUnit() *Unit {
 	obj := NewObject()
 
 	obj.AddUpdateFlags(
-		wow.UpdateFlagHighGUID |
-			wow.UpdateFlagLiving |
-			wow.UpdateFlagHasPosition,
+		wow.UpdateFlagLiving |
+			wow.UpdateFlagStationaryPosition,
 	)
 
 	obj.objectType |= wow.TypeMaskUnit

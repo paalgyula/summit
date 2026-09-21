@@ -60,6 +60,13 @@ func (gc *WorldSession) CreateCharacter(data wow.PacketData) {
 
 	pci := basedata.GetInstance().
 		LookupCharacterCreateInfo(req.Race, req.Class, req.Gender)
+	if pci == nil {
+		log.Error().Uint8("race", uint8(req.Race)).Uint8("class", uint8(req.Class)).
+			Msg("no player create info: is the base data (summit.dat) loaded?")
+		gc.socket.Send(wow.NewPacketWithData(wow.ServerCharCreate, []byte{0x2E})) // CHAR_CREATE_FAILED
+
+		return
+	}
 
 	loc := player.WorldLocation{
 		X:    pci.X,

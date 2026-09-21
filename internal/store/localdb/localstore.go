@@ -142,6 +142,27 @@ func (db *LocalStore) CreateCharacter(account string, character *player.Player) 
 	return fmt.Errorf("account %s not found", account)
 }
 
+// UpdateCharacter updates an existing character in the store.
+func (db *LocalStore) UpdateCharacter(character *player.Player) error {
+	for _, a := range db.Accounts {
+		var pp player.Players
+		if err := a.Characters(&pp); err != nil {
+			continue
+		}
+
+		for i, p := range pp {
+			if p.ID == character.ID {
+				pp[i] = character
+				a.UpdateCharacters(pp)
+
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("character %d not found", character.ID)
+}
+
 // DeleteCharacter removes character from db.
 func (db *LocalStore) DeleteCharacter(characterID int) error {
 	for _, a := range db.Accounts {

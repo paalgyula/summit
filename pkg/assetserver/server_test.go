@@ -2,6 +2,7 @@ package assetserver
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -123,5 +124,50 @@ func TestMPQLoadOrder(t *testing.T) {
 	}
 	if !isLocaleDir("enUS") || isLocaleDir("Data") || isLocaleDir("Interface") {
 		t.Errorf("isLocaleDir")
+	}
+}
+
+func TestAssetServerCharacterData(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// A one-race ChrRaces.dbc: 69 columns, the client prefix and name as strings
+	strs := []byte("\x00Hu\x00Human\x00")
+	row := make([]byte, 69*4)
+	binary.LittleEndian.PutUint32(row[0:], 1)
+	binary.LittleEndian.PutUint32(row[6*4:], 1)
+	binary.LittleEndian.PutUint32(row[14*4:], 4)
+	file := []byte("WDBC")
+	for _, v := range []uint32{1, 69, 69 * 4, uint32(len(strs))} {
+		file = binary.LittleEndian.AppendUint32(file, v)
+	}
+	file = append(append(file, row...), strs...)
+	if err := os.MkdirAll(filepath.Join(tmpDir, "DBFilesClient"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "DBFilesClient", "ChrRaces.dbc"), file, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, err := NewServer(Config{AssetDir: tmpDir})
+	if err != nil {
+		t.Fatalf("NewServer failed: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/"+CharacterDataPath, nil)
+	w := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var data struct {
+		Races map[string]struct{ Name, Prefix string } `json:"races"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &data); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if data.Races["1"].Name != "Human" || data.Races["1"].Prefix != "Hu" {
+		t.Fatalf("unexpected races: %+v", data.Races)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".cache", "dbc", "character.json")); err != nil {
+		t.Fatalf("character data not cached: %v", err)
 	}
 }

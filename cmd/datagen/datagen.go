@@ -19,19 +19,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func main() {
-	rootCmd := &cobra.Command{
-		Use:   "datagen",
-		Short: "A CLI tool for generating files and converting WoW assets",
-		Long:  "A CLI tool to generate/re-generate required assets and convert MPQ, BLP, M2, ADT, and WMO assets for web and server",
-		Run: func(cmd *cobra.Command, args []string) {
-			if len(args) == 0 {
-				_ = cmd.Help()
-				os.Exit(0)
-			}
-		},
-	}
+var rootCmd = &cobra.Command{
+	Use:   "datagen",
+	Short: "A CLI tool for generating files and converting WoW assets",
+	Long:  "A CLI tool to generate/re-generate required assets and convert MPQ, BLP, M2, ADT, and WMO assets for web and server",
+	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) == 0 {
+			_ = cmd.Help()
+			os.Exit(0)
+		}
+	},
+}
 
+func main() {
 	rootCmd.AddCommand(convertDBC())
 	rootCmd.AddCommand(opcodeGenCommand())
 	rootCmd.AddCommand(headerConvertCommand())
@@ -40,6 +40,7 @@ func main() {
 	rootCmd.AddCommand(convertM2())
 	rootCmd.AddCommand(convertADT())
 	rootCmd.AddCommand(convertWMO())
+	rootCmd.AddCommand(migrateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)

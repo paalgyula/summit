@@ -197,6 +197,8 @@ func ConvertToGLTF(model *Model, skin *Skin, options ...Option) (*gltf.Document,
 		}
 	}
 
+	addAttachments(doc, model, jointNodeIndices)
+
 	var skinIdx *int
 	if len(jointNodeIndices) > 0 {
 		sIdx := len(doc.Skins)
@@ -234,6 +236,40 @@ func ConvertToGLTF(model *Model, skin *Skin, options ...Option) (*gltf.Document,
 	addLights(doc, model, opts)
 
 	return doc, nil
+}
+
+// AttachmentExtras is attached to every attachment node.
+type AttachmentExtras struct {
+	AttachmentID uint32 `json:"attachmentId"`
+	Bone         uint16 `json:"bone"`
+}
+
+// AttachmentNodePrefix names the attachment nodes: Attach_<id>.
+const AttachmentNodePrefix = "Attach_"
+
+// addAttachments emits the model's attachment points as empty nodes parented
+// to their bone, so equipment placed on them follows the animation. The
+// attachment position is in model space and the joint node's origin is the
+// bone pivot, so the node sits at position - pivot within its bone.
+func addAttachments(doc *gltf.Document, model *Model, jointNodes []int) {
+	for _, att := range model.Attachments {
+		if int(att.Bone) >= len(model.Bones) {
+			continue
+		}
+		bone := model.Bones[att.Bone]
+		pos := gltf.ConvertM2ToGLTPosition(att.Position[0], att.Position[1], att.Position[2])
+		pivot := gltf.ConvertM2ToGLTPosition(bone.Pivot[0], bone.Pivot[1], bone.Pivot[2])
+		translation := [3]float32{pos[0] - pivot[0], pos[1] - pivot[1], pos[2] - pivot[2]}
+
+		nodeIdx := len(doc.Nodes)
+		doc.Nodes = append(doc.Nodes, gltf.Node{
+			Name:        fmt.Sprintf("%s%d", AttachmentNodePrefix, att.ID),
+			Translation: &translation,
+			Extras:      AttachmentExtras{AttachmentID: att.ID, Bone: att.Bone},
+		})
+		parent := jointNodes[att.Bone]
+		doc.Nodes[parent].Children = append(doc.Nodes[parent].Children, nodeIdx)
+	}
 }
 
 // LightExtras is one M2 light, static at its first keyframe.
@@ -383,6 +419,12 @@ type LayerExtras struct {
 	// UVKeys scroll the texture: [time ms, u, v] over UVLoopMs.
 	UVKeys   [][3]float32 `json:"uvKeys,omitempty"`
 	UVLoopMs uint32       `json:"uvLoopMs,omitempty"`
+	// UVRotKeys spin the texture about its centre: [time ms, radians].
+	UVRotKeys   [][2]float32 `json:"uvRotKeys,omitempty"`
+	UVRotLoopMs uint32       `json:"uvRotLoopMs,omitempty"`
+	// UVScaleKeys stretch the texture: [time ms, su, sv].
+	UVScaleKeys   [][3]float32 `json:"uvScaleKeys,omitempty"`
+	UVScaleLoopMs uint32       `json:"uvScaleLoopMs,omitempty"`
 }
 
 // MaterialExtras describes the WoW render state of one render pass (texture
@@ -476,7 +518,7 @@ func unitMaterial(model *Model, unit *TextureUnit, subIdx int, sub Submesh, ext 
 		switch m.BlendMode {
 		case BlendOpaque:
 		case BlendAlphaKey:
-			cutoff := float32(0.5)
+			cutoff := float32(224.0 / 255.0)
 			mat.AlphaMode = gltf.AlphaModeMask
 			mat.AlphaCutoff = &cutoff
 		default:
@@ -564,6 +606,36 @@ func unitMaterial(model *Model, unit *TextureUnit, subIdx int, sub Submesh, ext 
 					}
 					layer.UVLoopMs = trackLoop(model, tt.Translation)
 				}
+				// The rotation is a quaternion about the texture's Z axis; the
+				// angles are unwrapped so a full turn interpolates forward
+				if times, vals := model.TrackKeys(tt.Rotation, 0, 16, ext); len(times) > 1 {
+					stride := len(vals) / len(times)
+					prev := 0.0
+					for k, t := range times {
+						v := vals[k*stride:]
+						z, w := mathFloat32(v[8:12]), mathFloat32(v[12:16])
+						angle := 2 * math.Atan2(float64(z), float64(w))
+						if k > 0 {
+							for angle-prev > math.Pi {
+								angle -= 2 * math.Pi
+							}
+							for prev-angle > math.Pi {
+								angle += 2 * math.Pi
+							}
+						}
+						prev = angle
+						layer.UVRotKeys = append(layer.UVRotKeys, [2]float32{float32(t), float32(angle)})
+					}
+					layer.UVRotLoopMs = trackLoop(model, tt.Rotation)
+				}
+				if times, vals := model.TrackKeys(tt.Scaling, 0, 12, ext); len(times) > 1 {
+					stride := len(vals) / len(times)
+					for k, t := range times {
+						v := vals[k*stride:]
+						layer.UVScaleKeys = append(layer.UVScaleKeys, [3]float32{float32(t), mathFloat32(v[0:4]), mathFloat32(v[4:8])})
+					}
+					layer.UVScaleLoopMs = trackLoop(model, tt.Scaling)
+				}
 			}
 		}
 		extras.Layers = append(extras.Layers, layer)
@@ -588,6 +660,9 @@ func unitMaterial(model *Model, unit *TextureUnit, subIdx int, sub Submesh, ext 
 // texture alpha reaches the alpha test / blend) for every other blend mode,
 // and a second texture is Mod.
 func unitShaderID(model *Model, unit *TextureUnit, blendMode uint16) uint16 {
+	if unit.ShaderID&0x8000 != 0 {
+		return unit.ShaderID
+	}
 	if model.GlobalFlags&GlobalFlagTextureCombiners != 0 && len(model.TextureCombinerCombos) > 0 {
 		idx := int(unit.ShaderID)
 		if idx < len(model.TextureCombinerCombos) {
@@ -596,11 +671,11 @@ func unitShaderID(model *Model, unit *TextureUnit, blendMode uint16) uint16 {
 			if unit.TextureCount > 1 && idx+1 < len(model.TextureCombinerCombos) {
 				op1 = model.TextureCombinerCombos[idx+1] & 7
 			}
+			if blendMode != BlendOpaque && op0 == 0 {
+				op0 = 1
+			}
 			return op0<<4 | op1
 		}
-	}
-	if unit.ShaderID != 0 {
-		return unit.ShaderID
 	}
 	op0 := uint16(0)
 	if blendMode != BlendOpaque {
@@ -613,6 +688,18 @@ func unitShaderID(model *Model, unit *TextureUnit, blendMode uint16) uint16 {
 // high nibble is the first texture's operation, the low one the second's
 // (0 opaque, 1 mod, 3 add, 4 mod2x, 6 mod2xNA, 7 addAlpha).
 func PixelShaderName(textureCount int, shaderID uint16) string {
+	if shaderID&0x8000 != 0 {
+		switch shaderID & 0x7FFF {
+		case 1:
+			return "Combiners_Opaque_Mod2xNA_Alpha"
+		case 2:
+			return "Combiners_Opaque_AddAlpha"
+		case 3:
+			return "Combiners_Opaque_AddAlpha_Alpha"
+		default:
+			return "Combiners_Opaque_AddAlpha"
+		}
+	}
 	op0 := (shaderID >> 4) & 7
 	op1 := shaderID & 7
 	if textureCount < 2 {
@@ -631,18 +718,35 @@ func PixelShaderName(textureCount int, shaderID uint16) string {
 			return "Combiners_Opaque"
 		}
 	}
-	second := map[uint16]string{0: "Opaque", 1: "Mod", 3: "Add", 4: "Mod2x", 6: "Mod2xNA", 7: "AddAlpha"}
+	first := "Opaque"
+	switch op0 {
+	case 1:
+		first = "Mod"
+	case 2:
+		first = "Decal"
+	case 3:
+		first = "Add"
+	case 4:
+		first = "Mod2x"
+	case 5:
+		first = "Fade"
+	}
+	second := map[uint16]string{
+		0: "Opaque",
+		1: "Mod",
+		3: "Add",
+		4: "Mod2x",
+		6: "Mod2xNA",
+		7: "AddAlpha",
+	}
 	s, ok := second[op1]
 	if !ok {
 		s = "Mod"
 	}
-	if op0 == 1 {
-		if op1 == 7 {
-			s = "AddNA"
-		}
-		return "Combiners_Mod_" + s
+	if op0 == 1 && op1 == 7 {
+		s = "AddNA"
 	}
-	return "Combiners_Opaque_" + s
+	return "Combiners_" + first + "_" + s
 }
 
 // trackLoop returns the timeline length of a track: its global loop when it

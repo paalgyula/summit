@@ -92,9 +92,10 @@ func Decode(r io.Reader) (image.Image, error) {
 
 	mipData := data[mipOffset : mipOffset+mipSize]
 
+	var img image.Image
 	switch h.Encoding {
 	case EncodingDXT:
-		return decodeDXT(mipData, int(h.Width), int(h.Height), h.AlphaType)
+		img, err = decodeDXT(mipData, int(h.Width), int(h.Height), h.AlphaType)
 
 	case EncodingUncompressed:
 		palette := make([]color.NRGBA, 256)
@@ -106,14 +107,29 @@ func Decode(r io.Reader) (image.Image, error) {
 			a := paletteData[i*4+3]
 			palette[i] = color.NRGBA{R: r, G: g, B: b, A: a}
 		}
-		return decodePaletted(mipData, int(h.Width), int(h.Height), int(h.AlphaDepth), palette)
+		img, err = decodePaletted(mipData, int(h.Width), int(h.Height), int(h.AlphaDepth), palette)
 
 	case EncodingARGB:
-		return decodeARGB(mipData, int(h.Width), int(h.Height))
+		img, err = decodeARGB(mipData, int(h.Width), int(h.Height))
 
 	default:
 		return nil, fmt.Errorf("%w: encoding %d", ErrUnsupportedFormat, h.Encoding)
 	}
+	if err != nil {
+		return nil, err
+	}
+
+	// A texture without an alpha channel is opaque whatever its palette or
+	// DXT1 blocks say: otherwise every compositing step (character skins,
+	// item components) would discard it as fully transparent.
+	if h.AlphaDepth == 0 {
+		if nrgba, ok := img.(*image.NRGBA); ok {
+			for i := 3; i < len(nrgba.Pix); i += 4 {
+				nrgba.Pix[i] = 255
+			}
+		}
+	}
+	return img, nil
 }
 
 // DecodeFile opens and decodes a BLP file from disk.

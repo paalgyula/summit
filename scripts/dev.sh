@@ -12,6 +12,8 @@
 #
 # Environment:
 #   WOW_DATA        WoW client Data/ directory with the MPQs (optional)
+#   ASSET_UPSTREAM  asset server to fetch missing source files from when there
+#                   are no local MPQs, e.g. https://assets-summit.dev.pilab.hu
 #   ASSET_DIR       raw asset directory for the asset server (default: client/assets)
 #   ASSET_CACHE     conversion cache (default: .dev/asset-cache)
 #   ASSET_PORT      default 8080        CLIENT_PORT   default 5173
@@ -70,6 +72,9 @@ start_assetserver() {
   if [[ -n "${WOW_DATA:-}" ]]; then
     args+=(--mpq "$WOW_DATA")
   fi
+  if [[ -n "${ASSET_UPSTREAM:-}" ]]; then
+    args+=(--upstream "$ASSET_UPSTREAM")
+  fi
   "$BIN/assetserver" "${args[@]}" > >(prefix asset "$c_asset") 2>&1 &
   asset_pid=$!
   log "assetserver started (pid $asset_pid) on :$ASSET_PORT"
@@ -83,7 +88,7 @@ start_client() {
   fi
   (
     cd client &&
-      VITE_ASSET_HOST="http://localhost:$ASSET_PORT" \
+      VITE_ASSET_HOST="${VITE_ASSET_HOST:-http://localhost:$ASSET_PORT}" \
       VITE_AUTH_WS_URL="ws://127.0.0.1:5001/realm/auth" \
       exec npm run dev -- --port "$CLIENT_PORT" --strictPort
   ) > >(prefix client "$c_client") 2>&1 &
@@ -162,6 +167,7 @@ watch_sources() {
 # ------------------------------------------------------------------- main ----
 log "summit dev stack (Ctrl-C to stop)"
 [[ -n "${WOW_DATA:-}" ]] && log "MPQs: $WOW_DATA" || log "no WOW_DATA set: asset server serves $ASSET_DIR only"
+[[ -n "${ASSET_UPSTREAM:-}" ]] && log "upstream assets: $ASSET_UPSTREAM"
 
 build_go
 start_summit

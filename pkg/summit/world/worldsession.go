@@ -90,6 +90,7 @@ func NewWorldSession(n net.Conn, ws SessionManager, handlers ...PacketHandler) *
 // sending all initial world packets directly over the active session.
 func (gc *WorldSession) LoginCharacter(p *player.Player) {
 	gc.player = p
+	p.Sender = gc
 	p.Init()
 
 	gc.sendLoginVerifyWorld(p)
@@ -169,6 +170,13 @@ func (gc *WorldSession) sendDestroyObject(guid wow.GUID) {
 	pkt := wow.NewPacket(wow.ServerDestroyObject)
 	_ = pkt.Write(guid)
 	_ = pkt.WriteOne(0) // not despawn animation
+	gc.socket.Send(pkt)
+}
+
+// sendDestroyObjectWithDeath sends SMSG_DESTROY_OBJECT with the death flag,
+// triggering the death animation on the client.
+func (gc *WorldSession) sendDestroyObjectWithDeath(target *player.Player) {
+	pkt := BuildDestroyObject(target, true)
 	gc.socket.Send(pkt)
 }
 

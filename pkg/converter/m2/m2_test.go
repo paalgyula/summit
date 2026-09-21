@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"testing"
+
+	"github.com/paalgyula/summit/pkg/converter/gltf"
 )
 
 func TestM2ConversionSynthetic(t *testing.T) {
@@ -76,6 +78,9 @@ func TestPixelShaderSelection(t *testing.T) {
 		{2, 0x16, "Combiners_Mod_Mod2xNA"},
 		{2, 0x17, "Combiners_Mod_AddNA"},
 		{2, 0x07, "Combiners_Opaque_AddAlpha"},
+		{2, 0x8001, "Combiners_Opaque_Mod2xNA_Alpha"},
+		{2, 0x8002, "Combiners_Opaque_AddAlpha"},
+		{2, 0x8003, "Combiners_Opaque_AddAlpha_Alpha"},
 	}
 	for _, c := range cases {
 		if got := PixelShaderName(c.count, c.id); got != c.want {
@@ -96,5 +101,119 @@ func TestPixelShaderSelection(t *testing.T) {
 	model = &Model{GlobalFlags: GlobalFlagTextureCombiners, TextureCombinerCombos: []uint16{1, 4}}
 	if id := unitShaderID(model, &TextureUnit{TextureCount: 2, ShaderID: 0}, BlendOpaque); PixelShaderName(2, id) != "Combiners_Mod_Mod2x" {
 		t.Errorf("combo table: got %s", PixelShaderName(2, id))
+	}
+}
+
+func TestAttachmentsExported(t *testing.T) {
+	model := &Model{
+		Name: "Attached",
+		Vertices: []M2Vertex{
+			{Pos: [3]float32{0, 0, 0}, BoneWeights: [4]uint8{255}},
+			{Pos: [3]float32{1, 0, 0}, BoneWeights: [4]uint8{255}},
+			{Pos: [3]float32{0, 1, 0}, BoneWeights: [4]uint8{255}},
+		},
+		Bones: []M2Bone{
+			{ParentBone: -1, Pivot: [3]float32{0, 0, 1}},
+			{ParentBone: 0, Pivot: [3]float32{0, 0.5, 1.5}},
+		},
+		Attachments: []M2Attachment{
+			{ID: 1, Bone: 1, Position: [3]float32{0.2, 0.5, 1.5}},
+			{ID: 99, Bone: 7}, // dangling bone: skipped
+		},
+	}
+	doc, err := ConvertToGLTF(model, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *gltf.Node
+	for i := range doc.Nodes {
+		if doc.Nodes[i].Name == AttachmentNodePrefix+"1" {
+			found = &doc.Nodes[i]
+		}
+		if doc.Nodes[i].Name == AttachmentNodePrefix+"99" {
+			t.Error("attachment on a missing bone must be skipped")
+		}
+	}
+	if found == nil {
+		t.Fatal("Attach_1 node missing")
+	}
+	// (0.2, 0.5, 1.5) - pivot (0, 0.5, 1.5) = (0.2, 0, 0) in M2 space -> (0, 0, -0.2) in glTF space
+	if *found.Translation != [3]float32{0, 0, -0.2} {
+		t.Errorf("attachment translation: %v", *found.Translation)
+	}
+	// Parented to bone 1 (node index 1)
+	parented := false
+	for _, c := range doc.Nodes[1].Children {
+		if doc.Nodes[c].Name == AttachmentNodePrefix+"1" {
+			parented = true
+		}
+	}
+	if !parented {
+		t.Error("attachment must be a child of its bone node")
+	}
+}
+
+func TestRealCharacterAttachments(t *testing.T) {
+	path := "../../../client/assets/Character/Human/Male/HumanMale.m2"
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("HumanMale.m2 not available")
+	}
+	model, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[uint32]bool{}
+	for _, a := range model.Attachments {
+		ids[a.ID] = true
+	}
+	// Right hand, left hand, shoulders, helm and the sheath points
+	for _, want := range []uint32{0, 1, 2, 5, 6, 11, 26, 27} {
+		if !ids[want] {
+			t.Errorf("attachment %d missing (have %v)", want, ids)
+		}
+	}
+}
+
+func TestInspectTreeModel(t *testing.T) {
+	m2Path := "../../../client/assets/world/AZEROTH/STRANGLETHORN/PASSIVEDOODADS/TREES/STRANGLETHORNTREE01/STRANGLETHORNTREE01.m2"
+	skinPath := "../../../client/assets/world/AZEROTH/STRANGLETHORN/PASSIVEDOODADS/TREES/STRANGLETHORNTREE01/STRANGLETHORNTREE0100.skin"
+	model, err := Open(m2Path)
+	if err != nil {
+		t.Fatalf("open m2: %v", err)
+	}
+	skin, err := OpenSkin(skinPath)
+	if err != nil {
+		t.Fatalf("open skin: %v", err)
+	}
+	t.Logf("Model Name: %s, GlobalFlags: %#x, Sequences: %d", model.Name, model.GlobalFlags, len(model.Sequences))
+	for i, s := range model.Sequences {
+		t.Logf("Sequence %d: ID=%d, Duration=%d, Flags=%#x", i, s.ID, s.Duration, s.Flags)
+	}
+	t.Logf("Vertices: %d, Bones: %d, Materials: %d, Textures: %d", len(model.Vertices), len(model.Bones), len(model.Materials), len(model.Textures))
+	for i, b := range model.Bones {
+		t.Logf("Bone %d: Flags=%#x, Parent=%d, KeyBone=%d, Pivot=%v, TransTracks=%d, RotTracks=%d",
+			i, b.Flags, b.ParentBone, b.KeyBoneID, b.Pivot, len(b.Translation.Timestamps), len(b.Rotation.Timestamps))
+	}
+	for i, mat := range model.Materials {
+		t.Logf("Material %d: Flags=%#x, BlendMode=%d", i, mat.Flags, mat.BlendMode)
+	}
+	for i, tex := range model.Textures {
+		t.Logf("Texture %d: Type=%d, Flags=%#x, Name=%s", i, tex.Type, tex.Flags, tex.Name)
+	}
+	t.Logf("Submeshes: %d, TextureUnits: %d", len(skin.Submeshes), len(skin.TextureUnits))
+	for i, sub := range skin.Submeshes {
+		t.Logf("Submesh %d: ID=%d, VertStart=%d, VertCount=%d, TriStart=%d, TriCount=%d", i, sub.ID, sub.VertexStart, sub.VertexCount, sub.TriangleStart, sub.TriangleCount)
+	}
+	for i, u := range skin.TextureUnits {
+		t.Logf("TextureUnit %d: Flags=%#x, PriorityPlane=%d, ShaderID=%#x, SubmeshIdx=%d, MatIdx=%d, Layer=%d, TexCount=%d, TexComboIdx=%d",
+			i, u.Flags, u.PriorityPlane, u.ShaderID, u.SubmeshIndex, u.MaterialIndex, u.MaterialLayer, u.TextureCount, u.TextureComboIndex)
+	}
+	doc, err := ConvertToGLTF(model, skin)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	for i, mat := range doc.Materials {
+		extras := mat.Extras.(MaterialExtras)
+		t.Logf("GLTF Mat %d: Name=%s, DoubleSided=%v, AlphaMode=%s, Extras=%+v", i, mat.Name, mat.DoubleSided, mat.AlphaMode, extras)
 	}
 }

@@ -1,20 +1,24 @@
 package object
 
+import "github.com/paalgyula/summit/pkg/wow"
+
 type GameObject struct {
 	*Object
 }
 
 func NewGameObject() *GameObject {
-	gobject := &GameObject{
-		Object: NewObject(),
+	obj := NewObject()
+	obj.objectTypeID = wow.TypeIDGameObject
+	obj.objectType = wow.TypeMaskGameObject
+
+	// GameObject uses stationary position + low GUID + rotation
+	obj.AddUpdateFlags(
+		wow.UpdateFlagLowGUID |
+			wow.UpdateFlagStationaryPosition |
+			wow.UpdateFlagRotation,
+	)
+
+	return &GameObject{
+		Object: obj,
 	}
-
-	// m_objectType |= TYPEMASK_GAMEOBJECT
-	// m_objectTypeId = TYPEID_GAMEOBJECT
-	// 2.3.2 - 0x58
-	// m_updateFlag = (UPDATEFLAG_LOWGUID | UPDATEFLAG_HIGHGUID | UPDATEFLAG_HAS_POSITION)
-
-	// m_valuesCount = GAMEOBJECT_END
-
-	return gobject
 }

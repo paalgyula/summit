@@ -16,31 +16,8 @@ const (
 	ObjectUpdateTypeNearObjects       ObjectUpdateType = 5
 )
 
-type ObjectUpdateFlags uint16
-
-const (
-	UpdateFlagNone               ObjectUpdateFlags = 0x0000
-	UpdateFlagSelf               ObjectUpdateFlags = 0x0001
-	UpdateFlagTransport          ObjectUpdateFlags = 0x0002
-	UpdateFlagHasTarget          ObjectUpdateFlags = 0x0004
-	UpdateFlagUnknown            ObjectUpdateFlags = 0x0008
-	UpdateFlagLowGUID            ObjectUpdateFlags = 0x0010
-	UpdateFlagLiving             ObjectUpdateFlags = 0x0020
-	UpdateFlagStationaryPosition ObjectUpdateFlags = 0x0040
-	UpdateFlagVehicle            ObjectUpdateFlags = 0x0080
-	UpdateFlagPosition           ObjectUpdateFlags = 0x0100
-	UpdateFlagRotation           ObjectUpdateFlags = 0x0200
-)
-
 type ObjectManager struct{}
 
 func (*ObjectManager) CreateUpdatePacketFor(*player.Player) {
-	p := wow.NewPacket(wow.ServerUpdateObject)
-
-	updateFlag := UpdateFlagNone
-	updateFlag |= UpdateFlagSelf
-
-	_ = p.Write(updateFlag) // Creating self
-
-	_ = p.Write(uint32(0)) // Has transport
+	_ = wow.NewPacket(wow.ServerUpdateObject)
 }

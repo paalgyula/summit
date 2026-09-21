@@ -7,6 +7,13 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
+// ObjectUpdater is the interface that objects use to register themselves
+// for the next update cycle. Maps implement this to collect dirty objects.
+type ObjectUpdater interface {
+	AddUpdateObject(obj *Object)
+	RemoveUpdateObject(obj *Object)
+}
+
 type Object struct {
 	guid wow.GUID
 
@@ -21,9 +28,22 @@ type Object struct {
 	isInWorld bool
 	isUpdated bool
 
+	// updater is set when the object is added to a map. Setters use it
+	// to auto-queue the object for the next value-update cycle.
+	updater ObjectUpdater
+
 	// values holds the update field values as uint32 words.
 	// Index corresponds to the UpdateField constants (ObjectFieldGuid, UnitFieldHealth, etc.).
 	values []uint32
+
+	// changesMask tracks which fields have been modified since the last ClearChanges.
+	changesMask UpdateMask
+
+	// fieldNotifyFlags are OR'd into visibleFlag for every field that has
+	// the corresponding bit set in its per-field flags. This forces certain
+	// fields to always be included in updates (matching AzerothCore's
+	// _fieldNotifyFlags).
+	fieldNotifyFlags uint16
 
 	updateFlags wow.ObjectUpdateFlags
 }
@@ -39,10 +59,40 @@ func NewObject() *Object {
 	}
 }
 
-// InitValues allocates the values array with the given count.
-// Must be called before SetUInt32Value/GetUInt32Value.
+// InitValues allocates the values array with the given count and
+// initialises the changes mask. Must be called before SetUInt32Value/GetUInt32Value.
 func (o *Object) InitValues(count int) {
 	o.values = make([]uint32, count)
+	o.changesMask.SetCount(uint32(count))
+}
+
+// SetUpdater sets the ObjectUpdater for this object (called when added to a map).
+func (o *Object) SetUpdater(u ObjectUpdater) {
+	o.updater = u
+}
+
+// AddToObjectUpdateIfNeeded queues this object for the next update cycle
+// if it hasn't been queued yet. Called from every field setter.
+func (o *Object) AddToObjectUpdateIfNeeded() {
+	if o.updater != nil && !o.isUpdated {
+		o.isUpdated = true
+		o.updater.AddUpdateObject(o)
+	}
+}
+
+// RemoveFromObjectUpdate removes this object from the update queue.
+func (o *Object) RemoveFromObjectUpdate() {
+	if o.updater != nil && o.isUpdated {
+		o.isUpdated = false
+		o.updater.RemoveUpdateObject(o)
+	}
+}
+
+// ClearUpdateMask clears the changes mask and removes the object from the
+// update queue. Called after building updates for all visible players.
+func (o *Object) ClearUpdateMask() {
+	o.changesMask.Clear()
+	o.RemoveFromObjectUpdate()
 }
 
 // ValuesCount returns the length of the values array.
@@ -50,11 +100,15 @@ func (o *Object) ValuesCount() int {
 	return len(o.values)
 }
 
-// SetUInt32Value sets a uint32 update field value.
+// SetUInt32Value sets a uint32 update field value and marks the field as changed.
 func (o *Object) SetUInt32Value(field UpdateField, val uint32) {
 	idx := int(field)
 	if idx >= 0 && idx < len(o.values) {
-		o.values[idx] = val
+		if o.values[idx] != val {
+			o.values[idx] = val
+			o.changesMask.SetBit(uint32(idx))
+			o.AddToObjectUpdateIfNeeded()
+		}
 	}
 }
 
@@ -68,9 +122,17 @@ func (o *Object) GetUInt32Value(field UpdateField) uint32 {
 	return 0
 }
 
-// SetFloatValue sets a float32 update field value (stored as uint32 bits).
+// SetFloatValue sets a float32 update field value (stored as uint32 bits) and marks changed.
 func (o *Object) SetFloatValue(field UpdateField, val float32) {
-	o.SetUInt32Value(field, math.Float32bits(val))
+	newBits := math.Float32bits(val)
+	idx := int(field)
+	if idx >= 0 && idx < len(o.values) {
+		if o.values[idx] != newBits {
+			o.values[idx] = newBits
+			o.changesMask.SetBit(uint32(idx))
+			o.AddToObjectUpdateIfNeeded()
+		}
+	}
 }
 
 // GetFloatValue returns a float32 update field value.
@@ -78,7 +140,7 @@ func (o *Object) GetFloatValue(field UpdateField) float32 {
 	return math.Float32frombits(o.GetUInt32Value(field))
 }
 
-// SetInt32Value sets a signed int32 update field value.
+// SetInt32Value sets a signed int32 update field value and marks changed.
 func (o *Object) SetInt32Value(field UpdateField, val int32) {
 	o.SetUInt32Value(field, uint32(val))
 }
@@ -88,7 +150,58 @@ func (o *Object) GetInt32Value(field UpdateField) int32 {
 	return int32(o.GetUInt32Value(field))
 }
 
-// SetByteValue sets a single byte within a uint32 update field.
+// SetFlag sets bits in a uint32 update field and marks changed.
+func (o *Object) SetFlag(field UpdateField, flags uint32) {
+	idx := int(field)
+	if idx < 0 || idx >= len(o.values) {
+		return
+	}
+
+	oldVal := o.values[idx]
+	newVal := oldVal | flags
+
+	if oldVal != newVal {
+		o.values[idx] = newVal
+		o.changesMask.SetBit(uint32(idx))
+		o.AddToObjectUpdateIfNeeded()
+	}
+}
+
+// RemoveFlag clears bits in a uint32 update field and marks changed.
+func (o *Object) RemoveFlag(field UpdateField, flags uint32) {
+	idx := int(field)
+	if idx < 0 || idx >= len(o.values) {
+		return
+	}
+
+	oldVal := o.values[idx]
+	newVal := oldVal & ^flags
+
+	if oldVal != newVal {
+		o.values[idx] = newVal
+		o.changesMask.SetBit(uint32(idx))
+		o.AddToObjectUpdateIfNeeded()
+	}
+}
+
+// ToggleFlag toggles bits in a uint32 update field and marks changed.
+func (o *Object) ToggleFlag(field UpdateField, flags uint32) {
+	idx := int(field)
+	if idx < 0 || idx >= len(o.values) {
+		return
+	}
+
+	o.values[idx] ^= flags
+	o.changesMask.SetBit(uint32(idx))
+	o.AddToObjectUpdateIfNeeded()
+}
+
+// HasFlag returns true if the given bits are set in the update field.
+func (o *Object) HasFlag(field UpdateField, flags uint32) bool {
+	return o.GetUInt32Value(field)&flags != 0
+}
+
+// SetByteValue sets a single byte within a uint32 update field and marks changed.
 // byteIdx is 0-3 (little-endian byte order).
 func (o *Object) SetByteValue(field UpdateField, byteIdx uint8, val uint8) {
 	idx := int(field)
@@ -99,32 +212,51 @@ func (o *Object) SetByteValue(field UpdateField, byteIdx uint8, val uint8) {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, o.values[idx])
 	b[byteIdx] = val
-	o.values[idx] = binary.LittleEndian.Uint32(b)
+	newVal := binary.LittleEndian.Uint32(b)
+
+	if o.values[idx] != newVal {
+		o.values[idx] = newVal
+		o.changesMask.SetBit(uint32(idx))
+		o.AddToObjectUpdateIfNeeded()
+	}
 }
 
 // BuildValuesUpdateBlock writes the update mask and values block for SMSG_UPDATE_OBJECT.
-// It writes only the fields that differ from the target's current values.
+// It writes: uint8 blockCount + mask bytes + values bytes.
 // mask is the UpdateMask indicating which fields are set.
 func (o *Object) BuildValuesUpdateBlock(mask *UpdateMask, target *Object) []byte {
 	blockCount := mask.GetUpdateBlockCount()
 
-	// UpdateMask (4 bytes per block)
-	maskBytes := make([]byte, blockCount*4)
-	copy(maskBytes, mask.Mask()[:blockCount*4])
+	// Total:1 byte blockCount + blockCount*4 mask bytes + variable values bytes
+	result := make([]byte, 0, 1+blockCount*4+blockCount*32)
 
-	// Values block (4 bytes per set bit)
-	var valuesBytes []byte
-	for i := uint32(0); i < blockCount*32; i++ {
-		if mask.GetBit(i) && int(i) < len(o.values) {
-			b := make([]byte, 4)
-			binary.LittleEndian.PutUint32(b, o.values[i])
-			valuesBytes = append(valuesBytes, b...)
+	// blockCount as uint8 (matches AzerothCore's *data << uint8(updateMask.GetBlockCount()))
+	result = append(result, byte(blockCount))
+
+	// UpdateMask (4 bytes per block, little-endian)
+	for i := uint32(0); i < blockCount; i++ {
+		val := uint32(0)
+		for b := uint32(0); b < 32; b++ {
+			idx := i*32 + b
+			if mask.GetBit(idx) {
+				val |= 1 << b
+			}
 		}
+
+		result = append(result,
+			byte(val), byte(val>>8), byte(val>>16), byte(val>>24),
+		)
 	}
 
-	result := make([]byte, 0, len(maskBytes)+len(valuesBytes))
-	result = append(result, maskBytes...)
-	result = append(result, valuesBytes...)
+	// Values block (4 bytes per set bit)
+	for i := uint32(0); i < blockCount*32; i++ {
+		if mask.GetBit(i) && int(i) < len(o.values) {
+			v := o.values[i]
+			result = append(result,
+				byte(v), byte(v>>8), byte(v>>16), byte(v>>24),
+			)
+		}
+	}
 
 	return result
 }
@@ -174,7 +306,154 @@ func (o *Object) SetObjectType(mask wow.TypeMask) {
 	o.objectType = mask
 }
 
+// SetObjectTypeID sets the object type ID.
+func (o *Object) SetObjectTypeID(tid wow.TypeID) {
+	o.objectTypeID = tid
+}
+
 // ObjectType returns the object type mask.
 func (o *Object) ObjectType() wow.TypeMask {
 	return o.objectType
+}
+
+// ObjectTypeID returns the object type ID.
+func (o *Object) ObjectTypeID() wow.TypeID {
+	return o.objectTypeID
+}
+
+// ChangesMask returns the change-tracking mask.
+func (o *Object) ChangesMask() *UpdateMask {
+	return &o.changesMask
+}
+
+// HasChanges returns true if any field has been modified since the last ClearChanges.
+func (o *Object) HasChanges() bool {
+	for _, b := range o.changesMask.Mask() {
+		if b != 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ClearChanges resets all change bits.
+func (o *Object) ClearChanges() {
+	o.changesMask.Clear()
+}
+
+// FieldNotifyFlags returns the field-notify flags.
+func (o *Object) FieldNotifyFlags() uint16 {
+	return o.fieldNotifyFlags
+}
+
+// SetFieldNotifyFlag sets one or more field-notify flags.
+func (o *Object) SetFieldNotifyFlag(flag uint16) {
+	o.fieldNotifyFlags |= flag
+}
+
+// RemoveFieldNotifyFlag removes one or more field-notify flags.
+func (o *Object) RemoveFieldNotifyFlag(flag uint16) {
+	o.fieldNotifyFlags &^= flag
+}
+
+// GetUpdateFieldDataForTesting is a test helper that exposes the visibility
+// resolution logic without requiring a full Player. It mirrors AzerothCore's
+// Object::GetUpdateFieldData.
+func GetUpdateFieldDataForTesting(obj, target *Object) uint32 {
+	visibleFlag := uint32(UFFlagPublic)
+
+	if obj == target {
+		visibleFlag |= UFFlagPrivate
+	}
+
+	return visibleFlag
+}
+
+// BuildFilteredUpdateMask creates an UpdateMask with only the fields that are
+// visible to the target viewer. If isSelf is true, PRIVATE fields are included.
+// This is used for CREATE_OBJECT where all visible fields must be sent.
+func (o *Object) BuildFilteredUpdateMask(target *Object, isSelf bool) *UpdateMask {
+	visibleFlag := uint32(UFFlagPublic)
+	if isSelf {
+		visibleFlag |= UFFlagPrivate
+	}
+
+	fieldFlags := o.getFieldFlags()
+	mask := &UpdateMask{}
+	mask.SetCount(uint32(len(o.values)))
+
+	for i := uint32(0); i < uint32(len(o.values)); i++ {
+		var f uint32
+		// fieldFlags is indexed relative to ObjectEnd, so subtract the offset.
+		fi := int(i) - int(ObjectEnd)
+		if fi >= 0 && fi < len(fieldFlags) {
+			f = fieldFlags[fi]
+		}
+
+		if f&visibleFlag != 0 {
+			mask.SetBit(i)
+		}
+	}
+
+	return mask
+}
+
+// BuildIncrementalUpdateMask creates an UpdateMask that combines the changesMask
+// with visibility filtering. Only changed fields that are visible to the target
+// are included. Fields where fieldNotifyFlags match are always included.
+// Used for UPDATETYPE_VALUES (incremental updates).
+func (o *Object) BuildIncrementalUpdateMask(target *Object) *UpdateMask {
+	var visibleFlag uint32 = UFFlagPublic
+	if target == o {
+		visibleFlag |= UFFlagPrivate
+	}
+
+	fieldFlags := o.getFieldFlags()
+	mask := &UpdateMask{}
+	mask.SetCount(uint32(len(o.values)))
+
+	for i := uint32(0); i < uint32(len(o.values)); i++ {
+		var f uint32
+		fi := int(i) - int(ObjectEnd)
+		if fi >= 0 && fi < len(fieldFlags) {
+			f = fieldFlags[fi]
+		}
+
+		// Include if field has a notify flag set (always send these)
+		if o.fieldNotifyFlags != 0 && f&uint32(o.fieldNotifyFlags) != 0 {
+			mask.SetBit(i)
+			continue
+		}
+
+		// Include if changed AND visible to target
+		if o.changesMask.GetBit(i) && f&visibleFlag != 0 {
+			mask.SetBit(i)
+		}
+	}
+
+	return mask
+}
+
+// getFieldFlags returns the per-field visibility flags array for this object's type.
+func (o *Object) getFieldFlags() []uint32 {
+	switch o.objectTypeID {
+	case wow.TypeIDUnit, wow.TypeIDPlayer:
+		return UnitUpdateFieldFlags[:]
+
+	case wow.TypeIDItem, wow.TypeIDContainer:
+		return ItemUpdateFieldFlags[:]
+
+	case wow.TypeIDGameObject:
+		return GameObjectFieldFlags[:]
+
+	case wow.TypeIDDynamicoObject:
+		return DynamicObjectFieldFlags[:]
+
+	case wow.TypeIDCorpse:
+		return CorpseUpdateFieldFlags[:]
+
+	default:
+		return ObjectFieldFlags[:]
+	}
 }

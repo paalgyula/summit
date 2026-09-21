@@ -128,6 +128,32 @@ func (g GUID) Pack() []byte {
 	return append([]byte{mask}, packedGUID...)
 }
 
+// ReadPackedGUID reads a packed GUID: a mask byte followed by the non-zero
+// bytes of the value, least significant first.
+func ReadPackedGUID(r *PacketReader) (GUID, error) {
+	var mask uint8
+	if err := r.Read(&mask); err != nil {
+		return 0, err
+	}
+
+	var value uint64
+
+	for i := 0; i < 8; i++ {
+		if mask&(1<<uint(i)) == 0 {
+			continue
+		}
+
+		var b uint8
+		if err := r.Read(&b); err != nil {
+			return 0, err
+		}
+
+		value |= uint64(b) << (8 * uint(i))
+	}
+
+	return GUID(value), nil
+}
+
 func NewPlayerGUID(counter uint32) GUID {
 	return NewGUID(PlayerGUID, counter)
 }

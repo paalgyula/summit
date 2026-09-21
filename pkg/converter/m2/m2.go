@@ -181,6 +181,15 @@ type M2Camera struct {
 	Roll     M2Track // M2SplineKey<float>
 }
 
+// M2Attachment is a named point on a bone that equipment, spell effects and
+// the like are attached to (M2Attachment record, 40 bytes). Position is in
+// model space, moved by the bone.
+type M2Attachment struct {
+	ID       uint32 // attachment id: 0 shield, 1 right hand, 2 left hand, 5/6 shoulders, 11 helm, 26+ sheaths, ...
+	Bone     uint16
+	Position [3]float32
+}
+
 type Model struct {
 	Version         uint32
 	Name            string
@@ -195,6 +204,7 @@ type Model struct {
 	TexUnitLookup   []int16  // texture_unit_lookup_table: batch texcoord combo -> 0 uv0, 1 uv1, -1 env map
 	Cameras         []M2Camera
 	Lights          []M2Light
+	Attachments     []M2Attachment
 	// TextureCombinerCombos lists the per-texture combiner ops batches index
 	// with shader_id when GlobalFlagTextureCombiners is set.
 	TextureCombinerCombos  []uint16
@@ -457,6 +467,23 @@ func Read(r io.Reader) (*Model, error) {
 			for i := uint32(0); i < ccCnt; i++ {
 				m.TextureCombinerCombos[i] = binary.LittleEndian.Uint16(data[int(ccOfs)+int(i)*2:])
 			}
+		}
+	}
+
+	// Attachments (base+240): 40-byte M2Attachment records
+	atCnt, atOfs := readArr(base + 240)
+	if int(atOfs)+int(atCnt)*40 <= len(data) {
+		m.Attachments = make([]M2Attachment, atCnt)
+		for i := uint32(0); i < atCnt; i++ {
+			a := int(atOfs) + int(i)*40
+			att := M2Attachment{
+				ID:   binary.LittleEndian.Uint32(data[a : a+4]),
+				Bone: binary.LittleEndian.Uint16(data[a+4 : a+6]),
+			}
+			for k := 0; k < 3; k++ {
+				att.Position[k] = mathFloat32(data[a+8+k*4 : a+12+k*4])
+			}
+			m.Attachments[i] = att
 		}
 	}
 
