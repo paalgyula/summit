@@ -225,6 +225,11 @@ func (gc *WorldSession) playerAttackStop() {
 
 	// Send SMSG_ATTACKSTOP
 	gc.sendAttackStop(gc.player.GUID(), wow.GUID(targetGUID))
+
+	// Nobody left fighting us: leave combat (AC keeps a 5 s PvP timer; skipped)
+	if len(gc.player.GetAttackers()) == 0 {
+		gc.player.ClearInCombat()
+	}
 }
 
 // resolveCombatUnit resolves a GUID to a CombatUnit.
@@ -344,43 +349,50 @@ func CalculateMeleeDamage(attacker, victim CombatUnit, attackType WeaponAttackTy
 		baseDamage = weaponMin + apBonus
 	}
 
-	// Apply hit outcome modifiers
+	// Apply hit outcome modifiers (Unit::CalculateMeleeDamage): misses and
+	// the avoidances carry no damage and are told through HitInfo / TargetState
+	damageInfo.HitInfo = HitInfoAffectsVictim
+	damageInfo.TargetState = VictimStateHit
+
 	switch damageInfo.HitOutcome {
 	case MeleeHitMiss:
 		damageInfo.Damages[0].Damage = 0
-		damageInfo.HitInfo = 0x01
+		damageInfo.HitInfo |= HitInfoMiss
+		damageInfo.TargetState = VictimStateIntact
 		return damageInfo
 
 	case MeleeHitDodge:
 		damageInfo.Damages[0].Damage = 0
-		damageInfo.HitInfo = 0x02
+		damageInfo.TargetState = VictimStateDodge
 		return damageInfo
 
 	case MeleeHitParry:
 		damageInfo.Damages[0].Damage = 0
-		damageInfo.HitInfo = 0x04
+		damageInfo.TargetState = VictimStateParry
 		return damageInfo
 
 	case MeleeHitEvade:
 		damageInfo.Damages[0].Damage = 0
-		damageInfo.HitInfo = 0x20
+		damageInfo.HitInfo |= HitInfoNoAnimation
+		damageInfo.TargetState = VictimStateEvades
 		return damageInfo
+
+	case MeleeHitBlock:
+		damageInfo.HitInfo |= HitInfoBlock
+		damageInfo.TargetState = VictimStateBlocks
 
 	case MeleeHitGlancing:
 		glanceFactor := 0.7 + rand.Float64()*0.2
 		baseDamage = uint32(float64(baseDamage) * glanceFactor)
-		damageInfo.HitInfo = 0x10
+		damageInfo.HitInfo |= HitInfoGlancing
 
 	case MeleeHitCrit:
 		baseDamage *= 2
-		damageInfo.HitInfo = 0x08
+		damageInfo.HitInfo |= HitInfoCriticalHit
 
 	case MeleeHitCrushing:
 		baseDamage = uint32(float64(baseDamage) * 1.5)
-		damageInfo.HitInfo = 0x40
-
-	default:
-		damageInfo.HitInfo = 0
+		damageInfo.HitInfo |= HitInfoCrushing
 	}
 
 	// Apply armor mitigation
@@ -526,6 +538,7 @@ func DealDamage(attacker, victim CombatUnit, damageInfo *CalcDamageInfo) uint32 
 	// AI hooks
 	if victim.IsCreature() {
 		victim.OnDamageTaken(attacker, totalDamage)
+		victim.AddThreat(attacker, float32(totalDamage))
 	}
 	if attacker != nil && attacker.IsCreature() {
 		attacker.OnDamageDealt(victim, totalDamage)
@@ -601,7 +614,16 @@ func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *Cal
 
 	npc.OnDeath()
 
-	// TODO: loot, XP, achievements, script hooks
+	// Grant XP to the killing player (loot, achievements handled by SUMMIT-8)
+	if p, ok := attacker.(*player.Player); ok {
+		isElite := npc.Rank > 0
+		xp := CalculateKillXP(p.Level, npc.Level, isElite)
+		if xp > 0 {
+			if gc := getGC(p); gc != nil {
+				gc.GiveXP(xp)
+			}
+		}
+	}
 
 	if p, ok := attacker.(*player.Player); ok {
 		if gc := getGC(p); gc != nil {
@@ -726,10 +748,10 @@ func (gc *WorldSession) sendAttackStart(attacker, target wow.GUID) {
 	}
 }
 
-// sendAttackerStateUpdateFromCalc sends SMSG_ATTACKERSTATEUPDATE from CalcDamageInfo.
-func (gc *WorldSession) sendAttackerStateUpdateFromCalc(damageInfo *CalcDamageInfo) {
-	if damageInfo == nil || damageInfo.Target == nil {
-		return
+// BuildAttackerStateUpdatePacket builds SMSG_ATTACKERSTATEUPDATE packet from CalcDamageInfo.
+func BuildAttackerStateUpdatePacket(damageInfo *CalcDamageInfo) *wow.Packet {
+	if damageInfo == nil || damageInfo.Target == nil || damageInfo.Attacker == nil {
+		return nil
 	}
 
 	pkt := wow.NewPacket(wow.ServerAttackerstateupdate)
@@ -755,23 +777,29 @@ func (gc *WorldSession) sendAttackerStateUpdateFromCalc(damageInfo *CalcDamageIn
 	_ = pkt.Write(float32(totalDamage))            // damage (float)
 	_ = pkt.Write(uint32(totalDamage))             // damage (int)
 
-	if damageInfo.HitInfo&(0x20|0x40) != 0 { // HITINFO_FULL_ABSORB | HITINFO_PARTIAL_ABSORB
+	if damageInfo.HitInfo&(HitInfoFullAbsorb|HitInfoPartialAbsorb) != 0 {
 		_ = pkt.Write(uint32(damageInfo.Damages[0].Absorb))
 	}
-	if damageInfo.HitInfo&(0x80|0x100) != 0 { // HITINFO_FULL_RESIST | HITINFO_PARTIAL_RESIST
+	if damageInfo.HitInfo&(HitInfoFullResist|HitInfoPartialResist) != 0 {
 		_ = pkt.Write(uint32(damageInfo.Damages[0].Resist))
 	}
 
-	victimState := uint8(1)
-	if !damageInfo.Target.IsAlive() {
-		victimState = 0
-	}
-	_ = pkt.Write(uint8(victimState))
+	_ = pkt.Write(damageInfo.TargetState)
 	_ = pkt.Write(uint32(0)) // attacker state
 	_ = pkt.Write(uint32(0)) // melee spell id
 
-	if damageInfo.HitOutcome == MeleeHitBlock {
+	if damageInfo.HitInfo&HitInfoBlock != 0 {
 		_ = pkt.Write(uint32(damageInfo.Damages[0].Block))
+	}
+
+	return pkt
+}
+
+// sendAttackerStateUpdateFromCalc sends SMSG_ATTACKERSTATEUPDATE from CalcDamageInfo.
+func (gc *WorldSession) sendAttackerStateUpdateFromCalc(damageInfo *CalcDamageInfo) {
+	pkt := BuildAttackerStateUpdatePacket(damageInfo)
+	if pkt == nil {
+		return
 	}
 
 	// Send to all (including attacker)
@@ -933,11 +961,11 @@ func getFactionID(unit CombatUnit) uint32 {
 	return 0
 }
 
-// --- NPC Chase / Follow ---
+// --- NPC Chase / Follow & Movement Generators ---
 
 // ProcessNPCChase handles NPC movement toward a chase target.
 // Called from the world update loop.
-func ProcessNPCChase(npc *NPC, now time.Time) {
+func ProcessNPCChase(npc *NPC, now time.Time, sendPacket func(pkt *wow.Packet)) {
 	if npc == nil || !npc.InCombat || npc.ChaseTarget == nil {
 		return
 	}
@@ -952,33 +980,247 @@ func ProcessNPCChase(npc *NPC, now time.Time) {
 	dx := target.GetPositionX() - npc.X
 	dy := target.GetPositionY() - npc.Y
 	dz := target.GetPositionZ() - npc.Z
-	distance := float32(dx*dx + dy*dy + dz*dz)
-	distance = float32(math.Sqrt(float64(distance)))
+	distance := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
 
-	// Check leash range — if too far, exit combat
+	// Check leash range — if too far, exit combat and return to spawn
 	if distance > npc.ChaseRadius {
 		npc.ExitCombat()
+		npc.MoveTo(npc.SpawnX, npc.SpawnY, npc.SpawnZ, now, SplineFlagRunMode, sendPacket)
 		return
 	}
 
-	// If in melee range, stop moving and attack
+	// If in melee range, stop moving
 	if distance < 3.0 {
-		// TODO: execute melee attack
+		if npc.IsMoving {
+			npc.StopMoving(sendPacket)
+		}
 		return
 	}
 
-	// Move toward target (simplified: update position)
-	speed := float32(7.0) // run speed
-	if distance < 10.0 {
-		speed = 2.5 // walk speed when close
+	// If not currently moving, or destination is far from target (> 2.0 yards), generate new spline
+	targetDestDiffX := target.GetPositionX() - npc.MoveTargetX
+	targetDestDiffY := target.GetPositionY() - npc.MoveTargetY
+	targetDestDistSq := targetDestDiffX*targetDestDiffX + targetDestDiffY*targetDestDiffY
+
+	if !npc.IsMoving || targetDestDistSq > 2.0*2.0 {
+		npc.MoveTo(target.GetPositionX(), target.GetPositionY(), target.GetPositionZ(), now, SplineFlagRunMode, sendPacket)
+	}
+}
+
+// ProcessNPCWander handles idle random wandering for non-combat NPCs.
+func ProcessNPCWander(npc *NPC, now time.Time, sendPacket func(pkt *wow.Packet)) {
+	if npc == nil || npc.InCombat || !npc.IsAlive() || npc.IsMoving || npc.WanderRadius <= 0 {
+		return
 	}
 
-	moveSpeed := speed / 30.0 // per tick (assuming ~30fps update)
-	npc.X += dx / distance * moveSpeed
-	npc.Y += dy / distance * moveSpeed
-	// Z is not updated for simplicity (would need pathfinding)
+	if npc.NextWanderTime == 0 {
+		// Initialize first wander timer 5-15s in future
+		npc.NextWanderTime = now.UnixMilli() + int64(5000+rand.Intn(10000))
+		return
+	}
 
-	// TODO: send SMSG_MONSTER_MOVE to client
+	if now.UnixMilli() < npc.NextWanderTime {
+		return
+	}
+
+	// Schedule next wander in 10-25s
+	npc.NextWanderTime = now.UnixMilli() + int64(10000+rand.Intn(15000))
+
+	// Pick random angle and distance within WanderRadius
+	angle := rand.Float64() * 2 * math.Pi
+	dist := 1.0 + rand.Float64()*float64(npc.WanderRadius-1.0)
+
+	destX := npc.SpawnX + float32(dist*math.Cos(angle))
+	destY := npc.SpawnY + float32(dist*math.Sin(angle))
+	destZ := npc.SpawnZ
+
+	npc.MoveTo(destX, destY, destZ, now, SplineFlagWalkMode, sendPacket)
+}
+
+// ProcessNPCWaypoint drives waypoint-path movement for creatures with
+// MovementType == WAYPOINT_MOTION_TYPE (2).  Each tick it either waits
+// for the current waypoint's delay to expire or advances to the next
+// point and sends an SMSG_MONSTER_MOVE spline.
+//
+// Called from Server.updateNPCs for every alive, out-of-combat NPC that
+// carries a WaypointPath.
+func ProcessNPCWaypoint(npc *NPC, now time.Time, sendPacket func(pkt *wow.Packet)) {
+	if npc == nil || npc.WaypointPath == nil || npc.InCombat || !npc.IsAlive() {
+		return
+	}
+
+	points := npc.WaypointPath.Points
+	if len(points) == 0 {
+		return
+	}
+
+	// If currently moving along a spline, let it finish.
+	if npc.IsMoving {
+		return
+	}
+
+	// If waiting out a delay at a waypoint, check the timer.
+	if npc.WaypointDelayEnd > 0 {
+		if now.UnixMilli() < npc.WaypointDelayEnd {
+			return // still waiting
+		}
+		npc.WaypointDelayEnd = 0 // delay expired, advance below
+	}
+
+	// Get current waypoint
+	wp := points[npc.WaypointIndex]
+	splineFlags := SplineFlagRunMode
+	if wp.MoveType == 0 {
+		splineFlags = SplineFlagWalkMode
+	}
+
+	// Handle smooth transition with catmull-rom spline
+	if wp.SmoothTransition && len(points) >= 3 {
+		// Generate a smooth spline path through multiple waypoints
+		waypoints := make([][3]float32, 0, len(points))
+		for _, p := range points {
+			waypoints = append(waypoints, [3]float32{p.X, p.Y, p.Z})
+		}
+
+		// Generate spline points starting from current position
+		splinePoints := GenerateCatmullRomSpline(waypoints, 10, true)
+
+		// Find the starting index in the spline (closest to current position)
+		startIdx := 0
+		minDist := float32(math.MaxFloat32)
+		for i, sp := range splinePoints {
+			dist := Distance3D(npc.X, npc.Y, npc.Z, sp[0], sp[1], sp[2])
+			if dist < minDist {
+				minDist = dist
+				startIdx = i
+			}
+		}
+
+		// Take points from current position onwards
+		splinePoints = splinePoints[startIdx:]
+		if len(splinePoints) < 2 {
+			splinePoints = [][3]float32{{npc.X, npc.Y, npc.Z}, {wp.X, wp.Y, wp.Z}}
+		}
+
+		// Calculate total distance and duration
+		totalDist := float32(0)
+		for i := 1; i < len(splinePoints); i++ {
+			totalDist += Distance3D(
+				splinePoints[i-1][0], splinePoints[i-1][1], splinePoints[i-1][2],
+				splinePoints[i][0], splinePoints[i][1], splinePoints[i][2],
+			)
+		}
+
+		speed := float32(7.0) // default run speed
+		if wp.Velocity > 0 {
+			speed = wp.Velocity
+		} else if splineFlags&SplineFlagWalkMode != 0 {
+			speed = 2.5
+		}
+
+		durationMs := uint32((totalDist / speed) * 1000)
+		if durationMs < 100 {
+			durationMs = 100
+		}
+
+		// Set NPC movement state
+		npc.SplineID++
+		npc.IsMoving = true
+		npc.MoveStartX = npc.X
+		npc.MoveStartY = npc.Y
+		npc.MoveStartZ = npc.Z
+		npc.MoveTargetX = wp.X
+		npc.MoveTargetY = wp.Y
+		npc.MoveTargetZ = wp.Z
+		npc.MoveStartTime = now.UnixMilli()
+		npc.MoveDurationMs = durationMs
+
+		// Update orientation towards first spline point
+		if len(splinePoints) > 1 {
+			dx := splinePoints[1][0] - npc.X
+			dy := splinePoints[1][1] - npc.Y
+			npc.O = float32(math.Atan2(float64(dy), float64(dx)))
+		}
+
+		// Send spline packet with catmull-rom flag
+		if sendPacket != nil {
+			pkt := BuildMonsterMoveSplinePacket(
+				npc.GUID(),
+				npc.X, npc.Y, npc.Z,
+				splinePoints,
+				npc.SplineID,
+				durationMs,
+				splineFlags|SplineFlagCatmullRom,
+			)
+			sendPacket(pkt)
+		}
+	} else {
+		// Standard point-to-point movement
+		npc.MoveToWithVelocity(wp.X, wp.Y, wp.Z, wp.Velocity, now, splineFlags, sendPacket)
+	}
+
+	// Set delay if waypoint has one
+	if wp.Delay > 0 {
+		npc.WaypointDelayEnd = now.UnixMilli() + int64(wp.Delay)
+	}
+
+	// Advance index, wrapping around.
+	npc.WaypointIndex = (npc.WaypointIndex + 1) % len(points)
+}
+
+// ProcessNPCCombatTick executes melee attack swings from an NPC against its victim.
+func ProcessNPCCombatTick(npc *NPC, now time.Time, sendPacket func(pkt *wow.Packet)) {
+	if npc == nil || !npc.InCombat || npc.victim == nil || !npc.IsAlive() {
+		return
+	}
+
+	target, ok := npc.victim.(CombatUnit)
+	if !ok || !target.IsAlive() {
+		npc.victim = nil
+		npc.ChaseTarget = nil
+		return
+	}
+
+	// Check distance
+	dx := target.GetPositionX() - npc.X
+	dy := target.GetPositionY() - npc.Y
+	dz := target.GetPositionZ() - npc.Z
+	distSq := dx*dx + dy*dy + dz*dz
+	// Melee range ~ 3.5 yards (or combat reach)
+	if distSq > 3.5*3.5 {
+		return
+	}
+
+	// Check swing timer
+	if now.UnixMilli() < npc.NextAttackTime {
+		return
+	}
+
+	// Calculate melee damage
+	damageInfo := CalculateMeleeDamage(npc, target, BaseAttack)
+
+	// Apply damage modifiers
+	for i := range damageInfo.Damages {
+		DealDamageMods(target, &damageInfo.Damages[i].Damage, &damageInfo.Damages[i].Absorb)
+	}
+
+	// Send attacker state update packet
+	if sendPacket != nil {
+		pkt := BuildAttackerStateUpdatePacket(damageInfo)
+		if pkt != nil {
+			sendPacket(pkt)
+		}
+	}
+
+	// Deal the damage
+	DealDamage(npc, target, damageInfo)
+
+	// Schedule next swing
+	swingDelay := time.Duration(SwingTimerMS) * time.Millisecond
+	if npc.BaseAttackSpeed > 0 {
+		swingDelay = npc.BaseAttackSpeed
+	}
+	npc.NextAttackTime = now.UnixMilli() + swingDelay.Milliseconds()
 }
 
 // --- 5-Second Combat Timer ---
@@ -1019,5 +1261,7 @@ func (n *NPC) ExitCombat() {
 	n.victim = nil
 	n.ChaseTarget = nil
 	n.Attackers = nil
+	n.ClearThreat()
+	n.Object.RemoveFlag(object.UnitFieldFlags, UnitFlagInCombat)
 	// TODO: send movement stop, return to spawn
 }

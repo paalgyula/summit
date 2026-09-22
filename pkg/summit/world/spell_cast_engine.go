@@ -50,6 +50,12 @@ type Spell struct {
 	CastTimeLeft int32
 	PowerCost    int32
 	SchoolMask   SpellSchoolMask
+	// Succeeded is set by Finish: true only when the cast actually landed.
+	Succeeded bool
+	// HomeTeleport is set by SPELL_EFFECT_TELEPORT_UNITS without an explicit
+	// destination (the hearthstone): the session sends the caster home after
+	// the completion packet goes out.
+	HomeTeleport bool
 
 	// Target lists
 	UniqueTargetInfo   []TargetInfo
@@ -196,6 +202,7 @@ func (s *Spell) Finish(success bool) {
 	}
 
 	s.State = SpellStateFinished
+	s.Succeeded = success
 
 	if !success {
 		return
@@ -257,8 +264,24 @@ func (s *Spell) handleEffects() {
 			s.effectTriggerSpell(i, target)
 		case SpellEffectDummy:
 			s.effectDummy(i, target)
+		case SpellEffectBind:
+			s.effectBind(i, target)
+		case SpellEffectTeleportUnit:
+			s.effectTeleportUnit(i, target)
 		}
 	}
+}
+
+// effectTeleportUnit handles SPELL_EFFECT_TELEPORT_UNITS (5). Destinations come
+// from Teleport.dbc, which is not loaded: the only case modelled is the
+// hearthstone-style item, flagged for the session to send the caster to its
+// home bind point once the cast completes.
+func (s *Spell) effectTeleportUnit(idx int, target Unit) {
+	if s.Info.GetEffect(idx) == nil {
+		return
+	}
+
+	s.HomeTeleport = true
 }
 
 // effectSchoolDamage applies direct spell damage to the target.
@@ -418,4 +441,30 @@ func (f TriggerCastFlags) isSet(flag TriggerCastFlags) bool {
 // Full implementation is in Phase 3 (aura system).
 func ApplyAuraToTarget(spell *SpellInfo, target Unit, caster Unit) {
 	// Stub: aura application will be implemented in Phase 3
+}
+
+// effectBind saves the caster's current location as their hearthstone bind point.
+// This implements SPELL_EFFECT_BIND (11) used by hearthstone items.
+func (s *Spell) effectBind(idx int, target Unit) {
+	if s.Caster == nil {
+		return
+	}
+
+	effect := s.Info.GetEffect(idx)
+	if effect == nil {
+		return
+	}
+
+	// Save current position as bind point
+	s.Caster.BindLocation = player.WorldLocation{
+		X:    s.Caster.Location.X,
+		Y:    s.Caster.Location.Y,
+		Z:    s.Caster.Location.Z,
+		O:    s.Caster.Location.O,
+		Map:  s.Caster.Location.Map,
+		Zone: s.Caster.Location.Zone,
+	}
+
+	// Save to database if we have a world store
+	// The bind will be persisted on the next character save
 }

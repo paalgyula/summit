@@ -40,7 +40,7 @@ type SpellInfo struct {
 	Mechanic uint32
 
 	// Attributes (AC uses 8 uint32 attribute fields)
-	Attributes   uint32
+	Attributes    uint32
 	AttributesEx  uint32
 	AttributesEx2 uint32
 	AttributesEx3 uint32
@@ -63,46 +63,46 @@ type SpellInfo struct {
 	FacingCasterFlags  uint32
 
 	// Aura state requirements
-	CasterAuraState      uint32
-	TargetAuraState      uint32
-	CasterAuraStateNot   uint32
-	TargetAuraStateNot   uint32
-	CasterAuraSpell      uint32
-	TargetAuraSpell      uint32
+	CasterAuraState        uint32
+	TargetAuraState        uint32
+	CasterAuraStateNot     uint32
+	TargetAuraStateNot     uint32
+	CasterAuraSpell        uint32
+	TargetAuraSpell        uint32
 	ExcludeCasterAuraSpell uint32
 	ExcludeTargetAuraSpell uint32
 
 	// Cooldowns
-	RecoveryTime         uint32 // ms
-	CategoryRecoveryTime uint32 // ms
+	RecoveryTime          uint32 // ms
+	CategoryRecoveryTime  uint32 // ms
 	StartRecoveryCategory uint32
-	StartRecoveryTime    uint32 // ms
+	StartRecoveryTime     uint32 // ms
 
 	// Interrupt
-	InterruptFlags       uint32
-	AuraInterruptFlags   uint32
+	InterruptFlags        uint32
+	AuraInterruptFlags    uint32
 	ChannelInterruptFlags uint32
 
 	// Proc
-	ProcFlags  uint32
-	ProcChance uint32
+	ProcFlags   uint32
+	ProcChance  uint32
 	ProcCharges uint32
 
 	// Levels
-	MaxLevel  uint32
-	BaseLevel uint32
+	MaxLevel   uint32
+	BaseLevel  uint32
 	SpellLevel uint32
 
 	// Duration (resolved from DBC)
 	Duration int32 // ms, resolved from DurationIndex
 
 	// Power
-	PowerType        uint32
-	ManaCost         uint32
-	ManaCostPerlevel uint32
-	ManaPerSecond    uint32
+	PowerType             uint32
+	ManaCost              uint32
+	ManaCostPerlevel      uint32
+	ManaPerSecond         uint32
 	ManaPerSecondPerLevel uint32
-	ManaCostPercentage uint32
+	ManaCostPercentage    uint32
 
 	// Range (resolved from DBC)
 	RangeMin float32
@@ -116,13 +116,13 @@ type SpellInfo struct {
 	StackAmount uint32
 
 	// Reagents
-	Totem          [2]uint32
-	Reagent        [8]int32
-	ReagentCount   [8]uint32
+	Totem        [2]uint32
+	Reagent      [8]int32
+	ReagentCount [8]uint32
 
 	// Equipment requirements
-	EquippedItemClass            int32
-	EquippedItemSubClassMask     int32
+	EquippedItemClass             int32
+	EquippedItemSubClassMask      int32
 	EquippedItemInventoryTypeMask int32
 
 	// Effects (up to 3)
@@ -162,26 +162,26 @@ type SpellInfo struct {
 // SpellEffectInfo holds per-effect data.
 // Maps to AzerothCore's SpellEffectInfo from SpellInfo.h.
 type SpellEffectInfo struct {
-	Effect            uint32
-	ApplyAuraName     uint32
-	Amplitude         uint32 // ms between periodic ticks
-	DieSides          int32
-	BasePoints        int32
-	RealPointsPerLevel float32
+	Effect              uint32
+	ApplyAuraName       uint32
+	Amplitude           uint32 // ms between periodic ticks
+	DieSides            int32
+	BasePoints          int32
+	RealPointsPerLevel  float32
 	PointsPerComboPoint float32
-	ValueMultiplier   float32
-	DamageMultiplier  float32
-	BonusMultiplier   float32
-	MiscValue         int32
-	MiscValueB        int32
-	Mechanic          uint32
-	TargetA           uint32 // implicit target A
-	TargetB           uint32 // implicit target B
-	RadiusIndex       uint32
-	ChainTarget       uint32
-	ItemType          uint32
-	TriggerSpell      uint32
-	SpellClassMask    [3]uint32
+	ValueMultiplier     float32
+	DamageMultiplier    float32
+	BonusMultiplier     float32
+	MiscValue           int32
+	MiscValueB          int32
+	Mechanic            uint32
+	TargetA             uint32 // implicit target A
+	TargetB             uint32 // implicit target B
+	RadiusIndex         uint32
+	ChainTarget         uint32
+	ItemType            uint32
+	TriggerSpell        uint32
+	SpellClassMask      [3]uint32
 }
 
 // NewSpellInfo constructs a SpellInfo from a DBC SpellEntryEntry.
@@ -192,7 +192,7 @@ func NewSpellInfo(entry *wotlk.SpellEntryEntry, castTimes []wotlk.SpellCastTimeE
 		Dispel:   entry.Dispel,
 		Mechanic: entry.Mechanic,
 
-		Attributes:   entry.Attributes,
+		Attributes:    entry.Attributes,
 		AttributesEx:  entry.AttributesEx,
 		AttributesEx2: entry.AttributesEx2,
 		AttributesEx3: entry.AttributesEx3,
@@ -209,19 +209,19 @@ func NewSpellInfo(entry *wotlk.SpellEntryEntry, castTimes []wotlk.SpellCastTimeE
 		RequiresSpellFocus: entry.RequiresSpellFocus,
 		FacingCasterFlags:  entry.FacingCasterFlags,
 
-		CasterAuraState:      entry.CasterAuraState,
-		TargetAuraState:      entry.TargetAuraState,
-		CasterAuraStateNot:   entry.CasterAuraStateNot,
-		TargetAuraStateNot:   entry.TargetAuraStateNot,
-		CasterAuraSpell:      entry.CasterAuraSpell,
-		TargetAuraSpell:      entry.TargetAuraSpell,
+		CasterAuraState:        entry.CasterAuraState,
+		TargetAuraState:        entry.TargetAuraState,
+		CasterAuraStateNot:     entry.CasterAuraStateNot,
+		TargetAuraStateNot:     entry.TargetAuraStateNot,
+		CasterAuraSpell:        entry.CasterAuraSpell,
+		TargetAuraSpell:        entry.TargetAuraSpell,
 		ExcludeCasterAuraSpell: entry.ExcludeCasterAuraSpell,
 		ExcludeTargetAuraSpell: entry.ExcludeTargetAuraSpell,
 
-		RecoveryTime:         entry.RecoveryTime,
-		CategoryRecoveryTime: entry.CategoryRecoveryTime,
+		RecoveryTime:          entry.RecoveryTime,
+		CategoryRecoveryTime:  entry.CategoryRecoveryTime,
 		StartRecoveryCategory: entry.StartRecoveryCategory,
-		StartRecoveryTime:    entry.StartRecoveryTime,
+		StartRecoveryTime:     entry.StartRecoveryTime,
 
 		InterruptFlags:        entry.InterruptFlags,
 		AuraInterruptFlags:    entry.AuraInterruptFlags,
@@ -231,16 +231,16 @@ func NewSpellInfo(entry *wotlk.SpellEntryEntry, castTimes []wotlk.SpellCastTimeE
 		ProcChance:  entry.ProcChance,
 		ProcCharges: entry.ProcCharges,
 
-		MaxLevel:  entry.MaxLevel,
-		BaseLevel: entry.BaseLevel,
+		MaxLevel:   entry.MaxLevel,
+		BaseLevel:  entry.BaseLevel,
 		SpellLevel: entry.SpellLevel,
 
-		PowerType:        entry.PowerType,
-		ManaCost:         entry.ManaCost,
-		ManaCostPerlevel: entry.ManaCostPerlevel,
-		ManaPerSecond:    entry.ManaPerSecond,
+		PowerType:             entry.PowerType,
+		ManaCost:              entry.ManaCost,
+		ManaCostPerlevel:      entry.ManaCostPerlevel,
+		ManaPerSecond:         entry.ManaPerSecond,
 		ManaPerSecondPerLevel: entry.ManaPerSecondPerLevel,
-		ManaCostPercentage: entry.ManaCostPercentage,
+		ManaCostPercentage:    entry.ManaCostPercentage,
 
 		Speed:       entry.Speed,
 		StackAmount: entry.StackAmount,
@@ -427,6 +427,12 @@ func (si *SpellInfo) HasAttributeEx2(attr uint32) bool {
 // IsPassive returns true if the spell is a passive effect.
 func (si *SpellInfo) IsPassive() bool {
 	return si.Attributes&uint32(SpellAttr0Passive) != 0
+}
+
+// CanBeUsedInCombat reports whether the spell may be cast while in combat
+// (AC SpellInfo::CanBeUsedInCombat — not SPELL_ATTR0_NOT_IN_COMBAT_ONLY_PEACEFUL).
+func (si *SpellInfo) CanBeUsedInCombat() bool {
+	return si.Attributes&SpellAttr0NotInCombatOnlyPeaceful == 0
 }
 
 // IsAutoRepeat returns true if the spell is an auto-repeat ranged spell.

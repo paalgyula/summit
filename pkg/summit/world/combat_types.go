@@ -10,6 +10,34 @@ import (
 // UnitFlagInCombat is UNIT_FLAG_IN_COMBAT of UNIT_FIELD_FLAGS (shared with the player package).
 const UnitFlagInCombat = player.UnitFlagInCombat
 
+// HitInfo bits of SMSG_ATTACKERSTATEUPDATE (Unit.h HitInfo).
+const (
+	HitInfoAffectsVictim uint32 = 0x00000002
+	HitInfoOffhand       uint32 = 0x00000004
+	HitInfoMiss          uint32 = 0x00000010
+	HitInfoFullAbsorb    uint32 = 0x00000020
+	HitInfoPartialAbsorb uint32 = 0x00000040
+	HitInfoFullResist    uint32 = 0x00000080
+	HitInfoPartialResist uint32 = 0x00000100
+	HitInfoCriticalHit   uint32 = 0x00000200
+	HitInfoBlock         uint32 = 0x00002000
+	HitInfoGlancing      uint32 = 0x00010000
+	HitInfoCrushing      uint32 = 0x00020000
+	HitInfoNoAnimation   uint32 = 0x00040000
+	HitInfoRageGain      uint32 = 0x00800000
+)
+
+// VictimState of SMSG_ATTACKERSTATEUPDATE (Unit.h VictimState).
+const (
+	VictimStateIntact   uint8 = 0
+	VictimStateHit      uint8 = 1
+	VictimStateDodge    uint8 = 2
+	VictimStateParry    uint8 = 3
+	VictimStateBlocks   uint8 = 5
+	VictimStateEvades   uint8 = 6
+	VictimStateIsImmune uint8 = 7
+)
+
 // DamageEffectType mirrors AC's DamageEffectType enum (Unit.h:253).
 type DamageEffectType uint8
 
@@ -50,32 +78,32 @@ const (
 type CombatRating uint8
 
 const (
-	CRWeaponSkill          CombatRating = 0
-	CRDefenseSkill         CombatRating = 1
-	CRDodge                CombatRating = 2
-	CRParry                CombatRating = 3
-	CRBlock                CombatRating = 4
-	CRHitMelee             CombatRating = 5
-	CRHitRanged            CombatRating = 6
-	CRHitSpell             CombatRating = 7
-	CRCritMelee            CombatRating = 8
-	CRCritRanged           CombatRating = 9
-	CRCritSpell            CombatRating = 10
-	CRHitTakenMelee        CombatRating = 11
-	CRHitTakenRanged       CombatRating = 12
-	CRHitTakenSpell        CombatRating = 13
-	CRCritTakenMelee       CombatRating = 14
-	CRCritTakenRanged      CombatRating = 15
-	CRCritTakenSpell       CombatRating = 16
-	CRHasteMelee           CombatRating = 17
-	CRHasteRanged          CombatRating = 18
-	CRHasteSpell           CombatRating = 19
-	CRWeaponSkillMainhand  CombatRating = 20
-	CRWeaponSkillOffhand   CombatRating = 21
-	CRWeaponSkillRanged    CombatRating = 22
-	CRExpertise            CombatRating = 23
-	CRArmorPenetration     CombatRating = 24
-	MaxCombatRating        = 25
+	CRWeaponSkill         CombatRating = 0
+	CRDefenseSkill        CombatRating = 1
+	CRDodge               CombatRating = 2
+	CRParry               CombatRating = 3
+	CRBlock               CombatRating = 4
+	CRHitMelee            CombatRating = 5
+	CRHitRanged           CombatRating = 6
+	CRHitSpell            CombatRating = 7
+	CRCritMelee           CombatRating = 8
+	CRCritRanged          CombatRating = 9
+	CRCritSpell           CombatRating = 10
+	CRHitTakenMelee       CombatRating = 11
+	CRHitTakenRanged      CombatRating = 12
+	CRHitTakenSpell       CombatRating = 13
+	CRCritTakenMelee      CombatRating = 14
+	CRCritTakenRanged     CombatRating = 15
+	CRCritTakenSpell      CombatRating = 16
+	CRHasteMelee          CombatRating = 17
+	CRHasteRanged         CombatRating = 18
+	CRHasteSpell          CombatRating = 19
+	CRWeaponSkillMainhand CombatRating = 20
+	CRWeaponSkillOffhand  CombatRating = 21
+	CRWeaponSkillRanged   CombatRating = 22
+	CRExpertise           CombatRating = 23
+	CRArmorPenetration    CombatRating = 24
+	MaxCombatRating                    = 25
 )
 
 // DuelState mirrors AC's DuelState enum (Player.h:355).
@@ -113,6 +141,7 @@ type CalcDamageInfo struct {
 	Target      CombatUnit
 	AttackType  WeaponAttackType
 	HitInfo     uint32
+	TargetState uint8 // VictimState* sent with the swing
 	HitOutcome  MeleeHitOutcome
 
 	Damages     [2]CalcDamage // [0]=main hand, [1]=off hand
@@ -124,11 +153,11 @@ type CalcDamageInfo struct {
 
 // CalcDamage represents damage for a single weapon hand.
 type CalcDamage struct {
-	Damage   uint32
-	Absorb   uint32
-	Resist   uint32
-	Block    uint32
-	Clean    uint32 // damage mitigated but not to absorb/resist
+	Damage uint32
+	Absorb uint32
+	Resist uint32
+	Block  uint32
+	Clean  uint32 // damage mitigated but not to absorb/resist
 }
 
 // MeleeDamageInfo represents a single damage instance for DealDamage.

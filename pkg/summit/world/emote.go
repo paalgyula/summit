@@ -164,3 +164,28 @@ func (gc *WorldSession) broadcastInWorld(pkt *wow.Packet, includeSelf bool) {
 		other.socket.Send(pkt)
 	}
 }
+
+// Sheath states of UNIT_FIELD_BYTES_2 byte 0 (SheathState).
+const (
+	SheathStateUnarmed uint8 = 0
+	SheathStateMelee   uint8 = 1
+	SheathStateRanged  uint8 = 2
+)
+
+// HandleSetSheathed handles CMSG_SETSHEATHED: the client draws or sheathes
+// its weapons (it sends melee when auto-attack starts); everyone in view
+// gets the new state through the value update.
+func (gc *WorldSession) HandleSetSheathed(data wow.PacketData) {
+	if gc.player == nil || !gc.player.IsInWorld {
+		return
+	}
+
+	reader := wow.NewPacketReader(data)
+
+	var state uint32
+	if err := reader.Read(&state); err != nil || state > uint32(SheathStateRanged) {
+		return
+	}
+
+	gc.player.Object.SetByteValue(object.UnitFieldBytes_2, 0, uint8(state))
+}
