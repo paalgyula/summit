@@ -19,6 +19,7 @@ type Server struct {
 	managementToken string
 	logonListener   net.Listener
 	rpcListener     net.Listener
+	grpcServer      *grpc.Server
 
 	// The realm provider
 	realmProvider RealmProvider
@@ -61,6 +62,16 @@ func (as *Server) Run() {
 }
 
 func (as *Server) Close() error {
+	if as.grpcServer != nil {
+		as.grpcServer.GracefulStop()
+	}
+
+	if as.rpcListener != nil {
+		if err := as.rpcListener.Close(); err != nil {
+			as.log.Warn().Err(err).Msg("failed to close management listener")
+		}
+	}
+
 	//nolint:wrapcheck
 	return as.logonListener.Close()
 }
@@ -112,14 +123,14 @@ func (s *Server) StartManagementServer() {
 	if s.managementToken == "" {
 		s.log.Warn().Msg("management server has no token configured: any client can read session keys")
 	}
-	srv := grpc.NewServer(grpc.UnaryInterceptor(managementAuthInterceptor(s.managementToken)))
-	authv1.RegisterAuthManagementServer(srv, &managementRPCServer{
+	s.grpcServer = grpc.NewServer(grpc.UnaryInterceptor(managementAuthInterceptor(s.managementToken)))
+	authv1.RegisterAuthManagementServer(s.grpcServer, &managementRPCServer{
 		srv: s.management,
 	})
 
 	s.log.Info().Msgf("management server listening at %v", s.rpcListener.Addr())
-	if err := srv.Serve(s.rpcListener); err != nil {
-		log.Fatal().Err(err).Msgf("failed to serve: %v", err)
+	if err := s.grpcServer.Serve(s.rpcListener); err != nil {
+		s.log.Error().Err(err).Msg("management gRPC server stopped")
 	}
 }
 

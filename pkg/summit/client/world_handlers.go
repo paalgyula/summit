@@ -23,8 +23,42 @@ func (wc *WorldClient) handleMessage(msg *ServerMessage) {
 		wc.handleAuthResponse(msg)
 	case wow.ServerCharEnum:
 		wc.handleCharEnum(msg)
+	case wow.ServerLoginVerifyWorld:
+		wc.handleLoginVerifyWorld(msg)
+	case wow.ServerCharacterLoginFailed:
+		wc.handleCharacterLoginFailed(msg)
+	case wow.ServerInitialSpells:
+		wc.handleInitialSpells(msg)
+	case wow.ServerActionButtons:
+		wc.handleActionButtons(msg)
+	case wow.ServerBindpointupdate:
+		wc.handleBindPointUpdate(msg)
+	case wow.ServerTimeSyncReq:
+		wc.handleTimeSyncReq(msg)
+	case wow.ServerUpdateObject:
+		wc.handleUpdateObject(msg)
+	case wow.ServerDestroyObject:
+		wc.handleDestroyObject(msg)
+	case wow.ServerNameQueryResponse:
+		wc.handleNameQueryResponse(msg)
+	case wow.ServerCreatureQueryResponse:
+		wc.handleCreatureQueryResponse(msg)
+	case wow.ServerMonsterMove:
+		wc.handleMonsterMove(msg)
+	case wow.ServerAttackstart:
+		wc.handleAttackStart(msg)
+	case wow.ServerAttackstop:
+		wc.handleAttackStop(msg)
+	case wow.ServerAttackerstateupdate:
+		wc.handleAttackerStateUpdate(msg)
+	case wow.ServerLogXpgain:
+		wc.handleXpGain(msg)
+	case wow.ServerLevelupInfo:
+		wc.handleLevelUp(msg)
+	case wow.ServerLootResponse:
+		wc.handleLootResponse(msg)
 	default:
-		wc.log.Warn().
+		wc.log.Debug().
 			Str("packet", msg.Opcode.String()).
 			Int("size", len(msg.Data)).
 			Msgf("unhandled packet: %s", msg.Opcode.String())
@@ -38,7 +72,7 @@ func (wc *WorldClient) makeHeader(opcode wow.OpCode, dataSize int) []byte {
 
 	header := buf.Bytes()
 
-	if wc.cryptEnable {
+	if wc.cryptEnable.Load() {
 		header = wc.crypt.Encrypt(header)
 	}
 
@@ -49,7 +83,10 @@ func (wc *WorldClient) makeHeader(opcode wow.OpCode, dataSize int) []byte {
 	return header
 }
 
-// Send data to the client
+// Send data to the client. It is a no-op once the connection is closed.
 func (wc *WorldClient) Send(pkt *wow.Packet) {
-	wc.clientMessages <- pkt
+	select {
+	case wc.clientMessages <- pkt:
+	case <-wc.closed:
+	}
 }

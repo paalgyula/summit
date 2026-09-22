@@ -254,8 +254,9 @@ func main() {
 		// Spell.dbc & friends: without them no spell can be cast
 		if dbcPath := viper.GetString("world.dbc_path"); dbcPath != "" {
 			worldOptions = append(worldOptions, world.WithSpellDBC(dbcPath))
+			worldOptions = append(worldOptions, world.WithCreatureScaleDBC(dbcPath))
 		} else {
-			log.Warn().Msg("world.dbc_path is not set: spell data unavailable, casts will fail")
+			log.Warn().Msg("world.dbc_path is not set: spell and creature scale data unavailable")
 		}
 
 		worldSrv, err := world.NewServer(worldOptions...)

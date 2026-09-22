@@ -1,11 +1,14 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net"
-	"os"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
@@ -19,8 +22,9 @@ const defaultAddonInfo = `9e020000789c75d2c16ac3300cc671ef2976e99becb4b450c2eacb
 type WorldClient struct {
 	crypt *crypt.WowCrypt
 
-	// Enable after auth session
-	cryptEnable bool
+	// cryptEnable is enabled after the CMSG_AUTH_SESSION is sent; from that
+	// point on the header of every packet is encrypted with the session key.
+	cryptEnable atomic.Bool
 
 	AccountName string
 	SessionKey  *big.Int
@@ -28,9 +32,8 @@ type WorldClient struct {
 	// serverSeed is a 4 byte long random number
 	serverSeed []byte
 
-	input *wow.PacketReader
-	conn  net.Conn
-	log   zerolog.Logger
+	conn net.Conn
+	log  zerolog.Logger
 
 	clientMessages chan *wow.Packet
 	serverMessages chan ServerMessage
@@ -38,6 +41,32 @@ type WorldClient struct {
 	// ForwardHandler is called for all packets from upstream when set.
 	// This enables proxy mode where packets are forwarded instead of handled locally.
 	forwardHandler func(opcode wow.OpCode, data []byte)
+
+	closeOnce sync.Once
+	closed    chan struct{}
+
+	// startedAt is the reference for the client-side clock used in time sync
+	// responses.
+	startedAt time.Time
+
+	stateMu    sync.RWMutex
+	characters []*CharEnum
+	self       *Player
+
+	objectsMu     sync.RWMutex
+	objects       map[wow.GUID]*Entity
+	selfGUID      wow.GUID
+	creatureNames map[uint32]string
+
+	// charEnumCh receives the latest character list (buffered, latest wins).
+	charEnumCh chan []*CharEnum
+	// loginVerifyCh is signalled once SMSG_LOGIN_VERIFY_WORLD arrived.
+	loginVerifyCh chan struct{}
+	// loginFailedCh carries the status code of SMSG_CHARACTER_LOGIN_FAILED.
+	loginFailedCh chan uint8
+	// readyCh is signalled once the player entered the world and the initial
+	// spellbook and action bar have been received.
+	readyCh chan struct{}
 }
 
 func NewWorldClient(accountName, sessionKey, worldAddress string) (*WorldClient, error) {
@@ -52,7 +81,6 @@ func NewWorldClient(accountName, sessionKey, worldAddress string) (*WorldClient,
 	//nolint:exhaustruct
 	wc := &WorldClient{
 		crypt:       wowcrypt,
-		input:       wow.NewConnectionReader(conn),
 		conn:        conn,
 		serverSeed:  nil, // after the challenge this will be filled
 		AccountName: accountName,
@@ -61,13 +89,22 @@ func NewWorldClient(accountName, sessionKey, worldAddress string) (*WorldClient,
 		clientMessages: make(chan *wow.Packet),
 		serverMessages: make(chan ServerMessage),
 
+		closed:    make(chan struct{}),
+		startedAt: time.Now(),
+
+		objects:       make(map[wow.GUID]*Entity),
+		creatureNames: make(map[uint32]string),
+
+		charEnumCh:    make(chan []*CharEnum, 1),
+		loginVerifyCh: make(chan struct{}, 1),
+		loginFailedCh: make(chan uint8, 1),
+		readyCh:       make(chan struct{}, 1),
+
 		log: log.With().
 			Str("acc", accountName).
 			Str("server", worldAddress).
 			Str("service", "world-client").
 			Logger(),
-
-		// client: gc,
 	}
 
 	go wc.readServerPackets()
@@ -79,12 +116,34 @@ func NewWorldClient(accountName, sessionKey, worldAddress string) (*WorldClient,
 	return wc, nil
 }
 
+// Closed returns a channel that is closed when the connection is dropped.
+func (wc *WorldClient) Closed() <-chan struct{} {
+	return wc.closed
+}
+
+// isClosed reports whether the connection has already been closed.
+func (wc *WorldClient) isClosed() bool {
+	select {
+	case <-wc.closed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Disconnect closes the connection to the world server. It is safe to call
+// multiple times and from multiple goroutines.
+//
 //nolint:wrapcheck
 func (wc *WorldClient) Disconnect() error {
-	close(wc.clientMessages)
-	close(wc.serverMessages)
+	var err error
 
-	return wc.conn.Close()
+	wc.closeOnce.Do(func() {
+		close(wc.closed)
+		err = wc.conn.Close()
+	})
+
+	return err
 }
 
 // SetForwardHandler sets a callback function that will be called for all packets
@@ -104,26 +163,36 @@ func (msg *ServerMessage) Reader() *wow.PacketReader {
 
 // Handle packets (goroutine)
 func (wc *WorldClient) opcodeHandler() {
-	for msg := range wc.serverMessages {
-		wc.handleMessage(&msg)
+	for {
+		select {
+		case <-wc.closed:
+			return
+		case msg := <-wc.serverMessages:
+			wc.handleMessage(&msg)
+		}
 	}
 }
 
 // packetSender goroutine which sends out the packets
 func (wc *WorldClient) packetSender() {
-	for pkt := range wc.clientMessages {
-		header := wc.makeHeader(pkt.Opcode(), pkt.Len())
+	for {
+		select {
+		case <-wc.closed:
+			return
+		case pkt := <-wc.clientMessages:
+			header := wc.makeHeader(pkt.Opcode(), pkt.Len())
 
-		wc.log.Trace().
-			Str("opcode", pkt.Opcode().String()).
-			Int("size", pkt.Len()).
-			Msgf(">> %s", pkt.Opcode().String())
+			wc.log.Trace().
+				Str("opcode", pkt.Opcode().String()).
+				Int("size", pkt.Len()).
+				Msgf(">> %s", pkt.Opcode().String())
 
-		wc.conn.Write(header)
-		wc.conn.Write(pkt.Bytes())
+			_, _ = wc.conn.Write(header)
+			_, _ = wc.conn.Write(pkt.Bytes())
 
-		if pkt.Opcode() == wow.ClientAuthSession {
-			wc.cryptEnable = true
+			if pkt.Opcode() == wow.ClientAuthSession {
+				wc.cryptEnable.Store(true)
+			}
 		}
 	}
 }
@@ -132,33 +201,33 @@ func (wc *WorldClient) readServerPackets() {
 	for {
 		oc, data, err := wc.readPacket()
 		if err != nil {
-			if err == io.EOF {
-				wc.log.Info().Err(err).Msg("client dropped")
-
-				os.Exit(1)
+			if errors.Is(err, io.EOF) {
+				wc.log.Info().Msg("world server closed the connection")
+			} else if !wc.isClosed() {
+				wc.log.Debug().Err(err).Msg("cannot read from server")
 			}
 
-			// wc.log.Error().Err(err).Msg("cannot read from server")
-
-			// _ = wc.client.Close()
+			_ = wc.Disconnect()
 
 			return
 		}
 
-		wc.serverMessages <- ServerMessage{
-			Opcode: oc,
-			Data:   data,
+		select {
+		case wc.serverMessages <- ServerMessage{Opcode: oc, Data: data}:
+		case <-wc.closed:
+			return
 		}
 	}
 }
 
 func (wc *WorldClient) readPacket() (wow.OpCode, []byte, error) {
-	header, err := wc.input.ReadNBytes(4)
-	if err != nil {
+	header := make([]byte, 4)
+
+	if _, err := io.ReadFull(wc.conn, header); err != nil {
 		return 0, nil, fmt.Errorf("cannot read header: %w", err)
 	}
 
-	if wc.cryptEnable {
+	if wc.cryptEnable.Load() {
 		header = wc.crypt.Decrypt(header)
 	}
 
@@ -179,12 +248,16 @@ func (wc *WorldClient) readPacket() (wow.OpCode, []byte, error) {
 	wc.log.Trace().
 		Int("size", int(length)).
 		Str("opcode", wow.OpCode(opcode).String()).
-		Msgf("<< %s encrypted: %t", wow.OpCode(opcode).String(), wc.cryptEnable)
+		Msgf("<< %s encrypted: %t", wow.OpCode(opcode).String(), wc.cryptEnable.Load())
 
-	data := make([]byte, length)
+	// The size field counts the 2-byte opcode, so the payload is size-2.
+	payloadLen := int(length) - 2
+	if payloadLen <= 0 {
+		return wow.OpCode(opcode), nil, nil
+	}
 
-	_, err = wc.input.ReadBytes(data)
-	if err != nil {
+	data := make([]byte, payloadLen)
+	if _, err := io.ReadFull(wc.conn, data); err != nil {
 		return 0, nil, fmt.Errorf("readPacket: not enough data to read: %w", err)
 	}
 

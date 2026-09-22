@@ -3,7 +3,6 @@ package client
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
@@ -13,7 +12,7 @@ import (
 )
 
 type CharEnum struct {
-	guid   wow.GUID
+	GUID   wow.GUID
 	Name   string
 	Race   wow.PlayerRace
 	Class  wow.PlayerClass
@@ -46,7 +45,7 @@ type CharEnum struct {
 func readCharEnum(r *wow.PacketReader) *CharEnum {
 	var c CharEnum
 
-	r.Read(&c.guid)
+	r.Read(&c.GUID)
 	r.ReadString(&c.Name)
 
 	r.Read(&c.Race)
@@ -85,7 +84,9 @@ func readCharEnum(r *wow.PacketReader) *CharEnum {
 
 	c.Inventory = player.NewInventory()
 
-	for i := 0; i < player.EquipmentSlotEnd; i++ {
+	// The server describes CharEnumSlots (19 equipment + 4 bags) entries, each
+	// 9 bytes; reading fewer would desynchronise the following characters.
+	for i := 0; i < player.CharEnumSlots; i++ {
 		var displayID uint32
 		var invType wow.InventoryType
 		var enchantSlot uint32
@@ -95,9 +96,9 @@ func readCharEnum(r *wow.PacketReader) *CharEnum {
 		r.Read(&enchantSlot)
 
 		if displayID != 0 {
-			item := player.NewItem(displayID, c.guid)
+			item := player.NewItem(displayID, c.GUID)
 			item.SetEnchant(0, enchantSlot)
-			c.Inventory.SetEquipment(i, item)
+			c.Inventory.SetItem(i, item)
 		}
 	}
 
@@ -108,14 +109,19 @@ func (wc *WorldClient) handleCharEnum(msg *ServerMessage) {
 	r := msg.Reader()
 
 	var count uint8
-	r.Read(&count)
-
-	chars := make([]*CharEnum, count)
-	for i := 0; i < int(count); i++ {
-		chars[i] = readCharEnum(r)
+	if err := r.Read(&count); err != nil {
+		wc.log.Error().Err(err).Msg("cannot read character count")
+		return
 	}
 
-	fmt.Printf("read %d characters\n", len(chars))
+	chars := make([]*CharEnum, 0, count)
+	for i := 0; i < int(count); i++ {
+		chars = append(chars, readCharEnum(r))
+	}
+
+	wc.setCharacters(chars)
+
+	wc.log.Info().Int("count", len(chars)).Msg("received character list")
 }
 
 func (wc *WorldClient) handleAuthResponse(msg *ServerMessage) {
