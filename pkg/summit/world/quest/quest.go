@@ -108,7 +108,7 @@ type Quest struct {
 
 	// Addon fields (quest_template_addon)
 	PrevQuestId          int32
-	NextQuestId          uint32
+	NextQuestId          int32
 	ExclusiveGroup       int32
 	BreadcrumbForQuestId uint32
 	RequiredSkillId      uint16

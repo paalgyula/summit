@@ -200,12 +200,9 @@ func (gc *WorldSession) HandleQuestgiverQueryQuest(data wow.PacketData) {
 		return
 	}
 
-	// Auto-accept if the quest has that flag
-	if qDef.IsAutoAccept() {
-		gc.handleAcceptQuest(wow.GUID(npcGUID), questID)
-
-		return
-	}
+	// QUEST_FLAGS_AUTO_ACCEPT is set on most starting-zone quests; like the
+	// reference cores we still show the details and let the client accept
+	// (CMSG_QUESTGIVER_ACCEPT_QUEST), so the player sees the quest text.
 
 	// Auto-complete quests skip to request items
 	if qDef.IsAutoComplete() {
