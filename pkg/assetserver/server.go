@@ -61,6 +61,8 @@ type Server struct {
 	inFlight sync.Map
 	// creatures caches the parsed creature DBCs for the display manifests.
 	creatures creatureTables
+	// goDisplays caches the parsed GameObjectDisplayInfo DBC.
+	goDisplays goDisplayTables
 	// spells caches Spell.dbc and its lookup tables for the spell manifests.
 	spells spellTables
 }
@@ -332,7 +334,22 @@ func (s *Server) handleAsset(c echo.Context) error {
 		return c.File(canonicalCachePath)
 	}
 
-	// 5a. Spell manifests (Spell.dbc + SpellIcon / SpellCastTimes / SpellRange)
+	// 5a. Game object display manifests (GameObjectDisplayInfo)
+	if id, ok := gameObjectDisplayID(relPath); ok {
+		canonicalCachePath := filepath.Join(s.cfg.CacheDir, "gameobject", fmt.Sprintf("%d.json", id))
+		if fi, err := os.Stat(canonicalCachePath); err == nil && !fi.IsDir() {
+			c.Response().Header().Set("Content-Type", "application/json; charset=UTF-8")
+			return c.File(canonicalCachePath)
+		}
+		if err := s.tryJITGameObjectDisplay(id, canonicalCachePath); err != nil {
+			s.log.Debug().Err(err).Uint32("display", id).Msg("gameobject display unavailable")
+			return echo.ErrNotFound
+		}
+		c.Response().Header().Set("Content-Type", "application/json; charset=UTF-8")
+		return c.File(canonicalCachePath)
+	}
+
+	// 5c. Spell manifests (Spell.dbc + SpellIcon / SpellCastTimes / SpellRange)
 	if id, ok := spellID(relPath); ok {
 		if err := s.tryJITSpell(id, cachedPath); err != nil {
 			s.log.Debug().Err(err).Uint32("spell", id).Msg("spell unavailable")
@@ -341,7 +358,7 @@ func (s *Server) handleAsset(c echo.Context) error {
 		return c.File(cachedPath)
 	}
 
-	// 5b. Database tables as JSON
+	// 5d. Database tables as JSON
 	if relPath == CharacterDataPath {
 		if err := s.tryJITCharacterData(cachedPath); err == nil {
 			return c.File(cachedPath)
