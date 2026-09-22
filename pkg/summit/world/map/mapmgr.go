@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/paalgyula/summit/pkg/summit/world/areatrigger"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/rs/zerolog/log"
 )
 
@@ -20,6 +21,10 @@ type MapManager struct {
 
 	// AreaTrigger manager reference
 	areaTriggerMgr *areatrigger.Manager
+
+	// gameObjectDynamicFlagsFn resolves per-viewer GO dynamic flags for new
+	// maps (e.g. quest sparkle). Optional.
+	gameObjectDynamicFlagsFn func(gobj interface{}, p *player.Player) uint16
 
 	mutex sync.RWMutex
 }
@@ -47,6 +52,25 @@ func (mm *MapManager) SetAreaTriggerManager(mgr *areatrigger.Manager) {
 	mm.areaTriggerMgr = mgr
 }
 
+// SetGameObjectDynamicFlagsFunc installs the per-viewer dynamic flags resolver
+// applied to every map created from now on.
+func (mm *MapManager) SetGameObjectDynamicFlagsFunc(fn func(gobj interface{}, p *player.Player) uint16) {
+	mm.mutex.Lock()
+	defer mm.mutex.Unlock()
+
+	mm.gameObjectDynamicFlagsFn = fn
+
+	for _, m := range mm.baseMaps {
+		m.SetGameObjectDynamicFlagsFunc(fn)
+	}
+
+	for _, instances := range mm.instances {
+		for _, m := range instances {
+			m.SetGameObjectDynamicFlagsFunc(fn)
+		}
+	}
+}
+
 // CreateBaseMap creates or returns the base map for the given map ID.
 func (mm *MapManager) CreateBaseMap(mapID uint32) *Map {
 	mm.mutex.Lock()
@@ -59,6 +83,10 @@ func (mm *MapManager) CreateBaseMap(mapID uint32) *Map {
 	// Create new base map
 	entry := mm.getMapEntry(mapID)
 	m := NewMap(mapID, 0, entry)
+
+	if mm.gameObjectDynamicFlagsFn != nil {
+		m.SetGameObjectDynamicFlagsFunc(mm.gameObjectDynamicFlagsFn)
+	}
 
 	mm.baseMaps[mapID] = m
 
@@ -123,6 +151,10 @@ func (mm *MapManager) createInstance(mapID uint32, entry *MapEntry) *Map {
 	// Create instance map
 	m := NewMap(mapID, instanceID, entry)
 	m.SpawnMode = 0 // Normal difficulty
+
+	if mm.gameObjectDynamicFlagsFn != nil {
+		m.SetGameObjectDynamicFlagsFunc(mm.gameObjectDynamicFlagsFn)
+	}
 
 	// Initialize instance map
 	if mm.instances[mapID] == nil {

@@ -11,10 +11,12 @@ func NewGameObject() *GameObject {
 	obj.objectTypeID = wow.TypeIDGameObject
 	obj.objectType = wow.TypeMaskGameObject
 
-	// GameObject uses stationary position + low GUID + rotation
+	// GameObject uses stationary position + position + low GUID + rotation
+	// (mirrors GameObject::GameObject's m_updateFlag).
 	obj.AddUpdateFlags(
 		wow.UpdateFlagLowGUID |
 			wow.UpdateFlagStationaryPosition |
+			wow.UpdateFlagPosition |
 			wow.UpdateFlagRotation,
 	)
 

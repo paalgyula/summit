@@ -40,6 +40,10 @@ type Map struct {
 	// AreaTriggers on this map
 	areaTriggers []*areatrigger.AreaTrigger
 
+	// gameObjectDynamicFlags computes GAMEOBJECT_DYNAMIC for a game object from
+	// the viewer's perspective (e.g. quest sparkle). Optional; nil means 0.
+	gameObjectDynamicFlags func(gobj interface{}, p *player.Player) uint16
+
 	mutex sync.RWMutex
 	log   zerolog.Logger
 }
@@ -105,6 +109,15 @@ func (m *Map) GetPlayer(guid uint32) *player.Player {
 	defer m.mutex.RUnlock()
 
 	return m.players[guid]
+}
+
+// SetGameObjectDynamicFlagsFunc installs the per-viewer dynamic flags resolver
+// used when building game object create packets.
+func (m *Map) SetGameObjectDynamicFlagsFunc(fn func(gobj interface{}, p *player.Player) uint16) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	m.gameObjectDynamicFlags = fn
 }
 
 // GetPlayers returns all players on the map.
@@ -504,6 +517,12 @@ func (m *Map) sendGameObjectCreateToPlayer(gobj interface{}, target *player.Play
 	type positionProvider interface {
 		GetPosition() *player.WorldLocation
 	}
+	type rotationProvider interface {
+		GetPackedRotation() int64
+	}
+	type createTypeProvider interface {
+		CreateUpdateType() wow.ObjectUpdateType
+	}
 
 	guid, ok := gobj.(guidProvider)
 	if !ok {
@@ -523,10 +542,20 @@ func (m *Map) sendGameObjectCreateToPlayer(gobj interface{}, target *player.Play
 		return
 	}
 
+	updateType := int(wow.UpdateTypeCreateObject)
+	if ctp, ok := gobj.(createTypeProvider); ok {
+		updateType = int(ctp.CreateUpdateType())
+	}
+
+	var packedRotation int64
+	if rp, ok := gobj.(rotationProvider); ok {
+		packedRotation = rp.GetPackedRotation()
+	}
+
 	buf := object.NewUpdateBlockBuffer()
 
 	// Update type: CreateObject
-	_ = buf.WriteOne(int(wow.UpdateTypeCreateObject))
+	_ = buf.WriteOne(int(updateType))
 
 	// GUID
 	_ = buf.Write(guid.GetGUID())
@@ -535,17 +564,27 @@ func (m *Map) sendGameObjectCreateToPlayer(gobj interface{}, target *player.Play
 	_ = buf.WriteOne(int(wow.TypeIDGameObject))
 
 	// Update flags
-	flags := wow.UpdateFlagLowGUID | wow.UpdateFlagStationaryPosition | wow.UpdateFlagRotation
+	flags := wow.UpdateFlagLowGUID | wow.UpdateFlagStationaryPosition |
+		wow.UpdateFlagPosition | wow.UpdateFlagRotation
 	_ = buf.Write(flags)
 
 	object.WriteMovementBlock(buf, flags, &object.MovementBlock{
 		X: loc.X, Y: loc.Y, Z: loc.Z, O: loc.O,
-		LowGUID: uint32(guid.GetGUID().Counter()),
+		LowGUID:  uint32(guid.GetGUID().Counter()),
+		Rotation: packedRotation,
 	})
 
 	// Values update - full mask for create
 	goObj := obj.GetObject()
 	if goObj != nil {
+		// Per-viewer dynamic flags (quest sparkle etc.) must be set before the
+		// values block is built so they are included in the create packet.
+		if m.gameObjectDynamicFlags != nil {
+			if setter, ok := gobj.(interface{ SetGameObjectDynamicFlags(uint16) }); ok {
+				setter.SetGameObjectDynamicFlags(m.gameObjectDynamicFlags(gobj, target))
+			}
+		}
+
 		mask := goObj.BuildFilteredUpdateMask(target.Object, false)
 		block := goObj.BuildValuesUpdateBlock(mask, target.Object)
 		buf.WriteBytes(block)
@@ -866,6 +905,51 @@ func (m *Map) IsInstanceable() bool {
 // This is a simplified version - actual implementation would look up MapDifficulty.dbc.
 func (m *Map) GetMapDifficulty() uint32 {
 	return uint32(m.SpawnMode)
+}
+
+// SendToNPCVisiblePlayers sends a packet to all players who can see the specified NPC.
+// This is used for movement packets and other NPC broadcasts that should only go to
+// players within visibility range.
+func (m *Map) SendToNPCVisiblePlayers(npcGUID wow.GUID, pkt *wow.Packet) {
+	if pkt == nil {
+		return
+	}
+
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	for _, p := range m.players {
+		if p == nil || !p.IsInWorld || p.Sender == nil {
+			continue
+		}
+
+		// Check if this player can see the NPC
+		if m.visibilityTracker.IsVisible(p.GUID(), npcGUID) {
+			p.Sender.Send(pkt)
+		}
+	}
+}
+
+// SendToPlayerVisibleObjects sends a packet to all players who can see the specified object.
+// This is used for object broadcasts that should only go to players within visibility range.
+func (m *Map) SendToPlayerVisibleObjects(objGUID wow.GUID, pkt *wow.Packet) {
+	if pkt == nil {
+		return
+	}
+
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	for _, p := range m.players {
+		if p == nil || !p.IsInWorld || p.Sender == nil {
+			continue
+		}
+
+		// Check if this player can see the object
+		if m.visibilityTracker.IsVisible(p.GUID(), objGUID) {
+			p.Sender.Send(pkt)
+		}
+	}
 }
 
 // SendToPlayers sends a packet to all players on the map.

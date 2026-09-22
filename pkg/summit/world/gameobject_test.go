@@ -1,10 +1,14 @@
 package world_test
 
 import (
+	"math"
 	"testing"
+	"time"
 
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/summit/world/loot"
+	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,9 +54,9 @@ func testGOStore() *basedata.Store {
 			},
 		},
 		GOSpawns: []*basedata.GameObjectSpawn{
-			{GUID: 1, Entry: 1001, MapID: 0, PhaseMask: 1, PosX: -8940, PosY: -140, PosZ: 83, State: 0},
-			{GUID: 2, Entry: 1002, MapID: 0, PhaseMask: 1, PosX: -8935, PosY: -135, PosZ: 83, O: 1.57, State: 0},
-			{GUID: 3, Entry: 1003, MapID: 1, PhaseMask: 1, PosX: 100, PosY: 200, PosZ: 300, State: 0},
+			{GUID: 1, Entry: 1001, MapID: 0, PhaseMask: 1, PosX: -8940, PosY: -140, PosZ: 83, State: uint8(basedata.GOStateReady)},
+			{GUID: 2, Entry: 1002, MapID: 0, PhaseMask: 1, PosX: -8935, PosY: -135, PosZ: 83, O: 1.57, State: uint8(basedata.GOStateReady)},
+			{GUID: 3, Entry: 1003, MapID: 1, PhaseMask: 1, PosX: 100, PosY: 200, PosZ: 300, State: uint8(basedata.GOStateReady)},
 		},
 	}
 }
@@ -239,14 +243,14 @@ func TestGameObjectUse_Chest(t *testing.T) {
 		},
 	}
 	data := &world.GameObjectData{
-		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 1, Entry: 1001},
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 1, Entry: 1001, State: uint8(basedata.GOStateReady)},
 	}
 
 	g := world.NewGameObject(tpl, data)
 
-	assert.False(t, g.IsLooted())
-	g.Use(nil)
-	assert.True(t, g.IsLooted())
+	assert.Equal(t, world.GO_READY, g.GetLootState())
+	require.NoError(t, g.Use(world.GameObjectUseContext{}))
+	assert.Equal(t, world.GO_ACTIVATED, g.GetLootState())
 }
 
 func TestGameObjectUse_Door(t *testing.T) {
@@ -256,15 +260,16 @@ func TestGameObjectUse_Door(t *testing.T) {
 		},
 	}
 	data := &world.GameObjectData{
-		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 2, Entry: 1002},
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 2, Entry: 1002, State: uint8(basedata.GOStateReady)},
 	}
 
 	g := world.NewGameObject(tpl, data)
+	ctx := world.GameObjectUseContext{}
 
 	assert.Equal(t, world.GOStateReady, g.GOState)
-	g.Use(nil)
+	require.NoError(t, g.Use(ctx))
 	assert.Equal(t, world.GOStateActive, g.GOState)
-	g.Use(nil)
+	require.NoError(t, g.Use(ctx))
 	assert.Equal(t, world.GOStateReady, g.GOState)
 }
 
@@ -275,15 +280,16 @@ func TestGameObjectUse_Button(t *testing.T) {
 		},
 	}
 	data := &world.GameObjectData{
-		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 3, Entry: 1003},
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 3, Entry: 1003, State: uint8(basedata.GOStateReady)},
 	}
 
 	g := world.NewGameObject(tpl, data)
+	ctx := world.GameObjectUseContext{}
 
 	assert.Equal(t, world.GOStateReady, g.GOState)
-	g.Use(nil)
+	require.NoError(t, g.Use(ctx))
 	assert.Equal(t, world.GOStateActive, g.GOState)
-	g.Use(nil)
+	require.NoError(t, g.Use(ctx))
 	assert.Equal(t, world.GOStateReady, g.GOState)
 }
 
@@ -372,4 +378,247 @@ func TestGameObjectManager_SpawnObject(t *testing.T) {
 	gm.SpawnObject(9999, data2)
 	g = gm.GetObject(101)
 	assert.Nil(t, g) // should not be spawned
+}
+
+func TestQuaternionFromSpawn_Orientation(t *testing.T) {
+	q := world.QuaternionFromSpawn([4]float32{}, float32(math.Pi/2))
+
+	assert.InDelta(t, 0, q[0], 1e-6)
+	assert.InDelta(t, 0, q[1], 1e-6)
+	assert.InDelta(t, math.Sqrt2/2, q[2], 1e-6)
+	assert.InDelta(t, math.Sqrt2/2, q[3], 1e-6)
+}
+
+func TestQuaternionFromSpawn_ExplicitIsNormalized(t *testing.T) {
+	q := world.QuaternionFromSpawn([4]float32{1, 0, 0, 1}, 0)
+
+	length := math.Sqrt(float64(q[0]*q[0] + q[1]*q[1] + q[2]*q[2] + q[3]*q[3]))
+	assert.InDelta(t, 1.0, length, 1e-6)
+	assert.InDelta(t, math.Sqrt2/2, q[0], 1e-6)
+	assert.InDelta(t, math.Sqrt2/2, q[3], 1e-6)
+}
+
+func TestPackQuaternion_Identity(t *testing.T) {
+	assert.Equal(t, int64(0), world.PackQuaternion([4]float32{0, 0, 0, 1}))
+}
+
+func TestPackQuaternion_YawHalfPi(t *testing.T) {
+	q := world.QuaternionFromSpawn([4]float32{}, float32(math.Pi/2))
+
+	// z = round(0.70710678 * 2^20) = 741455, x = y = 0
+	assert.Equal(t, int64(741455), world.PackQuaternion(q))
+}
+
+func TestGameObject_RotationFieldsInitialised(t *testing.T) {
+	tpl := &world.GameObjectTemplate{
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry: 1002, Type: 0, Name: "Door", Size: 1.0,
+		},
+	}
+	data := &world.GameObjectData{
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 2, Entry: 1002, O: 1.57},
+	}
+
+	g := world.NewGameObject(tpl, data)
+
+	// Parent rotation defaults to identity.
+	assert.Equal(t, float32(0), g.Object.GetFloatValue(object.GameobjectParentrotation))
+	assert.Equal(t, float32(0), g.Object.GetFloatValue(object.GameobjectParentrotation+1))
+	assert.Equal(t, float32(0), g.Object.GetFloatValue(object.GameobjectParentrotation+2))
+	assert.Equal(t, float32(1), g.Object.GetFloatValue(object.GameobjectParentrotation+3))
+
+	// World rotation is derived from the orientation and packs non-zero.
+	assert.NotEqual(t, int64(0), g.PackedRotation)
+	assert.Equal(t, g.PackedRotation, g.GetPackedRotation())
+}
+
+func TestGameObject_InteractionDistance(t *testing.T) {
+	tests := []struct {
+		name     string
+		typeID   world.GameObjectType
+		expected float32
+	}{
+		{"questgiver", world.GameObjectTypeQuestGiver, 5.5555553},
+		{"door", world.GameObjectTypeDoor, 5.0},
+		{"chair", world.GameObjectTypeChair, 3.0},
+		{"fishinghole", world.GameObjectTypeFishingHole, 20.5},
+		{"mailbox", world.GameObjectTypeMailbox, 10.0},
+		{"chest", world.GameObjectTypeChest, 5.5},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &world.GameObject{Type: tt.typeID}
+			assert.InDelta(t, tt.expected, g.InteractionDistance(), 1e-6)
+		})
+	}
+}
+
+func TestGameObject_IsWithinInteractionDistance(t *testing.T) {
+	g := &world.GameObject{Type: world.GameObjectTypeChest, X: 10, Y: 20, Z: 30}
+
+	assert.True(t, g.IsWithinInteractionDistance(10, 20, 30))
+	assert.True(t, g.IsWithinInteractionDistance(14, 20, 30))  // 4 yd away
+	assert.False(t, g.IsWithinInteractionDistance(16, 20, 30)) // 6 yd away
+}
+
+func TestGameObject_CreateUpdateType(t *testing.T) {
+	assert.Equal(t, wow.ObjectUpdateType(wow.UpdateTypeCreateObject2),
+		(&world.GameObject{Type: world.GameObjectTypeTrap}).CreateUpdateType())
+	assert.Equal(t, wow.ObjectUpdateType(wow.UpdateTypeCreateObject2),
+		(&world.GameObject{Type: world.GameObjectTypeFlagStand}).CreateUpdateType())
+	assert.Equal(t, wow.ObjectUpdateType(wow.UpdateTypeCreateObject),
+		(&world.GameObject{Type: world.GameObjectTypeDoor}).CreateUpdateType())
+	assert.Equal(t, wow.ObjectUpdateType(wow.UpdateTypeCreateObject),
+		(&world.GameObject{Type: world.GameObjectTypeChest}).CreateUpdateType())
+}
+
+func TestGameObjectTemplate_AddonAccessors(t *testing.T) {
+	trap := &basedata.GameObjectTemplate{
+		Type: 6, // Trap
+		// Data[3]=spellId, Data[4]=type, Data[5]=cooldown(secs), Data[6]=autoClose
+		Data: [24]int32{0, 60, 10, 8001, 1, 30, 4000},
+	}
+	assert.Equal(t, uint32(8001), trap.GetSpellID())
+	assert.Equal(t, uint32(30000), trap.GetCooldown())
+	assert.Equal(t, uint32(4000), trap.GetAutoCloseTime())
+
+	spellcaster := &basedata.GameObjectTemplate{
+		Type: 22, // SpellCaster
+		// Data[0]=spellId, Data[1]=charges, Data[3]=allowMounted
+		Data: [24]int32{9001, 5, 0, 1},
+	}
+	assert.Equal(t, uint32(9001), spellcaster.GetSpellID())
+	assert.Equal(t, uint32(5), spellcaster.GetCharges())
+	assert.True(t, spellcaster.IsUsableMounted())
+
+	chest := &basedata.GameObjectTemplate{
+		Type: 3, // Chest
+		// Data[1]=lootId, Data[3]=consumable, Data[7]=linkedTrapId, Data[8]=questId
+		Data: [24]int32{0, 5001, 0, 1, 0, 0, 0, 7001, 1234},
+	}
+	assert.True(t, chest.IsDespawnAtAction())
+	assert.Equal(t, uint32(7001), chest.GetLinkedGameObjectEntry())
+	assert.Equal(t, int32(1234), chest.GetQuestID())
+
+	goober := &basedata.GameObjectTemplate{
+		Type: 10, // Goober
+		// Data[3]=autoClose, Data[6]=cooldown, Data[10]=spellId, Data[17]=allowMounted
+		Data: [24]int32{0, 0, 0, 3000, 0, 0, 60, 0, 0, 0, 8002, 0, 0, 0, 0, 0, 0, 1},
+	}
+	assert.True(t, goober.IsUsableMounted())
+	assert.Equal(t, uint32(60000), goober.GetCooldown())
+	assert.Equal(t, uint32(8002), goober.GetSpellID())
+}
+
+func TestGameObject_Flags(t *testing.T) {
+	tpl := &world.GameObjectTemplate{
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry: 1001, Type: 3, Name: "Chest", Size: 1.0,
+			Flags:   uint32(basedata.GOFlagLocked),
+			Faction: 35,
+		},
+	}
+	data := &world.GameObjectData{
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 1, Entry: 1001, State: uint8(basedata.GOStateReady)},
+	}
+
+	g := world.NewGameObject(tpl, data)
+
+	assert.Equal(t, uint32(35), g.Faction)
+	assert.True(t, g.HasGameObjectFlag(basedata.GOFlagLocked))
+
+	// A locked chest cannot be opened.
+	err := g.Use(world.GameObjectUseContext{})
+	assert.ErrorIs(t, err, world.ErrGameObjectLocked)
+
+	g.RemoveGameObjectFlag(basedata.GOFlagLocked)
+	assert.False(t, g.HasGameObjectFlag(basedata.GOFlagLocked))
+
+	g.SetGameObjectFlag(basedata.GOFlagNoDespawn)
+	assert.True(t, g.HasGameObjectFlag(basedata.GOFlagNoDespawn))
+}
+
+func TestGameObject_DoorAutoClose(t *testing.T) {
+	tpl := &world.GameObjectTemplate{
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry: 1002, Type: 0, Name: "Door", Size: 1.0,
+			// Data[2]=autoCloseTime(ms)
+			Data: [24]int32{0, 0, 5000},
+		},
+	}
+	data := &world.GameObjectData{
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 2, Entry: 1002, State: uint8(basedata.GOStateReady)},
+	}
+
+	g := world.NewGameObject(tpl, data)
+	ctx := world.GameObjectUseContext{}
+
+	require.NoError(t, g.Use(ctx))
+	assert.Equal(t, world.GOStateActive, g.GOState)
+	assert.Equal(t, world.GO_ACTIVATED, g.GetLootState())
+
+	// Force the auto-close timer to expire and tick.
+	g.CooldownAt = time.Now().Add(-time.Second)
+	g.Update(50, ctx)
+
+	assert.Equal(t, world.GOStateReady, g.GOState)
+	assert.Equal(t, world.GO_READY, g.GetLootState())
+}
+
+func TestGameObject_TrapArming(t *testing.T) {
+	tpl := &world.GameObjectTemplate{
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry: 1005, Type: 6, Name: "Trap", Size: 1.0,
+			Data: [24]int32{0, 60, 10, 8001, 0, 30},
+		},
+	}
+	data := &world.GameObjectData{
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 5, Entry: 1005, State: uint8(basedata.GOStateReady)},
+	}
+
+	g := world.NewGameObject(tpl, data)
+	g.SetLootState(world.GO_NOT_READY)
+
+	g.Update(50, world.GameObjectUseContext{})
+	assert.Equal(t, world.GO_READY, g.GetLootState())
+}
+
+func TestGameObject_ChestRestock(t *testing.T) {
+	tpl := &world.GameObjectTemplate{
+		GameObjectTemplate: &basedata.GameObjectTemplate{
+			Entry: 1001, Type: 3, Name: "Chest", Size: 1.0,
+			// Data[2]=restockTime(secs), Data[3]=consumable(0)
+			Data: [24]int32{0, 5001, 60, 0},
+		},
+	}
+	data := &world.GameObjectData{
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 1, Entry: 1001, State: uint8(basedata.GOStateReady)},
+	}
+
+	g := world.NewGameObject(tpl, data)
+	g.SetLootState(world.GO_NOT_READY)
+	g.RestockAt = time.Now().Add(-time.Second)
+
+	g.Update(50, world.GameObjectUseContext{})
+	assert.Equal(t, world.GO_READY, g.GetLootState())
+}
+
+func TestGameObject_SummonedDespawn(t *testing.T) {
+	tpl := &world.GameObjectTemplate{
+		GameObjectTemplate: &basedata.GameObjectTemplate{Entry: 1, Type: 3, Name: "Summoned", Size: 1.0},
+	}
+	data := &world.GameObjectData{
+		GameObjectSpawn: &basedata.GameObjectSpawn{GUID: 1, Entry: 1},
+	}
+
+	g := world.NewGameObject(tpl, data)
+	g.SetOwnerGUID(wow.NewGUID(wow.PlayerGUID, 42))
+	g.Loot = &loot.Loot{Gold: 5}
+	g.SetLootState(world.GO_JUST_DEACTIVATED)
+
+	g.Update(50, world.GameObjectUseContext{})
+
+	assert.Nil(t, g.Loot)
+	assert.False(t, g.SpawnedByDefault)
 }
