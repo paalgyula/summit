@@ -15,11 +15,12 @@ import (
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/auth"
 	"github.com/paalgyula/summit/pkg/summit/world/areatrigger"
-	"github.com/paalgyula/summit/pkg/summit/world/channel"
-	"github.com/paalgyula/summit/pkg/summit/world/lfg"
 	"github.com/paalgyula/summit/pkg/summit/world/babysocket"
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/summit/world/channel"
+	"github.com/paalgyula/summit/pkg/summit/world/lfg"
 	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/summit/world/worldstate"
 	"github.com/paalgyula/summit/pkg/summit/world/wsconn"
@@ -106,6 +107,7 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 
 	// Initialize map management system
 	worldServer.mapManager = mapmanager.GetMapManager()
+	worldServer.mapManager.SetGameObjectDynamicFlagsFunc(worldServer.gameObjectDynamicFlags)
 	worldServer.groups = make(map[uint32]*Group)
 	worldServer.channelAlliance = channel.NewManager(1)
 	worldServer.channelHorde = channel.NewManager(2)
@@ -167,6 +169,17 @@ func (ws *Server) StartServer(worldStore store.WorldRepo, charStore store.Charac
 	ws.worldStore = worldStore
 	if accRepo, ok := charStore.(store.AccountRepo); ok {
 		ws.accountStore = accRepo
+	}
+
+	// Full item templates (names, stats, prices) come from the world store;
+	// summit.dat only carries what Item.dbc knows.
+	if worldStore != nil {
+		if items, err := worldStore.GetItemTemplates(); err != nil {
+			ws.log.Warn().Err(err).Msg("cannot load item templates from the world store")
+		} else {
+			basedata.GetInstance().MergeItemTemplates(items)
+			ws.log.Info().Int("items", len(items)).Msg("loaded item templates from store")
+		}
 	}
 
 	// Initialize quest manager with world data
@@ -381,6 +394,12 @@ func (ws *Server) update(now time.Time) {
 		ws.mapManager.Update(50) // 50ms tick
 	}
 
+	// Update spawned NPCs (aggro scans, chase, and combat ticks)
+	ws.updateNPCs(now)
+
+	// Update spawned game objects (loot/respawn state machine)
+	ws.updateGameObjects()
+
 	ws.clients.Range(func(key, value any) bool {
 		gc, ok := value.(*WorldSession)
 		if !ok {
@@ -394,6 +413,162 @@ func (ws *Server) update(now time.Time) {
 		// Periodic player save
 		gc.updatePeriodic(now)
 
+		return true
+	})
+}
+
+// updateNPCs processes AI, aggro scans, and combat ticks for all spawned creatures.
+func (ws *Server) updateNPCs(now time.Time) {
+	if ws.spawns == nil {
+		return
+	}
+
+	// Snapshot online, in-world, alive players
+	var players []*player.Player
+	ws.clients.Range(func(_, value any) bool {
+		if gc, ok := value.(*WorldSession); ok && gc.player != nil && gc.player.IsInWorld && gc.player.IsAlive() {
+			players = append(players, gc.player)
+		}
+		return true
+	})
+
+	npcs := ws.spawns.GetNPCs()
+	for _, npc := range npcs {
+		if !npc.IsAlive() {
+			continue
+		}
+
+		// Interpolate active spline movement
+		npc.UpdatePositionFromSpline(now)
+
+		if !npc.InCombat {
+			// Proximity aggro scan
+			for _, p := range players {
+				if p.Location.Map != npc.Map {
+					continue
+				}
+				dx := p.Location.X - npc.X
+				dy := p.Location.Y - npc.Y
+				dz := p.Location.Z - npc.Z
+				distSq := dx*dx + dy*dy + dz*dz
+
+				aggroRadius := npc.AggroRadius
+				if aggroRadius <= 0 {
+					aggroRadius = 20.0
+				}
+				if distSq <= aggroRadius*aggroRadius {
+					if IsHostileToCheck(npc, p) {
+						npc.Attack(p, true)
+						npc.AddThreat(p, 100.0)
+						break
+					}
+				}
+			}
+
+			// Idle wander if not in combat
+			if !npc.InCombat {
+				// Create a send function that only sends to players who can see this NPC
+				sendToVisible := func(pkt *wow.Packet) {
+					if ws.mapManager != nil {
+						m := ws.mapManager.FindBaseMap(npc.Map)
+						if m != nil {
+							m.SendToNPCVisiblePlayers(npc.GUID(), pkt)
+							return
+						}
+					}
+					// Fallback to broadcast if map not found
+					ws.BroadcastPacket(pkt)
+				}
+
+				// Waypoint movement takes priority over random wander
+				if npc.MovementType == store.MotionTypeWaypoint && npc.WaypointPath != nil {
+					ProcessNPCWaypoint(npc, now, sendToVisible)
+				} else if npc.MovementType == store.MotionTypeRandom {
+					ProcessNPCWander(npc, now, sendToVisible)
+				}
+			}
+		} else {
+			// In combat: process chase, attack swings, and combat exit timer
+			sendToVisible := func(pkt *wow.Packet) {
+				if ws.mapManager != nil {
+					m := ws.mapManager.FindBaseMap(npc.Map)
+					if m != nil {
+						m.SendToNPCVisiblePlayers(npc.GUID(), pkt)
+						return
+					}
+				}
+				ws.BroadcastPacket(pkt)
+			}
+			ProcessNPCChase(npc, now, sendToVisible)
+			ProcessNPCCombatTick(npc, now, sendToVisible)
+			ProcessCombatTimer(npc, now)
+		}
+	}
+}
+
+// updateGameObjects advances the game object state machine for all spawned
+// game objects. Runs on the 50ms world tick.
+func (ws *Server) updateGameObjects() {
+	if ws.gameObjects == nil {
+		return
+	}
+
+	ws.gameObjects.Update(50, GameObjectUseContext{Server: ws})
+}
+
+// gameObjectDynamicFlags computes GAMEOBJECT_DYNAMIC from a viewer's
+// perspective: a game object that satisfies an incomplete kill/use-objective of
+// one of the player's quests sparkles and becomes interactable.
+// Mirrors GameObject::ActivateToQuest / BuildValuesUpdate's dynamic flags.
+func (ws *Server) gameObjectDynamicFlags(gobj interface{}, p *player.Player) uint16 {
+	g, ok := gobj.(*GameObject)
+	if !ok || g == nil || p == nil || ws.questMgr == nil {
+		return 0
+	}
+
+	quests, ok := p.QuestStatus.(map[uint32]*quest.QuestStatusData)
+	if !ok {
+		return 0
+	}
+
+	for questID, status := range quests {
+		if status == nil || status.Status != quest.QuestStatusIncomplete {
+			continue
+		}
+
+		q := ws.questMgr.GetQuest(questID)
+		if q == nil {
+			continue
+		}
+
+		for i := 0; i < 4; i++ {
+			if q.RequiredNpcOrGo[i] < 0 && uint32(-q.RequiredNpcOrGo[i]) == g.Entry {
+				return uint16(basedata.GODynFlagActivate | basedata.GODynFlagSparkle)
+			}
+		}
+	}
+
+	return 0
+}
+
+// BroadcastPacket sends a packet to all sessions that have a player actively
+// in the world (i.e. past auth handshake and map placement).
+// Pre-auth sessions must never receive world packets — doing so injects bytes
+// before the header cipher is initialised and desyncs the WoW framing.
+func (ws *Server) BroadcastPacket(pkt *wow.Packet) {
+	if pkt == nil {
+		return
+	}
+	ws.clients.Range(func(_, value any) bool {
+		gc, ok := value.(*WorldSession)
+		if !ok {
+			return true
+		}
+		// Skip sessions that have not yet authenticated or are not in the world.
+		if gc.player == nil || !gc.player.IsInWorld {
+			return true
+		}
+		gc.Send(pkt)
 		return true
 	})
 }

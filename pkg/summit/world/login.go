@@ -184,9 +184,9 @@ func (gc *WorldSession) sendLoginSetTimeSpeed() {
 	// Game time (packed)
 	_ = time.Now()
 
-	_ = pkt.Write(uint32(0)) // Game time placeholder
+	_ = pkt.Write(uint32(0))           // Game time placeholder
 	_ = pkt.Write(float32(0.01666667)) // Game speed (1/60)
-	_ = pkt.Write(uint32(0)) // Added in 3.1.2
+	_ = pkt.Write(uint32(0))           // Added in 3.1.2
 
 	gc.socket.Send(pkt)
 }
@@ -379,7 +379,7 @@ func (gc *WorldSession) sendInitialTalents(_ *player.Player) {
 // sendPlayerCreate sends the initial SMSG_UPDATE_OBJECT for the player's own creation.
 func (gc *WorldSession) sendPlayerCreate(p *player.Player) {
 	upd := &Updater{}
-	pkt := upd.BuildCreateObject(p, p)
+	pkt := upd.BuildSelfCreateObject(p)
 	gc.socket.Send(pkt)
 }
 

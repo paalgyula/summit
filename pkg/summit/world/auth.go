@@ -63,7 +63,9 @@ func (cas *ClientAuthSessionPacket) Bytes() []byte {
 	pkt.Write(cas.RealmID)
 	pkt.Write(cas.DOSResponse)
 
-	pkt.WriteReverseBytes(cas.Digest[:20])
+	// The digest is sent as-is: AuthSessionProof already returns the SHA1 in
+	// wire order (client seed, server seed and session key are reversed inside).
+	pkt.Write(cas.Digest[:20])
 
 	pkt.Write(cas.AddonInfo)
 

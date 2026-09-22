@@ -408,6 +408,11 @@ func (o *Object) BuildFilteredUpdateMask(target *Object, isSelf bool) *UpdateMas
 	visibleFlag := uint32(UFFlagPublic)
 	if isSelf {
 		visibleFlag |= UFFlagPrivate
+
+		// For items isSelf means the target owns it (Object::GetUpdateFieldData)
+		if o.objectTypeID == wow.TypeIDItem || o.objectTypeID == wow.TypeIDContainer {
+			visibleFlag |= UFFlagOwner | UFFlagItemOwner
+		}
 	}
 
 	mask := &UpdateMask{}

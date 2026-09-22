@@ -102,6 +102,20 @@ func (gc *WorldSession) LoginCharacter(p *player.Player) {
 	p.Sender = gc
 	p.Init()
 
+	// Sync XP bar and talent points derived from current level.
+	p.Object.SetUInt32Value(object.PlayerXp, p.XP)
+	p.Object.SetUInt32Value(object.PlayerNextLevelXp, NextLevelXP(p.Level))
+
+	// Talent points: 1 per level starting at level 10 (up to 71 at level 80).
+	if p.Level >= MinTalentLevel {
+		talentPoints := uint32(p.Level) - uint32(MinTalentLevel) + 1
+		// Cap at 71 (levels 10–80)
+		if talentPoints > 71 {
+			talentPoints = 71
+		}
+		p.Object.SetUInt32Value(object.PlayerCharacterPoints1, talentPoints)
+	}
+
 	gc.sendLoginVerifyWorld(p)
 	gc.sendFeatureSystemStatus()
 	gc.sendMOTD()
@@ -393,23 +407,38 @@ func (gc *WorldSession) broadcastPlayerStats() {
 }
 
 // sendLevelUpInfo sends SMSG_LEVELUP_INFO when the player gains a level.
-func (gc *WorldSession) sendLevelUpInfo(levelsGained uint32) {
+//
+// WotLK 3.3.5a layout:
+//
+//	uint32  newLevel
+//	uint32  healthGain
+//	uint32  manaGain     (power[0])
+//	uint32  rageGain     (power[1]) — always 0
+//	uint32  focusGain    (power[2]) — always 0
+//	uint32  energyGain   (power[3]) — always 0
+//	uint32  runeGain     (power[4]) — always 0
+//	uint32  strGain
+//	uint32  agiGain
+//	uint32  staGain
+//	uint32  intGain
+//	uint32  spiGain
+func (gc *WorldSession) sendLevelUpInfo(newLevel uint8, hp, mana, str, agi, sta, int_, spi uint32) {
 	pkt := wow.NewPacket(wow.ServerLevelupInfo)
 
-	_ = pkt.Write(uint32(levelsGained)) // levels gained
-	_ = pkt.Write(uint32(gc.player.Level))
-	_ = pkt.Write(uint32(0)) // bonus health
-	_ = pkt.Write(uint32(0)) // bonus mana
-	_ = pkt.Write(uint32(0)) // bonus talent points
+	_ = pkt.Write(uint32(newLevel))
+	_ = pkt.Write(hp)
+	_ = pkt.Write(mana)  // power 0
+	_ = pkt.Write(uint32(0)) // power 1 (rage)
+	_ = pkt.Write(uint32(0)) // power 2 (focus)
+	_ = pkt.Write(uint32(0)) // power 3 (energy)
+	_ = pkt.Write(uint32(0)) // power 4 (runes)
+	_ = pkt.Write(str)
+	_ = pkt.Write(agi)
+	_ = pkt.Write(sta)
+	_ = pkt.Write(int_)
+	_ = pkt.Write(spi)
 
-	// Stat gains (str, agi, sta, int, spi)
-	_ = pkt.Write(uint32(0)) // str
-	_ = pkt.Write(uint32(0)) // agi
-	_ = pkt.Write(uint32(0)) // sta
-	_ = pkt.Write(uint32(0)) // int
-	_ = pkt.Write(uint32(0)) // spi
-
-	gc.socket.Send(pkt)
+	gc.Send(pkt)
 }
 
 // sendDeath sends death notification to the client.

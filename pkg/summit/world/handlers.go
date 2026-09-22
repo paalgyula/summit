@@ -81,6 +81,7 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	// Name query
 	gc.opcodes.Handle(wow.ClientNameQuery, gc.HandleNameQuery)
 	gc.opcodes.Handle(wow.ClientCreatureQuery, gc.HandleCreatureQuery)
+	gc.opcodes.Handle(wow.ClientGameobjectQuery, gc.HandleGameObjectQuery)
 
 	// Targeting
 	gc.opcodes.Handle(wow.ClientSetSelection, gc.HandleSetSelection)
@@ -93,6 +94,7 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	gc.opcodes.Handle(wow.ClientEmote, gc.HandleEmote)
 
 	// Combat handlers
+	gc.opcodes.Handle(wow.ClientSetSheathed, gc.HandleSetSheathed)
 	gc.opcodes.Handle(wow.ClientAttackswing, gc.HandleAttackSwing)
 	gc.opcodes.Handle(wow.ClientAttackstop, gc.HandleAttackStop)
 
@@ -106,6 +108,7 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	gc.opcodes.Handle(wow.ClientSwapItem, gc.HandleSwapItem)
 	gc.opcodes.Handle(wow.ClientDestroyitem, gc.HandleDestroyItem)
 	gc.opcodes.Handle(wow.ClientItemQuerySingle, gc.HandleItemQuerySingle)
+	gc.opcodes.Handle(wow.ClientUseItem, gc.HandleUseItem)
 
 	// Loot handlers
 	gc.opcodes.Handle(wow.ClientLoot, gc.HandleLoot)
@@ -172,7 +175,11 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	gc.opcodes.Handle(wow.ClientMoveFallReset, handlePacket(func(data wow.PacketData) {
 		gc.HandleMovementOpcodes(wow.ClientMoveFallReset, data)
 	}))
-	gc.opcodes.Handle(wow.ClientMoveTimeSkipped, gc.HandleMoveTimeSkipped)
+	// Death & Resurrection handlers
+	gc.opcodes.Handle(wow.ClientRepopRequest, gc.HandleRepopRequest)
+	gc.opcodes.Handle(wow.ClientReclaimCorpse, gc.HandleReclaimCorpse)
+	gc.opcodes.Handle(wow.ClientResurrectResponse, gc.HandleResurrectResponse)
+	gc.opcodes.Handle(wow.ClientSpiritHealerActivate, gc.HandleSpiritHealerActivate)
 
 	// Quest & Gossip handlers
 	gc.opcodes.Handle(wow.ClientQuestgiverHello, gc.HandleQuestgiverHello)
@@ -186,6 +193,13 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	gc.opcodes.Handle(wow.ClientQuestgiverCancel, gc.HandleQuestgiverCancel)
 	gc.opcodes.Handle(wow.ClientQuestgiverStatusQuery, gc.HandleQuestgiverStatusQuery)
 	gc.opcodes.Handle(wow.ClientQuestlogRemoveQuest, gc.HandleQuestLogRemoveQuest)
+
+	// Talent handler
+	gc.opcodes.Handle(wow.ClientLearnTalent, handlePacket(gc.HandleLearnTalent))
+
+	// Game object handlers
+	gc.opcodes.Handle(wow.ClientGameobjUse, gc.HandleGameObjectUse)
+	gc.opcodes.Handle(wow.ClientGameobjReportUse, gc.HandleGameObjectReportUse)
 }
 
 func (gc *WorldSession) Handle(pkt *wow.Packet) {
@@ -201,10 +215,11 @@ func (gc *WorldSession) Handle(pkt *wow.Packet) {
 
 	switch t := handle.Handler.(type) {
 	case string:
-		gc.log.Warn().
+		// Unimplemented handler - only log at debug level to reduce noise
+		gc.log.Debug().
 			Str("packet", pkt.Opcode().String()).
 			Str("handler", t).
-			Msg("handler defined as string")
+			Msg("unimplemented handler")
 	case handlePacket:
 		t(pkt.Bytes())
 	case handlePacket2: // func(*wow.Packet)

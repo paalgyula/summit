@@ -72,6 +72,22 @@ func (gc *WorldSession) TeleportTo(mapID uint32, x, y, z, o float32) {
 	gc.teleportFar(mapID, x, y, z, o)
 }
 
+// TeleportToBindPoint teleports the player to their hearthstone bind point.
+// This is used by hearthstone items and similar effects.
+func (gc *WorldSession) TeleportToBindPoint() {
+	if gc.player == nil {
+		return
+	}
+
+	gc.TeleportTo(
+		gc.player.BindLocation.Map,
+		gc.player.BindLocation.X,
+		gc.player.BindLocation.Y,
+		gc.player.BindLocation.Z,
+		gc.player.BindLocation.O,
+	)
+}
+
 // teleportNear handles same-map teleportation.
 func (gc *WorldSession) teleportNear(mapID uint32, x, y, z, o float32) {
 	if gc.player == nil {
@@ -130,7 +146,6 @@ func (gc *WorldSession) teleportFar(mapID uint32, x, y, z, o float32) {
 	gc.player.Location.Z = z
 	gc.player.Location.O = o
 	gc.player.Location.Map = mapID
-	gc.player.CurrentMapID = mapID
 
 	// Send SMSG_NEW_WORLD (client loads new map)
 	gc.sendNewWorld(mapID, x, y, z, o)

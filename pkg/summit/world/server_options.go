@@ -133,6 +133,19 @@ func WithSpellDBC(dbcPath string) ServerOption {
 	}
 }
 
+// WithCreatureScaleDBC loads CreatureDisplayInfo.dbc and CreatureModelData.dbc
+// from the given directory so the server computes the correct creature display
+// scale (template × display × model) instead of sending the raw template scale.
+func WithCreatureScaleDBC(dbcPath string) ServerOption {
+	return func(s *Server) error {
+		if err := LoadCreatureScaleDBC(dbcPath); err != nil {
+			return fmt.Errorf("world.LoadCreatureScaleDBC: %w", err)
+		}
+
+		return nil
+	}
+}
+
 // WithChatConfig sets the chat system configuration.
 func WithChatConfig(cfg ChatConfig) ServerOption {
 	return func(s *Server) error {

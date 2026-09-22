@@ -178,6 +178,14 @@ func (upd *Updater) BuildItemCreateObject(item *player.Item, target *player.Play
 	}
 
 	ud := object.NewUpdateData()
+	upd.buildItemCreateBlock(item, target, ud)
+
+	return ud.BuildPacket()
+}
+
+// buildItemCreateBlock appends a CreateObject block for an item; the owner
+// also gets the OWNER-only fields (stack count, durability, charges).
+func (upd *Updater) buildItemCreateBlock(item *player.Item, target *player.Player, ud *object.UpdateData) {
 	buf := object.NewUpdateBlockBuffer()
 
 	// Update type
@@ -193,14 +201,34 @@ func (upd *Updater) BuildItemCreateObject(item *player.Item, target *player.Play
 	flags := wow.ObjectUpdateFlags(wow.UpdateFlagLowGUID)
 	_ = buf.Write(flags)
 
-	object.WriteMovementBlock(buf, flags, &object.MovementBlock{LowGUID: item.GUID().Entry()})
+	object.WriteMovementBlock(buf, flags, &object.MovementBlock{LowGUID: item.GUID().Counter()})
 
 	// Values update — visibility-filtered
-	mask := item.Object.BuildFilteredUpdateMask(target.Object, false)
+	isOwner := item.Owner == target.GUID()
+	mask := item.Object.BuildFilteredUpdateMask(target.Object, isOwner)
 	block := item.Object.BuildValuesUpdateBlock(mask, target.Object)
 	buf.WriteBytes(block)
 
 	ud.AddUpdateBlock(buf.Bytes())
+}
+
+// BuildSelfCreateObject builds the login SMSG_UPDATE_OBJECT for the player
+// itself: like Player::BuildCreateUpdateBlockForPlayer it carries the
+// inventory items first, then the player block that references them.
+func (upd *Updater) BuildSelfCreateObject(p *player.Player) *wow.Packet {
+	ud := object.NewUpdateData()
+
+	p.UpdateInventoryFields()
+
+	if p.Inventory != nil {
+		for i := 0; i < player.InventorySlotTotal; i++ {
+			if item := p.Inventory.GetItem(i); item != nil {
+				upd.buildItemCreateBlock(item, p, ud)
+			}
+		}
+	}
+
+	upd.buildCreateObjectBlock(p, p, true, ud)
 
 	return ud.BuildPacket()
 }
@@ -237,6 +265,14 @@ func (upd *Updater) BuildInventoryUpdate(p *player.Player) *wow.Packet {
 	// Mark PlayerFieldPackSlot_1 through + 31 (16 slots * 2)
 	for i := 0; i < 32; i++ {
 		field := int(object.PlayerFieldPackSlot_1) + i
+		if field < p.Object.ValuesCount() {
+			mask.SetBit(uint32(field))
+		}
+	}
+
+	// Worn gear (PLAYER_VISIBLE_ITEM_n entry + enchant, 19 slots * 2)
+	for i := 0; i < player.EquipmentSlotEnd*2; i++ {
+		field := int(object.PlayerVisibleItem1Entryid) + i
 		if field < p.Object.ValuesCount() {
 			mask.SetBit(uint32(field))
 		}
@@ -292,16 +328,24 @@ func BuildGameObjectCreateObject(gobj *GameObject) *wow.Packet {
 	ud := object.NewUpdateData()
 	buf := object.NewUpdateBlockBuffer()
 
-	_ = buf.WriteOne(wow.UpdateTypeCreateObject)
+	_ = buf.WriteOne(int(gobj.CreateUpdateType()))
 	_ = buf.Write(gobj.GetGUID())
 	_ = buf.WriteOne(int(wow.TypeIDGameObject))
 
-	flags := wow.ObjectUpdateFlags(wow.UpdateFlagLowGUID | wow.UpdateFlagStationaryPosition | wow.UpdateFlagRotation)
+	// Game objects carry a low GUID, a position (m_updateFlag in
+	// GameObject::GameObject), and a packed rotation.
+	flags := wow.ObjectUpdateFlags(
+		wow.UpdateFlagLowGUID |
+			wow.UpdateFlagStationaryPosition |
+			wow.UpdateFlagPosition |
+			wow.UpdateFlagRotation,
+	)
 	_ = buf.Write(flags)
 
 	object.WriteMovementBlock(buf, flags, &object.MovementBlock{
 		X: gobj.X, Y: gobj.Y, Z: gobj.Z, O: gobj.O,
-		LowGUID: uint32(gobj.ID),
+		LowGUID:  uint32(gobj.ID),
+		Rotation: gobj.PackedRotation,
 	})
 
 	// Values update — full mask (create block)

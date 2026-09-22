@@ -284,24 +284,25 @@ type Player struct {
 	BaseDamage     float32
 
 	// Loot state
-	LootGUID   uint64     // GUID of the object being looted
+	LootGUID   uint64      // GUID of the object being looted
 	ActiveLoot interface{} // *lootSource from loot_handler.go (avoids import cycle)
 
 	// Regen state
 	NextRegenTime int64 // when next regen tick happens (Unix ms)
 
 	// Combat state
-	FactionID   uint32   // faction template ID (from ChrRaces.dbc)
-	Mounted     bool     // player is mounted (can't attack)
-	InCombat    bool     // player is in combat
-	CombatTime  int64    // when combat started (Unix ms), for 5s rule
-	CombatEnd   int64    // when combat should end (Unix ms)
+	FactionID   uint32          // faction template ID (from ChrRaces.dbc)
+	Mounted     bool            // player is mounted (can't attack)
+	InCombat    bool            // player is in combat
+	CombatTime  int64           // when combat started (Unix ms), for 5s rule
+	CombatEnd   int64           // when combat should end (Unix ms)
 	Attackers   map[uint64]bool // GUIDs of units attacking this player
-	IsPVP       bool     // PvP flag enabled
-	IsFFAPVP    bool     // FFA PvP zone
-	IsSanctuary bool     // sanctuary zone (can't PvP)
-	IsGhost     bool     // dead/ghost state
-	DeathTime   int64    // when player died (Unix ms)
+	IsPVP       bool            // PvP flag enabled
+	IsFFAPVP    bool            // FFA PvP zone
+	IsSanctuary bool            // sanctuary zone (can't PvP)
+	IsGhost        bool          // dead/ghost state
+	DeathTime      int64         // when player died (Unix ms)
+	CorpseLocation WorldLocation // position where player died
 
 	// Chat flood throttle
 	ChatFloodCount   int
@@ -321,9 +322,6 @@ type Player struct {
 	// Rewarded quest IDs — map[uint32]bool stored as interface{}
 	RewardedQuests interface{}
 
-	// CurrentMapID is the map ID the player is on
-	CurrentMapID uint32
-
 	// CurrentInstanceID is the instance ID (0 for non-instanced maps)
 	CurrentInstanceID uint32
 
@@ -336,13 +334,13 @@ type Player struct {
 	Victim interface{}
 
 	// Combat stats (populated on login from character data)
-	Strength     uint32
-	Agility      uint32
-	Stamina      uint32
-	Intellect    uint32
-	Spirit       uint32
-	Armor        uint32
-	AttackPower  uint32
+	Strength        uint32
+	Agility         uint32
+	Stamina         uint32
+	Intellect       uint32
+	Spirit          uint32
+	Armor           uint32
+	AttackPower     uint32
 	BaseAttackSpeed time.Duration
 
 	// Weapon damage ranges (min, max) for mainhand and offhand
@@ -530,6 +528,16 @@ func (p *Player) Init() {
 
 	// Money
 	p.Object.SetUInt32Value(object.PlayerFieldCoinage, p.Money)
+
+	// Experience & next-level threshold (sent in update block)
+	p.Object.SetUInt32Value(object.PlayerXp, p.XP)
+	// NextLevelXP: level × 5 × level + 45 × level approximation; the XP
+	// table lookup lives in the world package (xp.go) to avoid a cycle.
+	// We store 0 here; the world session overwrites it on login.
+
+	// Talent points (PlayerCharacterPoints1) are initialised to 0;
+	// the world session grants the correct count from saved data.
+	p.Object.SetUInt32Value(object.PlayerCharacterPoints1, 0)
 
 	// Watched faction index (-1 = none)
 	p.Object.SetInt32Value(object.PlayerFieldWatchedFactionIndex, -1)
@@ -801,6 +809,38 @@ func (p *Player) IsDead() bool {
 	return p.Health == 0
 }
 
+// Resurrect restores a dead player to life with given health and power percentages.
+func (p *Player) Resurrect(healthPercent, powerPercent float32) {
+	p.IsGhost = false
+	p.CharFlags &^= 0x10 // clear dead flag
+	p.PlayerFlags &^= 0x00000010 // clear ghost flag
+	p.Object.RemoveFlag(object.UnitFieldFlags, 0x08)
+
+	if healthPercent <= 0 {
+		healthPercent = 0.5
+	}
+	if powerPercent <= 0 {
+		powerPercent = 0.5
+	}
+
+	maxHP := p.MaxHealth
+	if maxHP == 0 {
+		maxHP = 100
+	}
+	newHP := uint32(float32(maxHP) * healthPercent)
+	if newHP == 0 {
+		newHP = 1
+	}
+	p.SetHealth(newHP)
+
+	// Set primary power
+	pt := p.GetPrimaryPowerType()
+	maxPwr := p.GetMaxPower(pt)
+	if maxPwr > 0 {
+		p.SetPower(pt, uint32(float32(maxPwr)*powerPercent))
+	}
+}
+
 // --- CombatUnit interface implementation ---
 
 // IsPlayer returns true (player is always a player).
@@ -832,8 +872,20 @@ func (p *Player) GetAttackPower() uint32 { return p.AttackPower }
 func (p *Player) GetWeaponDamage(attackType uint8) (uint32, uint32) {
 	switch attackType {
 	case 1: // OffAttack
+		// Read from update fields (set by applyItemDamage)
+		minDmg := p.Object.GetFloatValue(object.UnitFieldMindamage)
+		maxDmg := p.Object.GetFloatValue(object.UnitFieldMaxdamage)
+		if minDmg > 0 || maxDmg > 0 {
+			return uint32(minDmg), uint32(maxDmg)
+		}
 		return p.OffHandDamageMin, p.OffHandDamageMax
 	default: // BaseAttack
+		// Read from update fields (set by applyItemDamage)
+		minDmg := p.Object.GetFloatValue(object.UnitFieldMindamage)
+		maxDmg := p.Object.GetFloatValue(object.UnitFieldMaxdamage)
+		if minDmg > 0 || maxDmg > 0 {
+			return uint32(minDmg), uint32(maxDmg)
+		}
 		return p.MainHandDamageMin, p.MainHandDamageMax
 	}
 }
@@ -919,7 +971,7 @@ func (p *Player) IsInSameMap(other interface{}) bool {
 		GetMapID() uint32
 	}
 	if mg, ok := other.(mapGetter); ok {
-		return p.CurrentMapID == mg.GetMapID()
+		return p.Location.Map == mg.GetMapID()
 	}
 	return false
 }
@@ -1281,29 +1333,6 @@ func (p *Player) Die() {
 	p.CharFlags |= 0x10
 }
 
-// Resurrect复活 the player with a percentage of health/mana.
-func (p *Player) Resurrect() {
-	p.IsGhost = false
-
-	// Resurrect with 100% health
-	p.Health = p.MaxHealth
-
-	// Restore some power
-	powerType := p.primaryPowerType()
-	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
-		p.Power[powerType] = p.MaxPower[powerType]
-	}
-
-	// Clear ghost flag
-	p.CharFlags &^= 0x10
-
-	// Update update fields
-	p.Object.SetUInt32Value(object.UnitFieldHealth, p.Health)
-
-	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
-		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldPower1)+int(powerType)), p.Power[powerType])
-	}
-}
 
 // GetMap returns the current map (interface to avoid circular import).
 func (p *Player) GetMap() interface{} {
@@ -1315,14 +1344,15 @@ func (p *Player) SetMap(m interface{}) {
 	p.CurrentMap = m
 }
 
-// GetMapID returns the current map ID.
+// GetMapID returns the current map ID (Location.Map is the single source of
+// truth: it is loaded with the character and updated by teleports).
 func (p *Player) GetMapID() uint32 {
-	return p.CurrentMapID
+	return p.Location.Map
 }
 
 // SetMapID sets the current map ID.
 func (p *Player) SetMapID(mapID uint32) {
-	p.CurrentMapID = mapID
+	p.Location.Map = mapID
 }
 
 // GetInstanceID returns the current instance ID.
@@ -1342,8 +1372,6 @@ func (p *Player) TeleportTo(mapID uint32, x, y, z, o float32) {
 	p.Location.Y = y
 	p.Location.Z = z
 	p.Location.O = o
-
-	p.CurrentMapID = mapID
 }
 
 // UpdateInventoryFields updates the player's inventory update fields.
@@ -1351,6 +1379,17 @@ func (p *Player) TeleportTo(mapID uint32, x, y, z, o float32) {
 func (p *Player) UpdateInventoryFields() {
 	if p.Inventory == nil {
 		return
+	}
+
+	// Every item needs a GUID and an owner before it can be referenced
+	for i := 0; i < InventorySlotTotal; i++ {
+		if item := p.Inventory.GetItem(i); item != nil {
+			item.EnsureGUID()
+
+			if item.Owner != p.GUID() {
+				item.SetOwner(p.GUID())
+			}
+		}
 	}
 
 	// Set equipment and bag slot GUIDs (PlayerFieldInvSlotHead covers slots 0-22)
@@ -1366,6 +1405,20 @@ func (p *Player) UpdateInventoryFields() {
 		} else {
 			p.Object.SetUInt32Value(slotField, 0)
 			p.Object.SetUInt32Value(slotField+1, 0)
+		}
+	}
+
+	// Worn gear is public: PLAYER_VISIBLE_ITEM_n (entry id + enchant) per equipment slot
+	for i := 0; i < EquipmentSlotEnd; i++ {
+		item := p.Inventory.GetEquipment(i)
+		entryField := object.UpdateField(int(object.PlayerVisibleItem1Entryid) + i*2)
+
+		if item != nil {
+			p.Object.SetUInt32Value(entryField, item.ItemEntry)
+			p.Object.SetUInt32Value(entryField+1, item.Enchantments[0])
+		} else {
+			p.Object.SetUInt32Value(entryField, 0)
+			p.Object.SetUInt32Value(entryField+1, 0)
 		}
 	}
 

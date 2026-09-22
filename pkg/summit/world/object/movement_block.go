@@ -23,6 +23,10 @@ type MovementBlock struct {
 
 	// Written for UpdateFlagLowGUID.
 	LowGUID uint32
+
+	// Rotation is the packed world rotation, written for UpdateFlagRotation
+	// (game objects only).
+	Rotation int64
 }
 
 // WriteMovementBlock writes the 3.3.5a movement update (Object::BuildMovementUpdate).
@@ -108,7 +112,7 @@ func WriteMovementBlock(buf *UpdateBlockBuffer, updateFlags wow.ObjectUpdateFlag
 	}
 
 	if updateFlags&wow.UpdateFlagRotation != 0 {
-		_ = buf.Write(int64(0)) // packed rotation
+		_ = buf.Write(mv.Rotation) // packed world rotation
 	}
 }
 
