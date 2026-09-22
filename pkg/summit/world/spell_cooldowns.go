@@ -6,33 +6,38 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 )
 
-// AddSpellCooldown adds a cooldown for a spell on the player.
-// If category > 0, the cooldown is shared with other spells in the same category.
+// AddSpellCooldown adds a cooldown for a spell on the player. It is keyed by
+// the spell id and, when the spell has a recovery category, by that category
+// too so sibling spells share it.
 func AddSpellCooldown(p *player.Player, spellId, category uint32, end time.Time) {
 	if p.SpellCooldowns == nil {
 		p.SpellCooldowns = make(map[uint32]time.Time)
 	}
 
-	key := spellId
+	p.SpellCooldowns[spellId] = end
 	if category > 0 {
-		key = category // category cooldowns share the same key
+		p.SpellCooldowns[category] = end // category cooldowns are shared
 	}
-
-	p.SpellCooldowns[key] = end
 }
 
-// IsSpellOnCooldown checks if a spell is currently on cooldown.
-func IsSpellOnCooldown(p *player.Player, spellId uint32) bool {
+// IsSpellOnCooldown checks the spell's own cooldown and its recovery category.
+func IsSpellOnCooldown(p *player.Player, spellId, category uint32) bool {
 	if p.SpellCooldowns == nil {
 		return false
 	}
 
-	end, ok := p.SpellCooldowns[spellId]
-	if !ok {
-		return false
+	now := time.Now()
+	if end, ok := p.SpellCooldowns[spellId]; ok && now.Before(end) {
+		return true
 	}
 
-	return time.Now().Before(end)
+	if category > 0 {
+		if end, ok := p.SpellCooldowns[category]; ok && now.Before(end) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetSpellCooldownDelay returns the remaining cooldown duration.

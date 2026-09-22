@@ -1,0 +1,30 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "client",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5173"
+      ],
+      "cwd": "client",
+      "port": 5173
+    },
+    {
+      "name": "client-mp",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_AUTH_WS_URL=ws://localhost:6001/realm/auth",
+        "VITE_ASSET_HOST=http://localhost:8091",
+        "npx",
+        "vite",
+        "--port",
+        "5175"
+      ],
+      "cwd": "client",
+      "port": 5175
+    }
+  ]
+}

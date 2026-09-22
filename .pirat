@@ -1,0 +1,116 @@
+{
+  "projectKey": "SUMMIT",
+  "projectName": "Summit",
+  "server": "https://pira.hu",
+  "primaryIssueType": "task",
+  "defaults": {
+    "priority": "medium",
+    "labels": [],
+    "assignee": "paalgyula"
+  },
+  "agent": {
+    "enabled": true,
+    "autoAssign": true,
+    "commitStrategy": "per-todo",
+    "modelOverride": null,
+    "fallbackChain": []
+  },
+  "workflow": {
+    "requireSpec": true,
+    "requireReview": true,
+    "autoTransition": false,
+    "types": {
+      "epic": {
+        "name": "Epic",
+        "steps": [
+          {"id": "open", "name": "Open", "type": "start"},
+          {"id": "in_progress", "name": "In Progress", "type": "normal"},
+          {"id": "done", "name": "Done", "type": "end"}
+        ],
+        "transitions": [
+          {"from": "open", "name": "Start", "to": "in_progress"},
+          {"from": "in_progress", "name": "Complete", "to": "done"}
+        ]
+      },
+      "story": {
+        "name": "Story",
+        "steps": [
+          {"id": "open", "name": "Open", "type": "start"},
+          {"id": "in_progress", "name": "In Progress", "type": "normal"},
+          {"id": "in_review", "name": "In Review", "type": "normal"},
+          {"id": "done", "name": "Done", "type": "end"}
+        ],
+        "transitions": [
+          {"from": "open", "name": "Start", "to": "in_progress"},
+          {"from": "in_progress", "name": "Ready for review", "to": "in_review"},
+          {"from": "in_progress", "name": "Complete", "to": "done"},
+          {"from": "in_review", "name": "Changes requested", "to": "in_progress"},
+          {"from": "in_review", "name": "Complete", "to": "done"}
+        ]
+      },
+      "task": {
+        "name": "Task",
+        "steps": [
+          {"id": "open", "name": "Open", "type": "start"},
+          {"id": "in_progress", "name": "In Progress", "type": "normal"},
+          {"id": "in_review", "name": "In Review", "type": "normal"},
+          {"id": "done", "name": "Done", "type": "end"}
+        ],
+        "transitions": [
+          {"from": "open", "name": "Start", "to": "in_progress"},
+          {"from": "in_progress", "name": "Ready for review", "to": "in_review"},
+          {"from": "in_progress", "name": "Complete", "to": "done"},
+          {"from": "in_review", "name": "Changes requested", "to": "in_progress"},
+          {"from": "in_review", "name": "Complete", "to": "done"}
+        ]
+      },
+      "bug": {
+        "name": "Bug",
+        "steps": [
+          {"id": "open", "name": "Open", "type": "start"},
+          {"id": "triaged", "name": "Triaged", "type": "normal"},
+          {"id": "in_progress", "name": "In Progress", "type": "normal"},
+          {"id": "in_review", "name": "In Review", "type": "normal"},
+          {"id": "done", "name": "Done", "type": "end"}
+        ],
+        "transitions": [
+          {"from": "open", "name": "Triage", "to": "triaged"},
+          {"from": "open", "name": "Start", "to": "in_progress"},
+          {"from": "triaged", "name": "Start", "to": "in_progress"},
+          {"from": "in_progress", "name": "Ready for review", "to": "in_review"},
+          {"from": "in_progress", "name": "Complete", "to": "done"},
+          {"from": "in_review", "name": "Changes requested", "to": "in_progress"},
+          {"from": "in_review", "name": "Verified", "to": "done"}
+        ]
+      },
+      "improvement": {
+        "name": "Improvement",
+        "steps": [
+          {"id": "open", "name": "Open", "type": "start"},
+          {"id": "in_progress", "name": "In Progress", "type": "normal"},
+          {"id": "in_review", "name": "In Review", "type": "normal"},
+          {"id": "done", "name": "Done", "type": "end"}
+        ],
+        "transitions": [
+          {"from": "open", "name": "Start", "to": "in_progress"},
+          {"from": "in_progress", "name": "Ready for review", "to": "in_review"},
+          {"from": "in_progress", "name": "Complete", "to": "done"},
+          {"from": "in_review", "name": "Changes requested", "to": "in_progress"},
+          {"from": "in_review", "name": "Complete", "to": "done"}
+        ]
+      },
+      "subtask": {
+        "name": "Subtask",
+        "steps": [
+          {"id": "open", "name": "Open", "type": "start"},
+          {"id": "in_progress", "name": "In Progress", "type": "normal"},
+          {"id": "done", "name": "Done", "type": "end"}
+        ],
+        "transitions": [
+          {"from": "open", "name": "Start", "to": "in_progress"},
+          {"from": "in_progress", "name": "Complete", "to": "done"}
+        ]
+      }
+    }
+  }
+}

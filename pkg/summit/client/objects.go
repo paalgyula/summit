@@ -353,6 +353,10 @@ func (wc *WorldClient) readValuesUpdate(r *wow.PacketReader) {
 	wc.objectsMu.Lock()
 	e := wc.ensureEntityLocked(wow.GUID(guid), wow.TypeIDObject)
 	wc.setFieldsLocked(e, values)
+
+	if wow.GUID(guid) == wc.selfGUID && e.Health() > 0 {
+		wc.dead.Store(false)
+	}
 	wc.objectsMu.Unlock()
 }
 
@@ -422,6 +426,10 @@ func (wc *WorldClient) readCreateUpdate(r *wow.PacketReader) {
 
 	if isSelf {
 		wc.selfGUID = wow.GUID(guid)
+
+		if e.Health() > 0 {
+			wc.dead.Store(false)
+		}
 	}
 
 	if e.Type == wow.TypeIDUnit {

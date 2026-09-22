@@ -22,6 +22,7 @@ func newTestClient() *WorldClient {
 		clientMessages: make(chan *wow.Packet, 64),
 		objects:        make(map[wow.GUID]*Entity),
 		creatureNames:  make(map[uint32]string),
+		spellFailures:  make(map[uint32]SpellFailure),
 	}
 }
 

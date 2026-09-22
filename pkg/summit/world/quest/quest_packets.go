@@ -392,3 +392,97 @@ func BuildGossipMessage(guid wow.GUID, menuID, textID uint32, options []GossipOp
 	return pkt
 }
 
+// BuildQuestQueryResponse builds SMSG_QUEST_QUERY_RESPONSE, the full quest
+// definition the client caches for the quest log and detail windows. The field
+// order matches AzerothCore's PlayerMenu::SendQuestQueryResponse.
+func BuildQuestQueryResponse(quest *Quest) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerQuestQueryResponse)
+
+	_ = pkt.Write(quest.ID)                 // quest id
+	_ = pkt.Write(quest.Method)             // 0 = auto-complete, 1 = disabled, 2 = enabled
+	_ = pkt.Write(uint32(quest.Level))      // quest level (may be -1)
+	_ = pkt.Write(uint32(quest.MinLevel))   // min level
+	_ = pkt.Write(uint32(quest.ZoneOrSort)) // zone or sort
+
+	_ = pkt.Write(quest.Type) // quest type
+	_ = pkt.Write(uint32(0))  // suggested players
+
+	_ = pkt.Write(uint32(0)) // reputation objective faction
+	_ = pkt.Write(uint32(0)) // reputation objective value
+	_ = pkt.Write(uint32(0)) // reputation objective faction (opposite)
+	_ = pkt.Write(uint32(0)) // reputation objective value (opposite)
+
+	_ = pkt.Write(uint32(quest.NextQuestId)) // next quest in chain
+	_ = pkt.Write(uint32(0))                 // quest XP id
+
+	_ = pkt.Write(quest.RewardMoney) // reward money
+	_ = pkt.Write(uint32(0))         // reward money at max level
+	_ = pkt.Write(uint32(0))         // reward spell (display)
+	_ = pkt.Write(int32(0))          // cast spell
+
+	_ = pkt.Write(uint32(0))                            // honor addition
+	_ = pkt.Write(float32(0))                           // honor multiplier
+	_ = pkt.Write(quest.StartItem)                      // source item id
+	_ = pkt.Write(uint32(quest.Flags) & uint32(0xFFFF)) // quest flags
+	_ = pkt.Write(uint32(0))                            // char title id
+	_ = pkt.Write(quest.RequiredPlayerKills)            // players slain
+	_ = pkt.Write(uint32(0))                            // bonus talents
+	_ = pkt.Write(uint32(0))                            // arena points
+	_ = pkt.Write(uint32(0))                            // review rep show mask
+
+	for i := 0; i < 4; i++ {
+		_ = pkt.Write(quest.RewardItemId[i])
+		_ = pkt.Write(uint32(quest.RewardItemCount[i]))
+	}
+
+	for i := 0; i < 6; i++ {
+		_ = pkt.Write(quest.RewardChoiceItemId[i])
+		_ = pkt.Write(uint32(quest.RewardChoiceItemCount[i]))
+	}
+
+	for i := 0; i < 5; i++ {
+		_ = pkt.Write(quest.RewardFactionId[i])
+	}
+
+	for i := 0; i < 5; i++ {
+		_ = pkt.Write(quest.RewardFactionValue[i])
+	}
+
+	for i := 0; i < 5; i++ {
+		_ = pkt.Write(int32(0))
+	}
+
+	_ = pkt.Write(uint32(0))  // POI continent
+	_ = pkt.Write(float32(0)) // POI x
+	_ = pkt.Write(float32(0)) // POI y
+	_ = pkt.Write(uint32(0))  // point options
+
+	pkt.WriteString(quest.Title)
+	pkt.WriteString(quest.Objectives)
+	pkt.WriteString(quest.Description)
+	pkt.WriteString(quest.AreaDescription)
+	pkt.WriteString(quest.QuestCompletionLog)
+
+	for i := 0; i < 4; i++ {
+		if quest.RequiredNpcOrGo[i] < 0 {
+			_ = pkt.Write(uint32(-quest.RequiredNpcOrGo[i]) | 0x80000000)
+		} else {
+			_ = pkt.Write(uint32(quest.RequiredNpcOrGo[i]))
+		}
+
+		_ = pkt.Write(uint32(quest.RequiredNpcOrGoCount[i]))
+		_ = pkt.Write(uint32(0)) // item drop
+		_ = pkt.Write(uint32(0)) // required source count
+	}
+
+	for i := 0; i < 6; i++ {
+		_ = pkt.Write(quest.RequiredItemId[i])
+		_ = pkt.Write(uint32(quest.RequiredItemCount[i]))
+	}
+
+	for i := 0; i < 4; i++ {
+		pkt.WriteString(quest.ObjectiveText[i])
+	}
+
+	return pkt
+}

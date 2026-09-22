@@ -782,7 +782,7 @@ func (gc *WorldSession) HandleUseItem(data wow.PacketData) {
 		return
 	}
 
-	if IsSpellOnCooldown(gc.player, spellIDUse) {
+	if IsSpellOnCooldown(gc.player, spellIDUse, spellInfo.StartRecoveryCategory) {
 		gc.sendCastFailed(spellIDUse, SpellCastFailedSpellOnCooldown)
 		return
 	}

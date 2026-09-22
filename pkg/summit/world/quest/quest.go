@@ -18,14 +18,14 @@ const (
 type QuestFlags uint32
 
 const (
-	QuestFlagsStayAlive     QuestFlags = 0x00000001
-	QuestFlagsPartyAccept   QuestFlags = 0x00000002
-	QuestFlagsExploration   QuestFlags = 0x00000004
-	QuestFlagsSharable      QuestFlags = 0x00000008
-	QuestFlagsDaily         QuestFlags = 0x00001000
-	QuestFlagsWeekly        QuestFlags = 0x00008000
-	QuestFlagsAutoComplete  QuestFlags = 0x00010000
-	QuestFlagsAutoAccept    QuestFlags = 0x00080000
+	QuestFlagsStayAlive    QuestFlags = 0x00000001
+	QuestFlagsPartyAccept  QuestFlags = 0x00000002
+	QuestFlagsExploration  QuestFlags = 0x00000004
+	QuestFlagsSharable     QuestFlags = 0x00000008
+	QuestFlagsDaily        QuestFlags = 0x00001000
+	QuestFlagsWeekly       QuestFlags = 0x00008000
+	QuestFlagsAutoComplete QuestFlags = 0x00010000
+	QuestFlagsAutoAccept   QuestFlags = 0x00080000
 )
 
 // Quest special flags (quest_template_addon.SpecialFlags).
@@ -71,24 +71,25 @@ const (
 
 // Quest is the in-memory representation of a quest template.
 type Quest struct {
-	ID             uint32
-	Method         uint32
-	ZoneOrSort     int32
-	MinLevel       uint32
-	Level          int32
-	Type           uint32
-	AllowableRaces uint32
-	Flags          QuestFlags
-	SpecialFlags   QuestSpecialFlags
-	TimeAllowed    uint32
-	StartItem      uint32
+	ID                  uint32
+	Method              uint32
+	ZoneOrSort          int32
+	MinLevel            uint32
+	Level               int32
+	Type                uint32
+	AllowableRaces      uint32
+	RequiredClasses     uint32
+	Flags               QuestFlags
+	SpecialFlags        QuestSpecialFlags
+	TimeAllowed         uint32
+	StartItem           uint32
 	RequiredPlayerKills uint32
-	RewardMoney    int32
-	RewardXP       uint32
+	RewardMoney         int32
+	RewardXP            uint32
 
-	RequiredItemId     [6]uint32
-	RequiredItemCount  [6]uint16
-	RequiredNpcOrGo    [4]int32 // >0 = creature entry, <0 = GO entry (abs)
+	RequiredItemId       [6]uint32
+	RequiredItemCount    [6]uint16
+	RequiredNpcOrGo      [4]int32 // >0 = creature entry, <0 = GO entry (abs)
 	RequiredNpcOrGoCount [4]uint16
 
 	RewardChoiceItemId    [6]uint32

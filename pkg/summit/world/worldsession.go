@@ -61,6 +61,10 @@ type WorldSession struct {
 	// Player currently logged in through this session
 	player *player.Player
 
+	// questLog mirrors the client quest log slots (PLAYER_QUEST_LOG_n_1);
+	// 0 means the slot is free.
+	questLog [maxQuestLogSlots]uint32
+
 	// Time sync counter
 	timeSyncCounter uint32
 }
@@ -427,7 +431,7 @@ func (gc *WorldSession) sendLevelUpInfo(newLevel uint8, hp, mana, str, agi, sta,
 
 	_ = pkt.Write(uint32(newLevel))
 	_ = pkt.Write(hp)
-	_ = pkt.Write(mana)  // power 0
+	_ = pkt.Write(mana)      // power 0
 	_ = pkt.Write(uint32(0)) // power 1 (rage)
 	_ = pkt.Write(uint32(0)) // power 2 (focus)
 	_ = pkt.Write(uint32(0)) // power 3 (energy)

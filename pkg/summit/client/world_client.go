@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/paalgyula/summit/pkg/wow/crypt"
 	"github.com/rs/zerolog"
@@ -58,6 +59,16 @@ type WorldClient struct {
 	selfGUID      wow.GUID
 	creatureNames map[uint32]string
 
+	// spellFailures remembers the last SpellCastResult per spell so the bot
+	// stops retrying spells the server keeps rejecting.
+	spellFailures map[uint32]SpellFailure
+
+	// Death / resurrection state.
+	dead      atomic.Bool
+	deathLoc  player.WorldLocation
+	reclaimCh chan struct{}
+	deathCh   chan struct{}
+
 	// charEnumCh receives the latest character list (buffered, latest wins).
 	charEnumCh chan []*CharEnum
 	// loginVerifyCh is signalled once SMSG_LOGIN_VERIFY_WORLD arrived.
@@ -94,6 +105,10 @@ func NewWorldClient(accountName, sessionKey, worldAddress string) (*WorldClient,
 
 		objects:       make(map[wow.GUID]*Entity),
 		creatureNames: make(map[uint32]string),
+		spellFailures: make(map[uint32]SpellFailure),
+
+		reclaimCh: make(chan struct{}, 1),
+		deathCh:   make(chan struct{}, 1),
 
 		charEnumCh:    make(chan []*CharEnum, 1),
 		loginVerifyCh: make(chan struct{}, 1),

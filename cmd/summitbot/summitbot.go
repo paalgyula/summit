@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/paalgyula/summit/pkg/summit/bot"
@@ -26,6 +27,9 @@ var (
 	worldServer string
 	character   string
 	timeout     int
+	spellIDs    []uint32
+	autoCast    bool
+	leash       float64
 )
 
 func main() {
@@ -36,6 +40,19 @@ func main() {
 	flag.StringVar(&character, "character", "", "character name to enter the world with (default: first)")
 
 	flag.IntVar(&timeout, "timeout", 15, "how long the bot stays in the world, in seconds")
+	flag.BoolVar(&autoCast, "cast", true, "auto-cast known spells when no -spell is given")
+	flag.Float64Var(&leash, "leash", 80, "max distance from spawn the bot chases")
+
+	flag.Func("spell", "spell id to cast at targets (repeatable)", func(s string) error {
+		id, err := strconv.ParseUint(s, 10, 32)
+		if err != nil {
+			return err
+		}
+
+		spellIDs = append(spellIDs, uint32(id))
+
+		return nil
+	})
 
 	flag.Parse()
 
@@ -131,9 +148,19 @@ func main() {
 	playCtx, cancelPlay := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancelPlay()
 
-	ai := bot.New(wc, bot.DefaultConfig())
+	cfg := bot.DefaultConfig()
+	cfg.Spells = spellIDs
+	cfg.AutoCast = autoCast
+	cfg.LeashRadius = float32(leash)
 
-	log.Info().Int("seconds", timeout).Msg("bot is playing the game")
+	ai := bot.New(wc, cfg)
+
+	log.Info().
+		Int("seconds", timeout).
+		Bool("autoCast", autoCast).
+		Int("spells", len(spellIDs)).
+		Float64("leash", leash).
+		Msg("bot is playing the game")
 
 	if err := ai.Run(playCtx); err != nil {
 		log.Warn().Err(err).Msg("bot stopped")

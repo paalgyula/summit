@@ -82,6 +82,7 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	gc.opcodes.Handle(wow.ClientNameQuery, gc.HandleNameQuery)
 	gc.opcodes.Handle(wow.ClientCreatureQuery, gc.HandleCreatureQuery)
 	gc.opcodes.Handle(wow.ClientGameobjectQuery, gc.HandleGameObjectQuery)
+	gc.opcodes.Handle(wow.ClientQuestQuery, gc.HandleQuestQuery)
 
 	// Targeting
 	gc.opcodes.Handle(wow.ClientSetSelection, gc.HandleSetSelection)

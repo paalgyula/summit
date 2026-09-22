@@ -134,7 +134,7 @@ func (s *Spell) CheckCast(strict bool) SpellCastResult {
 
 	// Check cooldown
 	if strict && !s.TriggerFlags.isSet(TriggeredIgnoreCooldowns) {
-		if IsSpellOnCooldown(s.Caster, s.Info.Id) {
+		if IsSpellOnCooldown(s.Caster, s.Info.Id, s.Info.StartRecoveryCategory) {
 			return SpellCastFailedSpellOnCooldown
 		}
 	}

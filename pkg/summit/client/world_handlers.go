@@ -57,6 +57,18 @@ func (wc *WorldClient) handleMessage(msg *ServerMessage) {
 		wc.handleLevelUp(msg)
 	case wow.ServerLootResponse:
 		wc.handleLootResponse(msg)
+	case wow.ServerCastFailed:
+		wc.handleCastFailed(msg)
+	case wow.ServerSpellStart:
+		wc.handleSpellStart(msg)
+	case wow.ServerSpellGo:
+		wc.handleSpellGo(msg)
+	case wow.ServerSpellFailure:
+		wc.handleSpellFailure(msg)
+	case wow.ServerDeathReleaseLoc:
+		wc.handleDeathReleaseLoc(msg)
+	case wow.ServerCorpseReclaimDelay:
+		wc.handleCorpseReclaimDelay(msg)
 	default:
 		wc.log.Debug().
 			Str("packet", msg.Opcode.String()).

@@ -234,7 +234,9 @@ func decodePaletted(data []byte, width, height, alphaDepth int, palette []color.
 			}
 		} else if alphaDepth == 4 && len(alphaData) > (i/2) {
 			nibble := (alphaData[i/2] >> ((i % 2) * 4)) & 0x0F
-			alpha = (nibble * 255) / 15
+			// 4-bit alpha expanded to 8 bits: 15 * 17 == 255. The multiply
+			// must not happen in uint8 (nibble * 255 overflows).
+			alpha = nibble * 17
 		}
 
 		off := i * 4
@@ -368,7 +370,7 @@ func decodeDXT3Block(block []byte, out *[16]color.NRGBA) {
 
 	for i := 0; i < 16; i++ {
 		nibble := uint8((alphaBits >> (i * 4)) & 0x0F)
-		out[i].A = (nibble * 255) / 15
+		out[i].A = nibble * 17
 	}
 }
 

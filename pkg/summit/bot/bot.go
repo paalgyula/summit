@@ -2,8 +2,9 @@
 //
 // The bot enters the world through pkg/summit/client, perceives nearby
 // creatures from SMSG_UPDATE_OBJECT, walks to a hostile target, auto-attacks
-// it, detects the kill (the server does not broadcast NPC health, so it is
-// inferred from the bot's own melee hits), loots the corpse and repeats.
+// and casts spells, detects the kill (the server does not broadcast NPC health,
+// so it is inferred from the bot's own melee hits and reported health updates),
+// loots the corpse, resurrects after death and repeats.
 package bot
 
 import (
@@ -24,6 +25,9 @@ import (
 // moveFlagForward is MOVEMENTFLAG_FORWARD.
 const moveFlagForward = 0x00000001
 
+// spellFailureBackoff is how long a rejected spell is skipped for.
+const spellFailureBackoff = 10 * time.Second
+
 // Config tunes the bot's behaviour.
 type Config struct {
 	// Tick is the AI decision interval.
@@ -36,11 +40,25 @@ type Config struct {
 	MoveSpeed float32
 	// WanderRadius is how far the bot roams while looking for a target.
 	WanderRadius float32
+	// LeashRadius is how far from its home point the bot will chase.
+	LeashRadius float32
 	// Loot controls whether corpses are looted after a kill.
 	Loot bool
+	// GroundFollow blends the bot's Z toward the target's height while moving.
+	GroundFollow bool
+
+	// Spells are cast at the current target. When empty and AutoCast is set,
+	// every known spell is tried and the rejected ones are backed off.
+	Spells []uint32
+	// AutoCast enables casting the character's known spells when Spells is empty.
+	AutoCast bool
+	// SpellRange is the maximum distance at which spells are cast.
+	SpellRange float32
+	// GCD is the minimum interval between two casts.
+	GCD time.Duration
 }
 
-// DefaultConfig returns sensible defaults for a melee grinding bot.
+// DefaultConfig returns sensible defaults for a melee/caster grinding bot.
 func DefaultConfig() Config {
 	return Config{
 		Tick:         250 * time.Millisecond,
@@ -48,7 +66,12 @@ func DefaultConfig() Config {
 		MeleeRange:   4,
 		MoveSpeed:    7,
 		WanderRadius: 12,
+		LeashRadius:  80,
 		Loot:         true,
+		GroundFollow: true,
+		AutoCast:     true,
+		SpellRange:   25,
+		GCD:          1500 * time.Millisecond,
 	}
 }
 
@@ -67,12 +90,68 @@ type Bot struct {
 	moving   bool
 	kills    int
 
+	lastCast time.Time
+
 	pendingLoot wow.GUID
 	lootTimer   time.Time
 
 	wanderTarget *player.WorldLocation
 	lastWander   time.Time
+
+	// Death / resurrection state machine.
+	death deathState
 }
+
+// deathAction is what the bot should do about being dead.
+type deathAction int
+
+const (
+	deathNone deathAction = iota
+	deathRepop
+	deathReclaim
+	deathHealer
+)
+
+// deathState is the pure timing behind the death recovery sequence.
+type deathState struct {
+	active      bool
+	startedAt   time.Time
+	reclaimSent bool
+	healerUsed  bool
+}
+
+// step advances the death sequence and returns the next action to take.
+func (d *deathState) step(now time.Time, dead bool) deathAction {
+	if !dead {
+		d.reset()
+		return deathNone
+	}
+
+	if !d.active {
+		d.active = true
+		d.startedAt = now
+
+		return deathRepop
+	}
+
+	elapsed := now.Sub(d.startedAt)
+
+	if elapsed > 2*time.Second && !d.reclaimSent {
+		d.reclaimSent = true
+
+		return deathReclaim
+	}
+
+	if elapsed > 8*time.Second && !d.healerUsed {
+		d.healerUsed = true
+
+		return deathHealer
+	}
+
+	return deathNone
+}
+
+func (d *deathState) reset() { *d = deathState{} }
 
 // New creates a bot for an already-in-world client.
 func New(wc *client.WorldClient, cfg Config) *Bot {
@@ -114,15 +193,19 @@ func (b *Bot) Run(ctx context.Context) error {
 func (b *Bot) tick() {
 	self := b.client.SelfEntity()
 
-	if self != nil {
-		if self.HasPos {
-			b.syncPosition(self)
-		}
+	if self != nil && self.HasPos {
+		b.syncPosition(self)
+	}
 
-		if self.MaxHealth() > 0 && self.Health() == 0 {
-			b.log.Warn().Msg("bot is dead; waiting")
-			return
-		}
+	// Death and resurrection take priority over everything else.
+	if b.client.IsDead() {
+		b.handleDeath()
+
+		return
+	}
+
+	if b.death.active {
+		b.onResurrect(self)
 	}
 
 	b.updateLoot()
@@ -135,9 +218,17 @@ func (b *Bot) tick() {
 			b.swinging = false
 		}
 
+		// Leash: walk back home when we have strayed too far.
+		if distance(b.pos, b.home) > b.cfg.LeashRadius {
+			b.moveToward(b.home)
+
+			return
+		}
+
 		mob := b.client.NearestAttackable(&b.pos, b.cfg.EngageRange)
-		if mob == nil {
+		if mob == nil || distance(mob.Pos, b.home) > b.cfg.LeashRadius {
 			b.wander()
+
 			return
 		}
 
@@ -212,16 +303,101 @@ func (b *Bot) engage(mob *client.Entity) {
 }
 
 func (b *Bot) fight(t *client.Entity) {
-	if distance(b.pos, t.Pos) > b.cfg.MeleeRange {
-		b.moveToward(t.Pos)
+	dist := distance(b.pos, t.Pos)
+
+	// Keep the target inside the leash.
+	if distance(t.Pos, b.home) > b.cfg.LeashRadius {
+		b.log.Debug().Str("name", b.nameOf(t)).Msg("target beyond leash, disengaging")
+		b.stopAttack()
+		b.target = 0
+		b.swinging = false
+
 		return
 	}
 
-	b.stopMoving()
+	if dist > b.cfg.MeleeRange {
+		b.moveToward(t.Pos)
+	} else {
+		b.stopMoving()
+	}
 
 	if !b.swinging {
 		b.client.AttackSwing(t.GUID)
 		b.swinging = true
+	}
+
+	b.maybeCast(t, dist)
+}
+
+// maybeCast casts an offensive spell at the target when in range and off the
+// global cooldown. Rejected spells are backed off.
+func (b *Bot) maybeCast(t *client.Entity, dist float32) {
+	spells := b.spellsToUse()
+	if len(spells) == 0 || dist > b.cfg.SpellRange {
+		return
+	}
+
+	if time.Since(b.lastCast) < b.cfg.GCD {
+		return
+	}
+
+	for _, spellID := range spells {
+		if failure, failed := b.client.SpellFailed(spellID); failed &&
+			time.Since(failure.At) < spellFailureBackoff {
+			continue
+		}
+
+		b.client.CastSpell(spellID, t.GUID)
+		b.lastCast = time.Now()
+
+		b.log.Debug().Uint32("spell", spellID).Str("target", b.nameOf(t)).Msg("casting spell")
+
+		return
+	}
+}
+
+func (b *Bot) spellsToUse() []uint32 {
+	if len(b.cfg.Spells) > 0 {
+		return b.cfg.Spells
+	}
+
+	if !b.cfg.AutoCast {
+		return nil
+	}
+
+	return b.client.KnownSpells()
+}
+
+// handleDeath releases the spirit, reclaims the corpse and falls back to the
+// spirit healer if the reclaim never completes.
+func (b *Bot) handleDeath() {
+	b.stopAttack()
+	b.stopMoving()
+	b.target = 0
+	b.swinging = false
+
+	switch b.death.step(time.Now(), true) {
+	case deathRepop:
+		b.log.Warn().Msg("died, releasing spirit")
+		b.client.RepopRequest()
+	case deathReclaim:
+		b.log.Info().Msg("reclaiming corpse")
+		b.client.ReclaimCorpse(0)
+	case deathHealer:
+		b.log.Info().Msg("corpse reclaim timed out, using spirit healer")
+		b.client.SpiritHealerActivate()
+	}
+}
+
+func (b *Bot) onResurrect(self *client.Entity) {
+	b.log.Info().Msg("resurrected")
+
+	b.death.reset()
+
+	if self != nil && self.HasPos {
+		b.pos = self.Pos
+		b.home = self.Pos
+		b.hasPos = true
 	}
 }
 
@@ -246,6 +422,10 @@ func (b *Bot) moveToward(dest player.WorldLocation) {
 	dy := dest.Y - b.pos.Y
 	dist := float32(math.Hypot(float64(dx), float64(dy)))
 
+	if dist < 0.01 {
+		return
+	}
+
 	if step > dist {
 		step = dist
 	}
@@ -253,6 +433,13 @@ func (b *Bot) moveToward(dest player.WorldLocation) {
 	b.pos.X += float32(math.Cos(float64(o))) * step
 	b.pos.Y += float32(math.Sin(float64(o))) * step
 	b.pos.O = o
+
+	if b.cfg.GroundFollow {
+		// Blend the height toward the destination so the bot follows the ground
+		// instead of hovering at its spawn height.
+		frac := min(float32(1), step/max(dist, 1))
+		b.pos.Z += (dest.Z - b.pos.Z) * frac
+	}
 
 	if b.moving {
 		b.client.SendMovement(wow.MsgMoveHeartbeat, moveFlagForward, b.pos)

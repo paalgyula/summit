@@ -95,6 +95,72 @@ func TestDecodeDXT5(t *testing.T) {
 	}
 }
 
+func TestDecodeDXT3AlphaExpansion(t *testing.T) {
+	// A 4x4 DXT3 block: 8 bytes of 4-bit alpha, then a DXT1 color block.
+	// The alpha nibbles must expand to the full 0..255 range: nibble*17
+	// (15*17 == 255). The multiply used to happen in uint8, wrapping every
+	// nibble above 1 down to a near-transparent value.
+	rawBLP := buildTestBLPHeader(4, 4, EncodingDXT, 8, AlphaTypeDXT3, 16)
+
+	// Alpha nibbles (pixel order): 0, 1, 8, 15, then 15 for the rest.
+	alpha := uint64(0)
+	for i, n := range []uint64{0, 1, 8, 15} {
+		alpha |= n << (i * 4)
+	}
+	for i := 4; i < 16; i++ {
+		alpha |= 15 << (i * 4)
+	}
+
+	dxt3Block := make([]byte, 16)
+	binary.LittleEndian.PutUint64(dxt3Block[0:8], alpha)
+	// Color block: c0 red > c1 blue, every pixel index 0 (opaque red).
+	copy(dxt3Block[8:], []byte{0x00, 0xF8, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00})
+	copy(rawBLP[148:], dxt3Block)
+
+	img, err := Decode(bytes.NewReader(rawBLP))
+	if err != nil {
+		t.Fatalf("Decode DXT3 failed: %v", err)
+	}
+
+	want := []uint8{0, 17, 136, 255}
+	for i, expected := range want {
+		got := img.At(i, 0).(color.NRGBA).A
+		if got != expected {
+			t.Errorf("pixel %d alpha: got %d, want %d", i, got, expected)
+		}
+	}
+	if got := img.At(3, 3).(color.NRGBA).A; got != 255 {
+		t.Errorf("opaque pixel alpha: got %d, want 255", got)
+	}
+}
+
+func TestDecodePaletted4BitAlpha(t *testing.T) {
+	// Paletted texture with alphaDepth 4: the nibbles after the index data
+	// expand to 0..255 the same way.
+	rawBLP := buildTestBLPHeader(2, 2, EncodingUncompressed, 4, 8, 4+2)
+	// Palette entry 0 is opaque white; the mip data starts after the palette.
+	rawBLP = append(rawBLP[:148], append(make([]byte, 1024), 0, 0, 0, 0, 0, 0)...)
+	binary.LittleEndian.PutUint32(rawBLP[20:24], 148+1024)
+	rawBLP[148+0], rawBLP[148+1], rawBLP[148+2], rawBLP[148+3] = 255, 255, 255, 255
+	// Index data: all pixels use entry 0. Alpha nibbles: 0, 15, 8, 1.
+	rawBLP[148+1024+0] = 0
+	rawBLP[148+1024+4] = 0x0F // pixel 0 low nibble 15, pixel 1 high nibble 0
+	rawBLP[148+1024+5] = 0x18 // pixel 2 low nibble 8, pixel 3 high nibble 1
+
+	img, err := Decode(bytes.NewReader(rawBLP))
+	if err != nil {
+		t.Fatalf("Decode paletted failed: %v", err)
+	}
+
+	want := []uint8{255, 0, 136, 17}
+	for i, expected := range want {
+		got := img.At(i%2, i/2).(color.NRGBA).A
+		if got != expected {
+			t.Errorf("pixel %d alpha: got %d, want %d", i, got, expected)
+		}
+	}
+}
+
 func TestDecodePalettedWithoutAlphaIsOpaque(t *testing.T) {
 	// A 2x2 paletted texture with alpha depth 0: the palette's alpha bytes are
 	// zero (as in the character skins), yet the pixels must come out opaque

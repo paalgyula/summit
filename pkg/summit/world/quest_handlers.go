@@ -54,6 +54,21 @@ func (gc *WorldSession) setPlayerQuests(m map[uint32]*quest.QuestStatusData) {
 	}
 }
 
+// playerInfo builds the quest-filtering view of the current player.
+func (gc *WorldSession) playerInfo() quest.PlayerInfo {
+	info := quest.PlayerInfo{
+		Level: uint32(gc.player.Level),
+		Race:  gc.player.Race,
+		Class: gc.player.Class,
+	}
+
+	if rewarded, ok := gc.player.RewardedQuests.(map[uint32]bool); ok {
+		info.Rewarded = rewarded
+	}
+
+	return info
+}
+
 // HandleQuestgiverHello handles CMSG_QUESTGIVER_HELLO — right-click on an NPC.
 func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 	if gc.player == nil {
@@ -87,9 +102,8 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 
 	// Build quest list
 	playerQuests := gc.getPlayerQuests()
+	info := gc.playerInfo()
 
-	// Get quests offered by this NPC
-	offeredQuests := qm.GetQuestsForCreature(npc.EntryID)
 	// Get quests completable at this NPC
 	involvedQuests := qm.GetInvolvedQuestsForCreature(npc.EntryID)
 
@@ -120,21 +134,11 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 		}
 	}
 
-	// Then: quests available to accept
-	for _, questID := range offeredQuests {
-		// Skip if already in quest log
-		if _, exists := playerQuests[questID]; exists {
-			continue
-		}
-
-		qDef := qm.GetQuest(questID)
-		if qDef == nil {
-			continue
-		}
-
-		// TODO: check level, race, class requirements
+	// Then: quests available to accept, filtered by level, race, class, chain
+	// and rewarded state.
+	for _, qDef := range qm.AvailableQuestsForCreature(info, playerQuests, npc.EntryID) {
 		questList = append(questList, quest.QuestListItem{
-			QuestID:      questID,
+			QuestID:      qDef.ID,
 			QuestIcon:    0, // exclamation mark (!)
 			QuestLevel:   qDef.Level,
 			QuestFlags:   uint32(qDef.Flags),
@@ -248,6 +252,14 @@ func (gc *WorldSession) handleAcceptQuest(npcGUID wow.GUID, questID uint32) {
 
 	playerQuests := gc.getPlayerQuests()
 
+	// Re-validate availability (level, race, class, chain, rewarded) — the
+	// client can request any quest id it has seen.
+	if !qm.CanTakeQuest(gc.playerInfo(), playerQuests, qDef) {
+		gc.socket.Send(quest.BuildQuestGiverQuestInvalid(0))
+
+		return
+	}
+
 	// Try to add the quest
 	if !qm.AddQuest(playerQuests, questID) {
 		// Failed — send invalid
@@ -256,6 +268,9 @@ func (gc *WorldSession) handleAcceptQuest(npcGUID wow.GUID, questID uint32) {
 
 		return
 	}
+
+	// Add the quest to the client's quest log (PLAYER_QUEST_LOG_n_* fields).
+	gc.addQuestToLog(qDef)
 
 	// Send close gossip
 	gc.sendGossipComplete(npcGUID)
@@ -451,7 +466,7 @@ func (gc *WorldSession) HandleQuestgiverStatusQuery(data wow.PacketData) {
 	}
 
 	playerQuests := gc.getPlayerQuests()
-	status := qm.GetDialogStatus(playerQuests, npc.EntryID)
+	status := qm.GetDialogStatus(gc.playerInfo(), playerQuests, npc.EntryID)
 
 	pkt := quest.BuildQuestGiverStatus(wow.GUID(guid), status)
 	gc.socket.Send(pkt)
@@ -475,6 +490,8 @@ func (gc *WorldSession) HandleQuestLogRemoveQuest(data wow.PacketData) {
 
 	playerQuests := gc.getPlayerQuests()
 	qm.RemoveQuest(playerQuests, questID)
+
+	gc.removeQuestFromLog(questID)
 
 	log.Debug().Uint32("quest", questID).Msg("quest abandoned")
 }
