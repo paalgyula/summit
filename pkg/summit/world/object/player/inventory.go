@@ -154,6 +154,66 @@ func (inv *Inventory) CountItems() int {
 	return count
 }
 
+// FindEmptyBackpackSlot returns the index of the first empty backpack slot,
+// or -1 if the backpack is full.
+func (inv *Inventory) FindEmptyBackpackSlot() int {
+	for i := InventorySlotItemStart; i < InventorySlotItemEnd; i++ {
+		if inv.Slots[i] == nil {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// AddItem places an item in the first available backpack slot.
+// For stackable items, it first tries to stack with existing items of the same entry.
+// Returns the slot where the item was placed, or -1 if inventory is full.
+func (inv *Inventory) AddItem(item *Item) int {
+	if item == nil {
+		return -1
+	}
+
+	tpl := basedata.GetInstance().LookupItem(item.ItemEntry)
+	maxStack := uint32(1)
+	if tpl != nil {
+		maxStack = uint32(tpl.GetMaxStackSize())
+	}
+
+	// Try to stack with existing items first
+	if maxStack > 1 {
+		for i := InventorySlotItemStart; i < InventorySlotItemEnd; i++ {
+			existing := inv.Slots[i]
+			if existing != nil && existing.ItemEntry == item.ItemEntry && existing.StackCount < maxStack {
+				space := maxStack - existing.StackCount
+				toAdd := item.StackCount
+				if toAdd > space {
+					toAdd = space
+				}
+
+				existing.StackCount += toAdd
+				existing.UpdateFields()
+				item.StackCount -= toAdd
+
+				if item.StackCount == 0 {
+					return i
+				}
+			}
+		}
+	}
+
+	// Find empty slot
+	slot := inv.FindEmptyBackpackSlot()
+	if slot < 0 {
+		return -1 // inventory full
+	}
+
+	item.SlotIndex = slot
+	inv.Slots[slot] = item
+
+	return slot
+}
+
 // CharEnumSlots is the number of item slots SMSG_CHAR_ENUM describes for a
 // character: the 19 equipment slots + 4 bag slots = 23 total.
 const CharEnumSlots = InventorySlotBagEnd // 19 equipment + 4 bag = 23

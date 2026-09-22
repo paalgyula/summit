@@ -1,11 +1,13 @@
 package world
 
-// xp.go — Experience Engine: kill XP formula, GiveXP, SMSG_LEVELUP_INFO.
+// xp.go — Experience Engine: kill XP formula, GiveXP, SMSG_LOG_XPGAIN,
+//          SMSG_EXPLORATION_EXPERIENCE, group XP rate.
 //
 // Reference: AzerothCore
-//   - src/server/game/Entities/Player/Player.cpp  (GiveXP, CheckLevelups)
-//   - src/server/game/Formulas/Formulas.h         (BaseGain, XP::Gain)
-//   - src/server/game/Entities/Player/PlayerUpdates.cpp (UpdateStats)
+//   - Formulas.h / Formulas.cpp   (GetGrayLevel, GetZeroDifference, BaseGain, Gain)
+//   - Player.cpp                  (GiveXP, GiveLevel, GetXPRestBonus, SendLogXPGain)
+//   - PlayerMisc.cpp              (SendExplorationExperience)
+//   - KillRewarder.cpp            (group XP splitting — TODO: future)
 
 import (
 	"github.com/paalgyula/summit/pkg/summit/world/object"
@@ -16,13 +18,23 @@ import (
 const (
 	// MaxPlayerLevel is the WotLK level cap.
 	MaxPlayerLevel uint8 = 80
-	// MaxTalentLevel is the level at which talent points start.
+	// MinTalentLevel is the level at which talent points start.
 	MinTalentLevel uint8 = 10
+)
+
+// ContentLevels determines the base XP tier for a mob based on the map's expansion.
+// Source: AzerothCore DBCStores.h (ContentLevels enum).
+type ContentLevels uint8
+
+const (
+	Content1_60 ContentLevels = 0 // Vanilla: Kalimdor, Eastern Kingdoms
+	Content61_70 ContentLevels = 1 // TBC: Outland
+	Content71_80 ContentLevels = 2 // WotLK: Northrend
 )
 
 // wotlkXPTable contains the total XP required to reach a given level from 1 to 80.
 // Index 0 = XP needed to reach level 2, index 79 = XP to reach 81 (unused sentinel).
-// Source: AzerothCore xp_per_level table (Player.cpp, ObjectMgr::LoadPlayerXPForLevel).
+// Source: AzerothCore xp_per_level table (ObjectMgr::LoadPlayerXPForLevel).
 //
 //nolint:gomnd
 var wotlkXPTable = [81]uint32{
@@ -114,80 +126,147 @@ func NextLevelXP(level uint8) uint32 {
 	if level == 0 || level >= MaxPlayerLevel {
 		return 0
 	}
+
 	return wotlkXPTable[level]
 }
 
-// CalculateKillXP returns the base XP a player of `playerLevel` earns for
-// killing a mob of `mobLevel`.  The elite multiplier doubles the reward.
-//
-// Formula mirrors AzerothCore Formulas::XP::Gain / BaseGain:
-//   - Grey (mob 5+ below player) → 0 XP
-//   - Green/Yellow/Orange/Red    → scaled reward
+// GetGrayLevel returns the level below which a mob gives zero XP.
+// Source: AzerothCore Formulas.h:46 (Acore::XP::GetGrayLevel).
 //
 //nolint:gomnd
+func GetGrayLevel(plLevel uint8) uint8 {
+	switch {
+	case plLevel <= 5:
+		return 0
+	case plLevel <= 39:
+		return plLevel - 5 - plLevel/10
+	case plLevel <= 59:
+		return plLevel - 1 - plLevel/5
+	default:
+		return plLevel - 9
+	}
+}
+
+// GetZeroDifference returns the zero-difference factor used in the XP formula
+// for mobs below the player's level.
+// Source: AzerothCore Formulas.h:82 (Acore::XP::GetZeroDifference).
+//
+//nolint:gomnd
+func GetZeroDifference(plLevel uint8) uint8 {
+	switch {
+	case plLevel < 8:
+		return 5
+	case plLevel < 10:
+		return 6
+	case plLevel < 12:
+		return 7
+	case plLevel < 16:
+		return 8
+	case plLevel < 20:
+		return 9
+	case plLevel < 30:
+		return 11
+	case plLevel < 40:
+		return 12
+	case plLevel < 45:
+		return 13
+	case plLevel < 50:
+		return 14
+	case plLevel < 55:
+		return 15
+	case plLevel < 60:
+		return 16
+	default:
+		return 17
+	}
+}
+
+// BaseGain returns the base XP for killing a mob of `mobLevel` by a player
+// of `plLevel`, before elite multiplier and server rates.
+// Source: AzerothCore Formulas.cpp:27 (Acore::XP::BaseGain).
+//
+//nolint:gomnd
+func BaseGain(plLevel, mobLevel uint8, content ContentLevels) uint32 {
+	var nBaseExp uint32
+
+	switch content {
+	case Content1_60:
+		nBaseExp = 45
+	case Content61_70:
+		nBaseExp = 235
+	case Content71_80:
+		nBaseExp = 580
+	default:
+		nBaseExp = 45
+	}
+
+	if mobLevel >= plLevel {
+		nLevelDiff := mobLevel - plLevel
+		if nLevelDiff > 4 {
+			nLevelDiff = 4
+		}
+
+		return ((uint32(plLevel)*5 + nBaseExp) * (20 + uint32(nLevelDiff)) / 10 + 1) / 2
+	}
+
+	// Mob is below player level
+	grayLevel := GetGrayLevel(plLevel)
+	if mobLevel > grayLevel {
+		ZD := GetZeroDifference(plLevel)
+
+		return (uint32(plLevel)*5 + nBaseExp) * (uint32(ZD) + uint32(mobLevel) - uint32(plLevel)) / uint32(ZD)
+	}
+
+	// Grey mob — zero XP
+	return 0
+}
+
+// CalculateKillXP returns the base XP a player of `playerLevel` earns for
+// killing a mob of `mobLevel`, including the elite multiplier.
+// This is a convenience wrapper around BaseGain for callers that don't need
+// the full Gain() pipeline.
 func CalculateKillXP(playerLevel, mobLevel uint8, elite bool) uint32 {
 	if playerLevel >= MaxPlayerLevel {
 		return 0
 	}
 
-	// Grey threshold: mob is 5 levels below player (below the "challenge" floor).
-	greyThreshold := int16(playerLevel) - greyLevelDelta(playerLevel)
-	if int16(mobLevel) < greyThreshold {
-		return 0
-	}
-
-	// Base XP at equal level (AzerothCore: baseGain = mobLevel * 5 + 45).
-	baseXP := uint32(mobLevel)*5 + 45
-
-	// Level difference factor: lower mob → less XP, higher → full or slight bonus.
-	diff := int16(mobLevel) - int16(playerLevel)
-	var factor float32
-
-	switch {
-	case diff >= 5:
-		factor = 1.20 // red — extra danger bonus
-	case diff >= 3:
-		factor = 1.10 // orange
-	case diff >= 0:
-		factor = 1.00 // yellow/equal
-	case diff >= -2:
-		factor = 0.70 // green
-	default:
-		factor = 0.40 // low-green (not yet grey)
-	}
-
-	xp := float32(baseXP) * factor
+	gain := BaseGain(playerLevel, mobLevel, Content1_60)
 
 	if elite {
-		xp *= 2.0
+		gain = uint32(float32(gain) * 2.0)
 	}
 
-	return uint32(xp)
+	return gain
 }
 
-// greyLevelDelta returns how many levels below the player makes a mob "grey".
-// Source: AzerothCore Player.cpp GetGrayLevel().
+// XpInGroupRate returns the group XP rate multiplier based on the number
+// of alive members in the group.
+// Source: AzerothCore Formulas.h:119 (Acore::XP::xp_in_group_rate).
 //
 //nolint:gomnd
-func greyLevelDelta(level uint8) int16 {
+func XpInGroupRate(count uint32, isRaid bool) float32 {
+	if isRaid {
+		// FIXME: Must apply decrease modifiers depending on raid size.
+		return 1.0
+	}
+
 	switch {
-	case level <= 5:
-		return 0
-	case level <= 39:
-		return int16((level / 10) + 3)
-	case level <= 59:
-		return int16((level / 5) + 1)
+	case count <= 2:
+		return 1.0
+	case count == 3:
+		return 1.166
+	case count == 4:
+		return 1.3
 	default:
-		return int16(level / 5)
+		return 1.4
 	}
 }
 
-// GiveXP awards `amount` XP to the player and triggers level-up if
-// `XP >= NextLevelXP`.  Called by handleCreatureDeath and quest reward code.
-//
-// Ref: AzerothCore Player::GiveXP, Player::CheckLevelups.
-func (gc *WorldSession) GiveXP(amount uint32) {
-	if gc.player == nil || amount == 0 {
+// GiveXP awards XP to the player, applies rest bonus, sends SMSG_LOG_XPGAIN,
+// and triggers level-up loop.
+// Source: AzerothCore Player.cpp:2404 (Player::GiveXP).
+func (gc *WorldSession) GiveXP(xp uint32, victim wow.GUID, groupRate float32) {
+	if gc.player == nil || xp < 1 {
 		return
 	}
 
@@ -197,27 +276,45 @@ func (gc *WorldSession) GiveXP(amount uint32) {
 		return
 	}
 
-	// Accumulate XP
-	p.XP += amount
-	p.Object.SetUInt32Value(object.PlayerXp, p.XP)
+	// Check XP gain toggle
+	if p.PlayerFlags&wow.PlayerFlagsNoXpGain != 0 {
+		return
+	}
 
-	// Broadcast XP gain log (optional — some servers omit this; AzerothCore sends it)
-	// We skip the XP_GAINED server notification for now; the XP field update is enough.
+	// Half XP if partial play time (CAIS)
+	if p.PlayerFlags&wow.PlayerFlagsPartialPlayTime != 0 {
+		if xp > 1 {
+			xp /= 2
+		}
+	}
 
-	// Level-up loop (in case of huge XP grants)
+	// Calculate rest bonus (RaF not implemented yet — rest only)
+	bonusXP := uint32(0)
+	if victim != 0 { // only for kill XP, not quest/exploration
+		bonusXP = GetXPRestBonus(p, xp)
+	}
+
+	// Send SMSG_LOG_XPGAIN
+	gc.sendLogXpgain(xp, victim, bonusXP, false, groupRate)
+
+	// Level-up loop
+	newXP := p.XP + xp + bonusXP
+
 	for p.Level < MaxPlayerLevel {
 		needed := NextLevelXP(p.Level)
-		if needed == 0 || p.XP < needed {
+		if needed == 0 || newXP < needed {
 			break
 		}
 
-		p.XP -= needed
+		newXP -= needed
 		p.Level++
 
 		gc.applyLevelUp(p)
 	}
 
-	// Persist final XP and NextLevelXP update fields
+	p.XP = newXP
+
+	// Update update fields
 	p.Object.SetUInt32Value(object.PlayerXp, p.XP)
 	p.Object.SetUInt32Value(object.PlayerNextLevelXp, NextLevelXP(p.Level))
 }
@@ -268,14 +365,13 @@ func (gc *WorldSession) applyLevelUp(p *player.Player) {
 }
 
 // recalcLevelUpStats returns (hp, mana, str, agi, sta, int, spi) gains for the
-// new level.  Uses a simple linear approximation; real data would come from
-// the gtOCT* DBC tables.
+// new level. Uses a simple linear approximation; real data would come from
+// the gtOCT* DBC tables and playerClassLevelStats.
 //
 //nolint:gomnd
 func recalcLevelUpStats(p *player.Player) (hp, mana, str, agi, sta, int_, spi uint32) {
 	lv := uint32(p.Level)
 
-	// Stamina drives HP; Intellect drives Mana (rough WotLK approximations).
 	staGain := uint32(1)
 	intGain := uint32(1)
 
@@ -300,6 +396,7 @@ func recalcLevelUpStats(p *player.Player) (hp, mana, str, agi, sta, int_, spi ui
 	if hp == 0 {
 		hp = lv
 	}
+
 	if mana == 0 {
 		mana = lv
 	}
@@ -307,4 +404,54 @@ func recalcLevelUpStats(p *player.Player) (hp, mana, str, agi, sta, int_, spi ui
 	return hp, mana, 1, 1, staGain, intGain, 1
 }
 
+// sendLogXpgain sends SMSG_LOG_XPGAIN to the client.
+// Source: AzerothCore Player.cpp:2385 (Player::SendLogXPGain).
+//
+// Packet layout:
+//
+//	ObjectGuid  victim GUID      (8 bytes)
+//	uint32      givenXP          (total XP + bonus)
+//	uint8       type             (0 = kill, 1 = non-kill)
+//	[if kill]:
+//	  uint32    baseXP           (XP without bonus)
+//	  float     groupRate        (group bonus rate, 1.0 = none)
+//	uint8       recruitAFriend   (1 if RaF bonus included)
+func (gc *WorldSession) sendLogXpgain(baseXP uint32, victim wow.GUID, bonusXP uint32, recruitAFriend bool, groupRate float32) {
+	pkt := wow.NewPacket(wow.ServerLogXpgain)
 
+	// Victim GUID (0 for non-kill XP)
+	_ = pkt.Write(uint64(victim))
+
+	// Total XP given (base + bonus)
+	_ = pkt.Write(baseXP + bonusXP)
+
+	// Type: 0 = kill XP, 1 = non-kill XP
+	if victim != 0 {
+		_ = pkt.Write(uint8(0))
+		_ = pkt.Write(baseXP) // XP without bonus
+		_ = pkt.Write(groupRate)
+	} else {
+		_ = pkt.Write(uint8(1))
+	}
+
+	// Recruit-A-Friend flag
+	if recruitAFriend {
+		_ = pkt.Write(uint8(1))
+	} else {
+		_ = pkt.Write(uint8(0))
+	}
+
+	gc.Send(pkt)
+}
+
+// SendExplorationExperience sends SMSG_EXPLORATION_EXPERIENCE when a player
+// discovers a new area.
+// Source: AzerothCore PlayerMisc.cpp:161 (Player::SendExplorationExperience).
+func (gc *WorldSession) SendExplorationExperience(areaID, xp uint32) {
+	pkt := wow.NewPacket(wow.ServerExplorationExperience)
+
+	_ = pkt.Write(areaID)
+	_ = pkt.Write(xp)
+
+	gc.Send(pkt)
+}

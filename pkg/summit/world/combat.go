@@ -614,13 +614,26 @@ func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *Cal
 
 	npc.OnDeath()
 
-	// Grant XP to the killing player (loot, achievements handled by SUMMIT-8)
+	// Grant XP to the killing player
+	// Source: AzerothCore KillRewarder.cpp, Player.cpp:GiveXP
 	if p, ok := attacker.(*player.Player); ok {
-		isElite := npc.Rank > 0
-		xp := CalculateKillXP(p.Level, npc.Level, isElite)
-		if xp > 0 {
-			if gc := getGC(p); gc != nil {
-				gc.GiveXP(xp)
+		if gc := getGC(p); gc != nil {
+			isElite := npc.Rank > 0
+
+			// Determine content level from map (default to vanilla for now)
+			content := Content1_60
+			// TODO: proper map→content lookup using Map.dbc expansion field
+
+			gain := BaseGain(p.Level, npc.Level, content)
+
+			if gain > 0 && isElite {
+				gain = uint32(float32(gain) * 2.0)
+			}
+
+			// TODO: apply creature.ModExperience multiplier when available
+
+			if gain > 0 {
+				gc.GiveXP(gain, npc.GetGUID(), 1.0)
 			}
 		}
 	}

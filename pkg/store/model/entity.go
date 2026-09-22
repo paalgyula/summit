@@ -60,6 +60,12 @@ type CharacterEntity struct {
 	XP    uint32 `bson:"xp"`
 	Money uint32 `bson:"money"`
 
+	// Rest XP system
+	RestBonus       float64 `bson:"restBonus"`
+	IsResting       bool    `bson:"isResting"`
+	LogoutTime      int64   `bson:"logoutTime"`
+	IsLogoutResting bool    `bson:"isLogoutResting"`
+
 	Health    uint32   `bson:"health"`
 	MaxHealth uint32   `bson:"maxHealth"`
 	Power     []uint32 `bson:"power"`

@@ -238,7 +238,7 @@ type RewardResult struct {
 	RewardItemCount [4]uint16
 }
 
-func (m *Manager) RewardQuest(playerQuests map[uint32]*QuestStatusData, questID uint32, chosenRewardIndex int) *RewardResult {
+func (m *Manager) RewardQuest(playerQuests map[uint32]*QuestStatusData, questID uint32, chosenRewardIndex int, playerLevel uint8) *RewardResult {
 	quest := m.templates[questID]
 	if quest == nil {
 		return nil
@@ -250,7 +250,8 @@ func (m *Manager) RewardQuest(playerQuests map[uint32]*QuestStatusData, questID 
 	}
 
 	result := &RewardResult{
-		XP:    quest.RewardXP,
+		// Compute XP dynamically from QuestXP.dbc (AzerothCore behaviour)
+		XP:    quest.CalculateQuestRewardXP(playerLevel),
 		Money: uint32(quest.RewardMoney),
 	}
 

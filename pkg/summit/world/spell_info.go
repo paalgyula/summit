@@ -185,7 +185,7 @@ type SpellEffectInfo struct {
 }
 
 // NewSpellInfo constructs a SpellInfo from a DBC SpellEntryEntry.
-func NewSpellInfo(entry *wotlk.SpellEntryEntry, castTimes []wotlk.SpellCastTimeEntry, durations []wotlk.SpellDurationEntry, ranges []wotlk.SpellRangeEntry) *SpellInfo {
+func NewSpellInfo(entry *wotlk.SpellEntryEntry, castTimes map[uint32]wotlk.SpellCastTimeEntry, durations map[uint32]wotlk.SpellDurationEntry, ranges map[uint32]wotlk.SpellRangeEntry) *SpellInfo {
 	si := &SpellInfo{
 		Id: entry.Id,
 
@@ -284,38 +284,25 @@ func NewSpellInfo(entry *wotlk.SpellEntryEntry, castTimes []wotlk.SpellCastTimeE
 	si.Effects[1] = newSpellEffectInfo(entry, 1)
 	si.Effects[2] = newSpellEffectInfo(entry, 2)
 
-	// Resolve cast time from DBC
-	if int(entry.CastingTimeIndex) < len(castTimes) {
-		for _, ct := range castTimes {
-			if ct.ID == entry.CastingTimeIndex {
-				si.CastTime = ct.CastTime
-				si.CastTimeMs = time.Duration(ct.CastTime) * time.Millisecond
-				break
-			}
-		}
+	// Resolve cast time from DBC. The index is a SpellCastTimes.dbc row id, not
+	// a slice position, so it has to be looked up by id.
+	if ct, ok := castTimes[entry.CastingTimeIndex]; ok {
+		si.CastTime = ct.CastTime
+		si.CastTimeMs = time.Duration(ct.CastTime) * time.Millisecond
 	}
 
 	// Resolve duration from DBC
-	if int(entry.DurationIndex) < len(durations) {
-		for _, d := range durations {
-			if d.ID == entry.DurationIndex {
-				si.Duration = int32(d.Duration)
-				si.DurationMs = time.Duration(d.Duration) * time.Millisecond
-				break
-			}
-		}
+	if d, ok := durations[entry.DurationIndex]; ok {
+		si.Duration = int32(d.Duration)
+		si.DurationMs = time.Duration(d.Duration) * time.Millisecond
 	}
 
-	// Resolve range from DBC
-	if int(entry.RangeIndex) < len(ranges) {
-		for _, r := range ranges {
-			if r.ID == entry.RangeIndex {
-				si.RangeMin = r.Field1
-				si.RangeMax = r.Field2
-				si.RangeMaxF = r.Field2
-				break
-			}
-		}
+	// Resolve range from DBC. SpellRange stores the maximum in column 3 (the
+	// asset server reads the same columns); column 2 is not the range.
+	if r, ok := ranges[entry.RangeIndex]; ok {
+		si.RangeMin = r.Field1
+		si.RangeMax = r.Field3
+		si.RangeMaxF = r.Field3
 	}
 
 	return si

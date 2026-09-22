@@ -292,6 +292,7 @@ func storeTemplateToQuest(t *store.QuestTemplate) *Quest {
 		RequiredPlayerKills: t.RequiredPlayerKills,
 		RewardMoney:         t.RewardMoney,
 		RewardXP:            t.RewardXP,
+		RewardXPDifficulty:  t.RewardXPDifficulty,
 
 		RequiredItemId:        t.RequiredItemId,
 		RequiredItemCount:     t.RequiredItemCount,

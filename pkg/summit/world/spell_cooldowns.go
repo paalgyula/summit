@@ -8,15 +8,20 @@ import (
 
 // AddSpellCooldown adds a cooldown for a spell on the player. It is keyed by
 // the spell id and, when the spell has a recovery category, by that category
-// too so sibling spells share it.
+// too so sibling spells share it. An existing, longer cooldown is kept (the
+// global cooldown must not shorten a real one).
 func AddSpellCooldown(p *player.Player, spellId, category uint32, end time.Time) {
 	if p.SpellCooldowns == nil {
 		p.SpellCooldowns = make(map[uint32]time.Time)
 	}
 
-	p.SpellCooldowns[spellId] = end
+	if cur, ok := p.SpellCooldowns[spellId]; !ok || end.After(cur) {
+		p.SpellCooldowns[spellId] = end
+	}
 	if category > 0 {
-		p.SpellCooldowns[category] = end // category cooldowns are shared
+		if cur, ok := p.SpellCooldowns[category]; !ok || end.After(cur) {
+			p.SpellCooldowns[category] = end
+		}
 	}
 }
 

@@ -58,4 +58,5 @@ const (
 	PlayerFlagsSanctuary       PlayerFlag = 0x10000
 	PlayerFlagsTaxiBenchmark   PlayerFlag = 0x20000
 	PlayerFlagsPVPTimer        PlayerFlag = 0x40000
+	PlayerFlagsNoXpGain        PlayerFlag = 0x02000000
 )

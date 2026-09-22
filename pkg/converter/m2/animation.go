@@ -29,6 +29,16 @@ var DefaultSequences = map[uint16]string{
 	41: "SwimIdle",
 	42: "Swim",
 
+	// Spell casting: the precast loop, the release, the AoE variant and the
+	// channeled loops. Without these the client has nothing to play on
+	// SMSG_SPELL_START / SMSG_SPELL_GO.
+	31:  "SpellPrecast",
+	32:  "SpellCast",
+	52:  "ReadySpellOmni",
+	54:  "SpellCastOmni",
+	124: "ChannelCastDirected",
+	125: "ChannelCastOmni",
+
 	// Emotes (Emotes.dbc animations) and the stand states of /sit, /sleep, /kneel
 	60:  "EmoteTalk",
 	61:  "EmoteEat",

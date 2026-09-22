@@ -201,6 +201,9 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	// Game object handlers
 	gc.opcodes.Handle(wow.ClientGameobjUse, gc.HandleGameObjectUse)
 	gc.opcodes.Handle(wow.ClientGameobjReportUse, gc.HandleGameObjectReportUse)
+
+	// XP toggle handler
+	gc.opcodes.Handle(wow.ClientToggleXpGain, gc.HandleToggleXpGain)
 }
 
 func (gc *WorldSession) Handle(pkt *wow.Packet) {
@@ -248,4 +251,16 @@ func (gc *WorldSession) Handle(pkt *wow.Packet) {
 	// default:
 
 	// }
+}
+
+// HandleToggleXpGain handles CMSG_TOGGLE_XP_GAIN — the client's "show/hide
+// XP bar" toggle.  Server-side, it flips PLAYER_FLAGS_NO_XP_GAIN so the
+// player stops earning XP.  AzerothCore marks this as Handle_NULL (not
+// implemented on the wire) but the flag must still be toggled.
+func (gc *WorldSession) HandleToggleXpGain(_ wow.PacketData) {
+	if gc.player == nil {
+		return
+	}
+
+	gc.player.PlayerFlags ^= wow.PlayerFlagsNoXpGain
 }

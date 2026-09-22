@@ -34,9 +34,25 @@ func NewLoot() *Loot {
 	return &Loot{}
 }
 
-// Empty returns true if there is nothing to loot.
+// Empty returns true if there is nothing left to loot.
 func (l *Loot) Empty() bool {
-	return len(l.Items) == 0 && len(l.QuestItems) == 0 && l.Gold == 0
+	if l.Gold > 0 {
+		return false
+	}
+
+	for i := range l.Items {
+		if !l.Items[i].IsLooted {
+			return false
+		}
+	}
+
+	for i := range l.QuestItems {
+		if !l.QuestItems[i].IsLooted {
+			return false
+		}
+	}
+
+	return true
 }
 
 // AddItem adds an item to the loot, splitting into stacks if needed.

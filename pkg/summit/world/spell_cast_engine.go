@@ -391,13 +391,22 @@ func (s *Spell) effectDummy(idx int, target Unit) {
 
 // applyCooldowns adds the spell's cooldowns to the caster.
 func (s *Spell) applyCooldowns() {
+	now := time.Now()
+
+	// Global cooldown: the shared recovery category (133), 1500 ms for most
+	// spells. It gates every other spell in the category.
+	if s.Info.StartRecoveryTime > 0 && s.Info.StartRecoveryCategory > 0 {
+		end := now.Add(time.Duration(s.Info.StartRecoveryTime) * time.Millisecond)
+		AddSpellCooldown(s.Caster, s.Info.Id, s.Info.StartRecoveryCategory, end)
+	}
+
 	if s.Info.RecoveryTime > 0 {
-		end := time.Now().Add(time.Duration(s.Info.RecoveryTime) * time.Millisecond)
+		end := now.Add(time.Duration(s.Info.RecoveryTime) * time.Millisecond)
 		AddSpellCooldown(s.Caster, s.Info.Id, 0, end)
 	}
 
 	if s.Info.CategoryRecoveryTime > 0 && s.Info.StartRecoveryCategory > 0 {
-		end := time.Now().Add(time.Duration(s.Info.CategoryRecoveryTime) * time.Millisecond)
+		end := now.Add(time.Duration(s.Info.CategoryRecoveryTime) * time.Millisecond)
 		AddSpellCooldown(s.Caster, s.Info.Id, s.Info.StartRecoveryCategory, end)
 	}
 }

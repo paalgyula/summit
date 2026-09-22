@@ -149,6 +149,7 @@ type QuestTemplate struct {
 	RequiredPlayerKills uint32
 	RewardMoney         int32
 	RewardXP            uint32
+	RewardXPDifficulty  uint32 // QuestXP.dbc difficulty column (0-9)
 
 	RequiredItemId        [6]uint32
 	RequiredItemCount     [6]uint16

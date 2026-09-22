@@ -73,6 +73,10 @@ deploy-assetserver:
 deploy-summit:
 	@scripts/deploy-summit.sh
 
+## Copy all local MongoDB data (accounts, characters, world data) to MongoDB Atlas
+migrate-to-atlas:
+	@scripts/migrate-to-atlas.sh
+
 ## Wipe the asset server's conversion cache in the running pod
 evict-asset-cache:
 	@scripts/deploy-assetserver.sh evict-cache

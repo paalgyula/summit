@@ -306,20 +306,49 @@ type QuestSortEntry struct {
 }
 
 // QuestXPEntry represents the QuestXP.dbc file structure.
+// Maps quest level to base XP values per difficulty tier (0-9).
 //
-// Format: niiiiiiiiii
+// Format: niiiiiiiiii (ID + 10 difficulty columns)
 type QuestXPEntry struct {
-	ID uint32 `dbc:"offset=0"`
-	Field1 uint32 `dbc:"offset=1"`
-	Field2 uint32 `dbc:"offset=2"`
-	Field3 uint32 `dbc:"offset=3"`
-	Field4 uint32 `dbc:"offset=4"`
-	Field5 uint32 `dbc:"offset=5"`
-	Field6 uint32 `dbc:"offset=6"`
-	Field7 uint32 `dbc:"offset=7"`
-	Field8 uint32 `dbc:"offset=8"`
-	Field9 uint32 `dbc:"offset=9"`
-	Field10 uint32 `dbc:"offset=10"`
+	ID    uint32 `dbc:"offset=0"`
+	Exp0  uint32 `dbc:"offset=1"`  // Difficulty 0
+	Exp1  uint32 `dbc:"offset=2"`  // Difficulty 1
+	Exp2  uint32 `dbc:"offset=3"`  // Difficulty 2
+	Exp3  uint32 `dbc:"offset=4"`  // Difficulty 3
+	Exp4  uint32 `dbc:"offset=5"`  // Difficulty 4
+	Exp5  uint32 `dbc:"offset=6"`  // Difficulty 5
+	Exp6  uint32 `dbc:"offset=7"`  // Difficulty 6
+	Exp7  uint32 `dbc:"offset=8"`  // Difficulty 7
+	Exp8  uint32 `dbc:"offset=9"`  // Difficulty 8
+	Exp9  uint32 `dbc:"offset=10"` // Difficulty 9
+}
+
+// XPForDifficulty returns the base XP for the given difficulty index (0-9).
+func (e *QuestXPEntry) XPForDifficulty(difficulty uint32) uint32 {
+	switch difficulty {
+	case 0:
+		return e.Exp0
+	case 1:
+		return e.Exp1
+	case 2:
+		return e.Exp2
+	case 3:
+		return e.Exp3
+	case 4:
+		return e.Exp4
+	case 5:
+		return e.Exp5
+	case 6:
+		return e.Exp6
+	case 7:
+		return e.Exp7
+	case 8:
+		return e.Exp8
+	case 9:
+		return e.Exp9
+	default:
+		return 0
+	}
 }
 
 // RandomPropertiesPointsEntry represents the RandomPropertiesPoints.dbc file structure.

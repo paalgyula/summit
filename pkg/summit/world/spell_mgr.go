@@ -107,16 +107,12 @@ func (sm *SpellMgr) LoadSpells(dbcPath string) error {
 	}
 
 	// Build SpellInfo for each entry
-	castTimeSlice := sm.castTimesSlice()
-	durationSlice := sm.durationsSlice()
-	rangeSlice := sm.rangesSlice()
-
 	for i := range entries {
 		entry := &entries[i]
 		if entry.Id == 0 {
 			continue
 		}
-		si := NewSpellInfo(entry, castTimeSlice, durationSlice, rangeSlice)
+		si := NewSpellInfo(entry, sm.castTimes, sm.durations, sm.ranges)
 		sm.spellInfo[entry.Id] = si
 	}
 
@@ -157,30 +153,6 @@ func (sm *SpellMgr) loadSupportingDBC(dbcPath string) error {
 	}
 
 	return nil
-}
-
-func (sm *SpellMgr) castTimesSlice() []wotlk.SpellCastTimeEntry {
-	s := make([]wotlk.SpellCastTimeEntry, 0, len(sm.castTimes))
-	for _, v := range sm.castTimes {
-		s = append(s, v)
-	}
-	return s
-}
-
-func (sm *SpellMgr) durationsSlice() []wotlk.SpellDurationEntry {
-	s := make([]wotlk.SpellDurationEntry, 0, len(sm.durations))
-	for _, v := range sm.durations {
-		s = append(s, v)
-	}
-	return s
-}
-
-func (sm *SpellMgr) rangesSlice() []wotlk.SpellRangeEntry {
-	s := make([]wotlk.SpellRangeEntry, 0, len(sm.ranges))
-	for _, v := range sm.ranges {
-		s = append(s, v)
-	}
-	return s
 }
 
 // GetSpellInfo returns the SpellInfo for the given spell ID, or nil if not found.

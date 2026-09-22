@@ -95,14 +95,15 @@ func (rc *AuthConnection) HandleLogin(pkt *ClientLoginChallenge) error {
 		// } else if pkt.Version != static.SupportedGameVersion || pkt.Build != static.SupportedGameBuild {
 		// 	res.Status = ChallengeStatusFailVersionInvalid
 		res.Status = ChallengeStatusFailed
-	} else {
-		rc.account = rc.mgmt.
-			FindAccount(pkt.AccountName)
-
-		if rc.mgmt == nil {
-			res.Status = ChallengeStatusFailUnknownAccount
-			rc.c.Close()
-		}
+	} else if rc.mgmt == nil {
+		res.Status = ChallengeStatusFailUnknownAccount
+		rc.c.Close()
+	} else if rc.account = rc.mgmt.FindAccount(pkt.AccountName); rc.account == nil {
+		// Unknown account: answer with the proper status. Without this the
+		// challenge below dereferences a nil account and the whole auth
+		// server dies on a single mistyped username.
+		res.Status = ChallengeStatusFailUnknownAccount
+		rc.c.Close()
 	}
 
 	if res.Status == ChallengeStatusSuccess {

@@ -29,6 +29,16 @@ MANIFESTS="deploy/k8s/summit"
 SERVER_IMAGE="$REGISTRY/summit-server"
 CLIENT_IMAGE="$REGISTRY/summit-client"
 
+# Atlas URI for the summit-mongodb secret. Read from PROD_MONGO_URI (env or
+# .env) and normalise the common export typos ("srv+mongodb://", "@>@").
+if [[ -z "${PROD_MONGO_URI:-}" && -f .env ]]; then
+  PROD_MONGO_URI="$(grep -E '^PROD_MONGO_URI=' .env | head -1 | cut -d= -f2-)"
+fi
+if [[ -n "${PROD_MONGO_URI:-}" ]]; then
+  PROD_MONGO_URI="${PROD_MONGO_URI/srv+mongodb:\/\//mongodb+srv:\/\/}"
+  PROD_MONGO_URI="${PROD_MONGO_URI/@>@/@}"
+fi
+
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 kctl() { kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" "$@"; }
 
@@ -61,6 +71,15 @@ deploy() {
   if ! kctl get secret summit-management >/dev/null 2>&1; then
     echo "secret summit-management is missing; see $MANIFESTS/secret.example.yaml" >&2
     exit 1
+  fi
+  if ! kctl get secret summit-mongodb >/dev/null 2>&1; then
+    if [[ -n "${PROD_MONGO_URI:-}" ]]; then
+      log "Creating secret summit-mongodb from PROD_MONGO_URI"
+      kctl create secret generic summit-mongodb --from-literal=uri="$PROD_MONGO_URI" >/dev/null
+    else
+      echo "secret summit-mongodb is missing; set PROD_MONGO_URI or create it (see $MANIFESTS/secret-mongodb.example.yaml)" >&2
+      exit 1
+    fi
   fi
   for f in "$MANIFESTS"/*.yaml; do
     [[ "$f" == *.example.yaml ]] && continue

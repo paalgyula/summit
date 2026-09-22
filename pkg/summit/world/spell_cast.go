@@ -283,6 +283,32 @@ func (gc *WorldSession) applySpellCompletion(spell *Spell) {
 	if spell.HomeTeleport && spell.CastItem != nil {
 		gc.TeleportToBindPoint()
 	}
+
+	gc.sendSpellCooldowns(spell)
+}
+
+// sendSpellCooldowns sends SMSG_SPELL_COOLDOWN (3.3.5a): raw caster GUID, a
+// flags byte, then (u32 spell, u32 cooldown ms) entries. The client draws the
+// sweep; the longest of the global / recovery / category timers is reported.
+func (gc *WorldSession) sendSpellCooldowns(spell *Spell) {
+	cooldownMs := spell.Info.StartRecoveryTime
+	if spell.Info.RecoveryTime > cooldownMs {
+		cooldownMs = spell.Info.RecoveryTime
+	}
+	if spell.Info.CategoryRecoveryTime > cooldownMs {
+		cooldownMs = spell.Info.CategoryRecoveryTime
+	}
+	if cooldownMs == 0 {
+		return
+	}
+
+	pkt := wow.NewPacket(wow.ServerSpellCooldown)
+	_ = pkt.Write(gc.player.GUID())
+	_ = pkt.WriteOne(0) // flags
+	_ = pkt.Write(spell.Info.Id)
+	_ = pkt.Write(cooldownMs)
+
+	gc.socket.Send(pkt)
 }
 
 // broadcastPlayerStatsToAll sends health/mana updates for a player to all nearby players.
@@ -440,6 +466,39 @@ func (gc *WorldSession) sendCastFailed(spellID uint32, result SpellCastResult) {
 	_ = pkt.WriteOne(0)           // multiple casts (false)
 
 	gc.socket.Send(pkt)
+}
+
+// sendSpellFailure sends SMSG_SPELL_FAILURE (3.3.5a): packed caster, u8
+// castCount, u32 spell, u8 result. Unlike SMSG_CAST_FAILED this is for a cast
+// that already started (SMSG_SPELL_START went out) and ended without landing.
+func (gc *WorldSession) sendSpellFailure(castCount uint32, spellID uint32, result SpellCastResult) {
+	pkt := wow.NewPacket(wow.ServerSpellFailure)
+
+	writePackedGUID(pkt, gc.player.GUID())
+
+	_ = pkt.WriteOne(int(castCount & 0xff))
+	_ = pkt.Write(spellID)
+	_ = pkt.WriteOne(int(result))
+
+	gc.socket.Send(pkt)
+}
+
+// interruptCast drops a running cast-time spell without completing it and
+// tells the client (and the caster) why. Movement, jumps and the like end a
+// cast in WoW; no cooldown is applied to an interrupted cast.
+func (gc *WorldSession) interruptCast(result SpellCastResult) {
+	if gc.player == nil || gc.player.ActiveSpell == nil {
+		return
+	}
+
+	activeSpell, ok := gc.player.ActiveSpell.(*ActiveSpell)
+	if !ok || activeSpell == nil || activeSpell.Spell == nil {
+		gc.player.ActiveSpell = nil
+		return
+	}
+
+	gc.player.ActiveSpell = nil
+	gc.sendSpellFailure(activeSpell.CastCount, activeSpell.Spell.Info.Id, result)
 }
 
 // sendSpellGo sends SMSG_SPELL_GO (3.3.5a): packed castItem, packed caster,

@@ -46,6 +46,11 @@ spec:
                 secretKeyRef:
                   name: summit-management
                   key: token
+            - name: SUMMIT_STORE_MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: summit-mongodb
+                  key: uri
           ports:
             - name: management
               containerPort: 4999
@@ -57,6 +62,15 @@ spec:
               containerPort: 5000
             - name: world-tcp
               containerPort: 8129
+          # Loading Spell.dbc and the other DBCs takes ~40s; without a startup
+          # probe the liveness probe kills the container while it is still
+          # loading and the pod never becomes ready.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: auth-ws
+            periodSeconds: 5
+            failureThreshold: 40 # up to ~200s to finish loading
           livenessProbe:
             httpGet:
               path: /health

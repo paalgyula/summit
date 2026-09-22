@@ -391,7 +391,7 @@ func (gc *WorldSession) HandleQuestgiverChooseReward(data wow.PacketData) {
 	}
 
 	playerQuests := gc.getPlayerQuests()
-	result := qm.RewardQuest(playerQuests, questID, int(chosenItem))
+	result := qm.RewardQuest(playerQuests, questID, int(chosenItem), gc.player.Level)
 	if result == nil {
 		return
 	}

@@ -110,6 +110,19 @@ func (gc *WorldSession) LoginCharacter(p *player.Player) {
 	p.Object.SetUInt32Value(object.PlayerXp, p.XP)
 	p.Object.SetUInt32Value(object.PlayerNextLevelXp, NextLevelXP(p.Level))
 
+	// Initialize rest XP system
+	// Calculate offline rest bonus (accumulated while logged out)
+	now := currentUnixTime()
+	CalculateOfflineRestBonus(p, now)
+
+	// Set rest bonus from loaded data (persists across logins)
+	SetRestBonus(p, p.RestBonus)
+
+	// If was resting at logout, restore resting flag
+	if p.IsLogoutResting {
+		SetRestFlag(p)
+	}
+
 	// Talent points: 1 per level starting at level 10 (up to 71 at level 80).
 	if p.Level >= MinTalentLevel {
 		talentPoints := uint32(p.Level) - uint32(MinTalentLevel) + 1

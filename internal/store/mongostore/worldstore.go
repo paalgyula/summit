@@ -481,6 +481,7 @@ func questEntityToTemplate(e model.QuestTemplateEntity) *store.QuestTemplate {
 		RequiredPlayerKills: e.RequiredPlayerKills,
 		RewardMoney:         e.RewardMoney,
 		RewardXP:            e.RewardXP,
+		RewardXPDifficulty:  e.RewardXPDifficulty,
 
 		RequiredItemId:        e.RequiredItemId,
 		RequiredItemCount:     e.RequiredItemCount,

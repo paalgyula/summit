@@ -39,3 +39,8 @@ data:
       - name: The Highest Summit
         slug: highest-summit
         address: summit-server:5002
+    # Accounts, characters and world data live in MongoDB (Atlas). The URI is
+    # injected as SUMMIT_STORE_MONGODB_URI from the summit-mongodb secret.
+    store:
+      mongodb:
+        database: summit

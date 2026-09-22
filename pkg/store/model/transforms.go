@@ -130,6 +130,11 @@ func PlayerToEntity(p *player.Player, account string) CharacterEntity {
 		XP:    p.XP,
 		Money: p.Money,
 
+		RestBonus:       p.RestBonus,
+		IsResting:       p.IsResting,
+		LogoutTime:      p.LogoutTime,
+		IsLogoutResting: p.IsLogoutResting,
+
 		Health:    p.Health,
 		MaxHealth: p.MaxHealth,
 		Power:     p.Power[:],
@@ -253,6 +258,11 @@ func EntityToPlayer(e CharacterEntity) *player.Player {
 	p.Level = e.Level
 	p.XP = e.XP
 	p.Money = e.Money
+
+	p.RestBonus = e.RestBonus
+	p.IsResting = e.IsResting
+	p.LogoutTime = e.LogoutTime
+	p.IsLogoutResting = e.IsLogoutResting
 
 	p.Health = e.Health
 	p.MaxHealth = e.MaxHealth

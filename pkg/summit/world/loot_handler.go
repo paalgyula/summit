@@ -3,6 +3,7 @@ package world
 import (
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/loot"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -86,6 +87,10 @@ func (gc *WorldSession) HandleLoot(data wow.PacketData) {
 }
 
 // HandleAutostoreLootItem handles CMSG_AUTOSTORE_LOOT_ITEM — player takes an item.
+// This is called both by manual clicking and by the client's auto-loot feature
+// (when the player has "Auto Loot" enabled in Interface settings).
+//
+// Source: AzerothCore LootHandler.cpp:33 (HandleAutostoreLootItemOpcode).
 func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 	if gc.player == nil || gc.player.ActiveLoot == nil {
 		return
@@ -109,23 +114,58 @@ func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 		Uint8("slot", slot).
 		Msg("CMSG_AUTOSTORE_LOOT_ITEM")
 
-	if int(slot) >= len(l.Items) {
+	// Determine if this is a normal item or quest item slot
+	normalCount := len(l.Items)
+	questCount := len(l.QuestItems)
+
+	var item *loot.LootItem
+	var isQuestItem bool
+
+	if int(slot) < normalCount {
+		item = &l.Items[slot]
+	} else if questSlot := int(slot) - normalCount; questSlot < questCount {
+		item = &l.QuestItems[questSlot]
+		isQuestItem = true
+	} else {
 		gc.log.Warn().Uint8("slot", slot).Msg("invalid loot slot")
 		return
 	}
 
-	item := &l.Items[slot]
 	if item.IsLooted {
 		return
 	}
 
-	// TODO: validate player can loot this slot (permission check)
-	// TODO: check inventory space, call player.AddItem
-	// For now, just mark as looted
+	// Create a new inventory item from the loot item
+	newItem := player.NewItem(item.ItemID, gc.player.GUID())
+	newItem.StackCount = uint32(item.Count)
+	newItem.EnsureGUID()
+
+	// Try to add to inventory
+	slotIdx := gc.player.Inventory.AddItem(newItem)
+	if slotIdx < 0 {
+		// Inventory full
+		gc.log.Warn().Msg("inventory full, cannot loot item")
+
+		return
+	}
+
+	// Mark as looted
 	item.IsLooted = true
 
-	// Notify all looters that this slot was removed
+	// Send SMSG_LOOT_REMOVED to notify other looters
 	gc.sendLootRemoved(slot)
+
+	// Send SMSG_UPDATE_OBJECT with CreateObject block for the new item
+	upd := &Updater{}
+	pkt := upd.BuildItemCreateObject(newItem, gc.player)
+	if pkt != nil {
+		gc.Send(pkt)
+	}
+
+	// Update player's inventory fields
+	gc.player.UpdateInventoryFields()
+
+	_ = isQuestItem // TODO: quest item notification logic
 
 	// If all items looted and no gold, auto-release
 	if l.Empty() {

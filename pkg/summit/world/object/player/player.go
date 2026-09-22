@@ -222,6 +222,13 @@ type Player struct {
 	XP    uint32
 	Money uint32
 
+	// Rest XP system (AzerothCore-compatible)
+	RestBonus       float64 // accumulated rest XP bonus (displayed / 2 to client)
+	IsResting       bool    // whether in inn/city (REST_FLAG)
+	RestTime        int64   // last rest tick timestamp (unix seconds)
+	LogoutTime      int64   // timestamp of last logout
+	IsLogoutResting bool    // was resting at logout
+
 	Health    uint32
 	MaxHealth uint32
 	Power     [wow.MaxPowerTypes]uint32
@@ -1216,104 +1223,6 @@ func (p *Player) IsWithinRange(target *Player, maxRange float32) bool {
 	dist := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
 
 	return dist <= maxRange
-}
-
-// XpToNextLevel returns the XP required for the next level.
-// Uses the standard WotLK formula: (level * 1000) + (level^2 * 100)
-func (p *Player) XpToNextLevel() uint32 {
-	lvl := uint32(p.Level)
-	return lvl*1000 + lvl*lvl*100
-}
-
-// GainXP grants experience points and checks for level up.
-func (p *Player) GainXP(amount uint32) uint32 {
-	if p.Level >= 80 {
-		return 0 // max level
-	}
-
-	p.XP += amount
-
-	// Check for level up
-	levelsGained := uint32(0)
-	for p.XP >= p.XpToNextLevel() && p.Level < 80 {
-		p.XP -= p.XpToNextLevel()
-		p.Level++
-		levelsGained++
-
-		// Apply stat gains per level
-		p.applyLevelUpGains()
-	}
-
-	return levelsGained
-}
-
-// applyLevelUpGains applies stat increases when leveling up.
-func (p *Player) applyLevelUpGains() {
-	// Health gain per level (varies by class, simplified)
-	var healthGain uint32
-	switch p.Class {
-	case wow.ClassWarior:
-		healthGain = 20
-	case wow.ClassPaladin, wow.ClassDruid:
-		healthGain = 18
-	case wow.ClassHunter, wow.ClassShaman:
-		healthGain = 16
-	case wow.ClassRogue, wow.ClassDeathKnight:
-		healthGain = 14
-	case wow.ClassPriest, wow.ClassMage, wow.ClassWarlock:
-		healthGain = 12
-	default:
-		healthGain = 14
-	}
-
-	p.MaxHealth += healthGain
-	p.Health = p.MaxHealth // Full heal on level up
-
-	// Power gain per level (for mana users)
-	powerType := p.primaryPowerType()
-	if powerType == wow.PowerTypeMana {
-		p.MaxPower[powerType] += 12
-		p.Power[powerType] = p.MaxPower[powerType]
-	}
-
-	// Update update fields
-	p.Object.SetUInt32Value(object.UnitFieldLevel, uint32(p.Level))
-	p.Object.SetUInt32Value(object.UnitFieldMaxhealth, p.MaxHealth)
-	p.Object.SetUInt32Value(object.UnitFieldHealth, p.Health)
-
-	if powerType >= 0 && int(powerType) < wow.MaxPowerTypes {
-		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldPower1)+int(powerType)), p.Power[powerType])
-		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldMaxpower1)+int(powerType)), p.MaxPower[powerType])
-	}
-}
-
-// Kill grants XP for killing a creature based on level difference.
-func (p *Player) Kill(creatureLevel uint8) uint32 {
-	// Base XP from creature level
-	baseXP := uint32(creatureLevel) * 10
-
-	// Level difference modifier
-	diff := int32(p.Level) - int32(creatureLevel)
-	var modifier float32
-	switch {
-	case diff <= -5:
-		modifier = 2.0 // much higher level creature
-	case diff <= -2:
-		modifier = 1.5
-	case diff <= 2:
-		modifier = 1.0 // same level
-	case diff <= 5:
-		modifier = 0.8
-	default:
-		modifier = 0.5 // much lower level creature
-	}
-
-	xp := uint32(float32(baseXP) * modifier)
-	if xp < 1 {
-		xp = 1
-	}
-
-	return p.GainXP(xp)
 }
 
 // Die kills the player and sets ghost state.

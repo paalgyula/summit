@@ -70,7 +70,8 @@ type QuestTemplateEntity struct {
 	StartItem           uint32 `bson:"startItem"`
 	RequiredPlayerKills uint32 `bson:"requiredPlayerKills"`
 	RewardMoney         int32  `bson:"rewardMoney"`
-	RewardXP            uint32 `bson:"rewardXP"`
+	RewardXP            uint32 `bson:"rewardXP"`            // legacy flat XP (unused with DBC)
+	RewardXPDifficulty  uint32 `bson:"rewardXPId"`          // QuestXP.dbc difficulty column
 
 	RequiredItemId        [6]uint32 `bson:"requiredItemId"`
 	RequiredItemCount     [6]uint16 `bson:"requiredItemCount"`

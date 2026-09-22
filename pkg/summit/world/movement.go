@@ -196,6 +196,9 @@ func (gc *WorldSession) updatePlayerPosition(info *MovementInfo) {
 	// Moving ends dances, sitting and the like
 	if info.Flags&uint32(wow.MovementFlagMoving) != 0 {
 		gc.clearEmotes()
+		// A moving caster cannot keep a cast-time spell going: the client's own
+		// prediction drops the cast, the server confirms it with SPELL_FAILURE.
+		gc.interruptCast(SpellCastFailedSpellInterrupted)
 	}
 
 	// Check areatriggers after position update
