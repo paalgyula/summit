@@ -28,6 +28,10 @@ type CharacterRepo interface {
 	// UpdateCharacter updates an existing character in the store.
 	UpdateCharacter(character *player.Player) error
 
+	// UpdateCharacterQuests persists only the character's quest progress with a
+	// single atomic partial update, leaving the rest of the document untouched.
+	UpdateCharacterQuests(character *player.Player) error
+
 	// DeleteCharacter removes character from db.
 	DeleteCharacter(characterID int) error
 }
@@ -175,7 +179,7 @@ type QuestTemplate struct {
 // Waypoint is a single waypoint along a creature's path.
 type Waypoint struct {
 	Point            uint32
-	X, Y, Z         float32
+	X, Y, Z          float32
 	Orientation      float32
 	Delay            uint32    // wait time at this waypoint (ms)
 	MoveType         uint8     // 0 = walk, 1 = run

@@ -6,6 +6,7 @@ import (
 
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -95,18 +96,18 @@ func PlayerToEntity(p *player.Player, account string) CharacterEntity {
 	now := time.Now()
 
 	e := CharacterEntity{
-		GUID:      p.ID,
-		Account:   account,
-		Name:      p.Name,
-		Race:      uint8(p.Race),
-		Class:     uint8(p.Class),
-		Gender:    uint8(p.Gender),
-		Skin:      p.Skin,
-		Face:      p.Face,
-		HairStyle: p.HairStyle,
-		HairColor: p.HairColor,
+		GUID:       p.ID,
+		Account:    account,
+		Name:       p.Name,
+		Race:       uint8(p.Race),
+		Class:      uint8(p.Class),
+		Gender:     uint8(p.Gender),
+		Skin:       p.Skin,
+		Face:       p.Face,
+		HairStyle:  p.HairStyle,
+		HairColor:  p.HairColor,
 		FacialHair: p.FacialHair,
-		OutfitID:  p.OutfitID,
+		OutfitID:   p.OutfitID,
 
 		Location: LocationEntity{
 			Map:  p.Location.Map,
@@ -170,7 +171,48 @@ func PlayerToEntity(p *player.Player, account string) CharacterEntity {
 		}
 	}
 
+	// Quests (embedded)
+	e.Quests, e.RewardedQuests = QuestProgressToEntity(p)
+
 	return e
+}
+
+// QuestProgressToEntity extracts the character's quest progress for embedding in
+// the character document. It is also used for partial (`$set`) quest updates.
+func QuestProgressToEntity(p *player.Player) ([]QuestProgressEntity, []uint32) {
+	var quests []QuestProgressEntity
+
+	if qs, ok := p.QuestStatus.(map[uint32]*quest.QuestStatusData); ok && len(qs) > 0 {
+		quests = make([]QuestProgressEntity, 0, len(qs))
+
+		for id, s := range qs {
+			if s == nil {
+				continue
+			}
+
+			quests = append(quests, QuestProgressEntity{
+				QuestID:           id,
+				Status:            uint32(s.Status),
+				Timer:             s.Timer,
+				ItemCount:         s.ItemCount,
+				CreatureOrGOCount: s.CreatureOrGOCount,
+				PlayerCount:       s.PlayerCount,
+				Explored:          s.Explored,
+			})
+		}
+	}
+
+	var rewarded []uint32
+
+	if rw, ok := p.RewardedQuests.(map[uint32]bool); ok && len(rw) > 0 {
+		rewarded = make([]uint32, 0, len(rw))
+
+		for id := range rw {
+			rewarded = append(rewarded, id)
+		}
+	}
+
+	return quests, rewarded
 }
 
 // EntityToPlayer converts a MongoDB entity to a domain Player.
@@ -233,8 +275,8 @@ func EntityToPlayer(e CharacterEntity) *player.Player {
 	p.FirstLogin = e.FirstLogin
 
 	p.Pet = player.Pet{
-		DisplayID: e.Pet.DisplayID,
-		PetLevel:  e.Pet.Level,
+		DisplayID:  e.Pet.DisplayID,
+		PetLevel:   e.Pet.Level,
 		PetFamilly: e.Pet.Family,
 	}
 
@@ -242,6 +284,34 @@ func EntityToPlayer(e CharacterEntity) *player.Player {
 
 	if len(e.Actions) > 0 {
 		copy(p.Actions[:], e.Actions)
+	}
+
+	// Quests (embedded)
+	if len(e.Quests) > 0 {
+		status := make(map[uint32]*quest.QuestStatusData, len(e.Quests))
+
+		for _, qe := range e.Quests {
+			status[qe.QuestID] = &quest.QuestStatusData{
+				Status:            quest.QuestStatus(qe.Status),
+				Timer:             qe.Timer,
+				ItemCount:         qe.ItemCount,
+				CreatureOrGOCount: qe.CreatureOrGOCount,
+				PlayerCount:       qe.PlayerCount,
+				Explored:          qe.Explored,
+			}
+		}
+
+		p.QuestStatus = status
+	}
+
+	if len(e.RewardedQuests) > 0 {
+		rewarded := make(map[uint32]bool, len(e.RewardedQuests))
+
+		for _, id := range e.RewardedQuests {
+			rewarded[id] = true
+		}
+
+		p.RewardedQuests = rewarded
 	}
 
 	// Inventory

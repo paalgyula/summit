@@ -7,9 +7,44 @@ import (
 
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestQuestProgressRoundTrip(t *testing.T) {
+	p := player.NewPlayer()
+	p.ID = 7
+	p.Name = "Questor"
+	p.QuestStatus = map[uint32]*quest.QuestStatusData{
+		100: {
+			Status:            quest.QuestStatusIncomplete,
+			ItemCount:         [6]uint16{2, 0, 0, 0, 0, 0},
+			CreatureOrGOCount: [4]uint16{1, 3, 0, 0},
+		},
+		200: {Status: quest.QuestStatusComplete},
+	}
+	p.RewardedQuests = map[uint32]bool{50: true}
+
+	e := PlayerToEntity(p, "acc")
+
+	require.Len(t, e.Quests, 2)
+	assert.ElementsMatch(t, []uint32{50}, e.RewardedQuests)
+
+	got := EntityToPlayer(e)
+
+	status, ok := got.QuestStatus.(map[uint32]*quest.QuestStatusData)
+	require.True(t, ok)
+	require.Len(t, status, 2)
+	assert.Equal(t, quest.QuestStatusIncomplete, status[100].Status)
+	assert.Equal(t, [4]uint16{1, 3, 0, 0}, status[100].CreatureOrGOCount)
+	assert.Equal(t, [6]uint16{2, 0, 0, 0, 0, 0}, status[100].ItemCount)
+	assert.Equal(t, quest.QuestStatusComplete, status[200].Status)
+
+	rewarded, ok := got.RewardedQuests.(map[uint32]bool)
+	require.True(t, ok)
+	assert.True(t, rewarded[50])
+}
 
 func TestAccountToEntity(t *testing.T) {
 	now := time.Now()
@@ -137,22 +172,22 @@ func TestPlayerToEntity(t *testing.T) {
 
 func TestEntityToPlayer(t *testing.T) {
 	e := CharacterEntity{
-		GUID:      42,
-		Name:      "Arthas",
-		Race:      6,
-		Class:     2,
-		Gender:    0,
-		Skin:      1,
-		Face:      2,
-		HairStyle: 3,
-		HairColor: 4,
+		GUID:       42,
+		Name:       "Arthas",
+		Race:       6,
+		Class:      2,
+		Gender:     0,
+		Skin:       1,
+		Face:       2,
+		HairStyle:  3,
+		HairColor:  4,
 		FacialHair: 5,
-		Level:     10,
-		Money:     500,
-		Health:    200,
-		MaxHealth: 300,
-		Power:     []uint32{0, 0, 0, 0, 0},
-		MaxPower:  []uint32{0, 0, 0, 0, 0},
+		Level:      10,
+		Money:      500,
+		Health:     200,
+		MaxHealth:  300,
+		Power:      []uint32{0, 0, 0, 0, 0},
+		MaxPower:   []uint32{0, 0, 0, 0, 0},
 		Location: LocationEntity{
 			Map:  0,
 			Zone: 12,

@@ -35,13 +35,13 @@ func (AccountEntity) CollectionName() string { return "accounts" }
 
 // CharacterEntity is the MongoDB document for the characters collection.
 type CharacterEntity struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty"`
-	GUID      uint32             `bson:"guid"`
-	Account   string             `bson:"account"`
-	Name      string             `bson:"name"`
-	Race      uint8              `bson:"race"`
-	Class     uint8              `bson:"class"`
-	Gender    uint8              `bson:"gender"`
+	ID      primitive.ObjectID `bson:"_id,omitempty"`
+	GUID    uint32             `bson:"guid"`
+	Account string             `bson:"account"`
+	Name    string             `bson:"name"`
+	Race    uint8              `bson:"race"`
+	Class   uint8              `bson:"class"`
+	Gender  uint8              `bson:"gender"`
 
 	// Appearance
 	Skin       uint8 `bson:"skin"`
@@ -88,6 +88,11 @@ type CharacterEntity struct {
 	// Action bar (120 buttons, packed)
 	Actions []uint32 `bson:"actions"`
 
+	// Quests are embedded in the character document (no separate collection):
+	// one sub-document per active quest plus the list of rewarded quest ids.
+	Quests         []QuestProgressEntity `bson:"quests,omitempty"`
+	RewardedQuests []uint32              `bson:"rewardedQuests,omitempty"`
+
 	// Timestamps
 	CreatedAt time.Time `bson:"createdAt"`
 	UpdatedAt time.Time `bson:"updatedAt"`
@@ -122,6 +127,19 @@ type ItemEntity struct {
 	Flags      uint16 `bson:"flags"`
 	Durability uint16 `bson:"durability"`
 	PropertyID int8   `bson:"propertyId"`
+}
+
+// QuestProgressEntity stores a character's progress in a single quest. It is
+// embedded in the character document, so the whole quest log is loaded and
+// saved with the character in one document read/write.
+type QuestProgressEntity struct {
+	QuestID           uint32    `bson:"questId"`
+	Status            uint32    `bson:"status"`
+	Timer             uint32    `bson:"timer,omitempty"`
+	ItemCount         [6]uint16 `bson:"itemCount,omitempty"`
+	CreatureOrGOCount [4]uint16 `bson:"creatureOrGoCount,omitempty"`
+	PlayerCount       uint16    `bson:"playerCount,omitempty"`
+	Explored          bool      `bson:"explored,omitempty"`
 }
 
 // --- Counter (for GUID allocation) ---

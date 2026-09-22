@@ -249,6 +249,36 @@ func (s *Store) UpdateCharacter(character *player.Player) error {
 	return nil
 }
 
+// UpdateCharacterQuests persists only the character's quest progress (active
+// quests and rewarded quest ids) using a single atomic $set. Quests are embedded
+// in the character document, so this avoids a separate collection and does not
+// rewrite the rest of the document.
+func (s *Store) UpdateCharacterQuests(character *player.Player) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	quests, rewarded := model.QuestProgressToEntity(character)
+
+	update := bson.M{
+		"$set": bson.M{
+			"quests":         quests,
+			"rewardedQuests": rewarded,
+			"updatedAt":      time.Now(),
+		},
+	}
+
+	result, err := s.characters.UpdateOne(ctx, bson.M{"guid": character.ID}, update)
+	if err != nil {
+		return fmt.Errorf("UpdateCharacterQuests: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("character %d not found", character.ID)
+	}
+
+	return nil
+}
+
 // DeleteCharacter removes a character by GUID.
 func (s *Store) DeleteCharacter(characterID int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -111,3 +111,17 @@ func (mr *MockCharacterRepoMockRecorder) UpdateCharacter(character any) *gomock.
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateCharacter", reflect.TypeOf((*MockCharacterRepo)(nil).UpdateCharacter), character)
 }
+
+// UpdateCharacterQuests mocks base method.
+func (m *MockCharacterRepo) UpdateCharacterQuests(character *player.Player) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateCharacterQuests", character)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateCharacterQuests indicates an expected call of UpdateCharacterQuests.
+func (mr *MockCharacterRepoMockRecorder) UpdateCharacterQuests(character any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateCharacterQuests", reflect.TypeOf((*MockCharacterRepo)(nil).UpdateCharacterQuests), character)
+}
