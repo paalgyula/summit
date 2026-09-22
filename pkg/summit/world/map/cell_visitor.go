@@ -11,8 +11,8 @@ import (
 // GridCell holds all objects located within a single cell.
 // Objects are split into two containers: normal and far-visible.
 type GridCell struct {
-	objects     []*object.Object
-	farVisible  []*object.Object
+	objects    []*object.Object
+	farVisible []*object.Object
 }
 
 // NewGridCell creates an empty GridCell.

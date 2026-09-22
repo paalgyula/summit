@@ -1,6 +1,7 @@
 package world
 
 import (
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,8 @@ type NPC struct {
 	SpawnTimeSecs uint32 // respawn delay from creature table
 	// Scale is the model scale of the template (1.0 when unknown).
 	Scale float32
+	// Rank is the creature template rank (0=Normal, 1=Elite, 2=Rare Elite, 3=WorldBoss, 4=Rare).
+	Rank uint32
 
 	// Combat state
 	FactionID uint32          // faction template ID (from creature_template)
@@ -44,31 +47,75 @@ type NPC struct {
 	InCombat  bool            // NPC is in combat
 	Attackers map[uint64]bool // GUIDs of units attacking this NPC
 
+	// Combat attack timing
+	NextAttackTime  int64         // when next attack swing happens (Unix ms)
+	BaseAttackSpeed time.Duration // base attack speed duration
+
+	// Threat table
+	threatMu   sync.RWMutex
+	ThreatList map[uint64]float32 // GUID -> threat value
+
 	// Chase state
 	ChaseTarget interface{} // target being chased
 	ChaseRadius float32     // max chase distance (leash)
 	AggroRadius float32     // aggro detection range
+
+	// Spawn coordinates (for returning home / wandering)
+	SpawnX, SpawnY, SpawnZ, SpawnO float32
+
+	// Movement type from creature spawn (0=idle, 1=random, 2=waypoint)
+	MovementType uint8
+
+	// Waypoint movement state (when MovementType == 2)
+	WaypointPath     *store.WaypointPath
+	WaypointIndex    int    // current waypoint index into WaypointPath.Points
+	WaypointDelayEnd int64  // Unix ms when the current delay at a waypoint expires
+	WaypointWalkMode bool   // true = walk, false = run for current path
+
+	// Movement / Spline state
+	SplineID       uint32
+	IsMoving       bool
+	MoveStartX     float32
+	MoveStartY     float32
+	MoveStartZ     float32
+	MoveTargetX    float32
+	MoveTargetY    float32
+	MoveTargetZ    float32
+	MoveStartTime  int64  // Unix ms
+	MoveDurationMs uint32 // duration in ms
+	NextWanderTime int64  // Unix ms
+	WanderRadius   float32
 }
 
 // NewNPC creates a new NPC with the given parameters.
 func NewNPC(entryID uint32, name string, displayID, faction uint32, level uint8, health uint32, x, y, z, o float32, mapID uint32, npcFlags uint32) *NPC {
 	n := &NPC{
-		Object:    object.NewObject(),
-		Unit:      object.NewUnit(),
-		SpawnID:   uint64(entryID),
-		EntryID:   entryID,
-		Name:      name,
-		DisplayID: displayID,
-		Faction:   faction,
-		Level:     level,
-		Health:    health,
-		MaxHealth: health,
-		X:         x,
-		Y:         y,
-		Z:         z,
-		O:         o,
-		Map:       mapID,
-		NpcFlags:  npcFlags,
+		Object:          object.NewObject(),
+		Unit:            object.NewUnit(),
+		SpawnID:         uint64(entryID),
+		EntryID:         entryID,
+		Name:            name,
+		DisplayID:       displayID,
+		Faction:         faction,
+		Level:           level,
+		Health:          health,
+		MaxHealth:       health,
+		X:               x,
+		Y:               y,
+		Z:               z,
+		O:               o,
+		SpawnX:          x,
+		SpawnY:          y,
+		SpawnZ:          z,
+		SpawnO:          o,
+		Map:             mapID,
+		NpcFlags:        npcFlags,
+		ThreatList:      make(map[uint64]float32),
+		Attackers:       make(map[uint64]bool),
+		BaseAttackSpeed: 2000 * time.Millisecond,
+		AggroRadius:     20.0,
+		ChaseRadius:     50.0,
+		WanderRadius:    5.0,
 	}
 
 	n.init()
@@ -115,18 +162,50 @@ func NewNPCFromSpawn(spawn *store.CreatureSpawn, tmpl *store.CreatureTemplate) *
 		Level:         level,
 		Health:        uint32(health),
 		MaxHealth:     uint32(health),
-		X:             spawn.PosX,
-		Y:             spawn.PosY,
-		Z:             spawn.PosZ,
-		O:             spawn.Orientation,
-		Map:           spawn.MapID,
-		NpcFlags:      npcFlags,
-		UnitFlags:     tmpl.UnitFlags,
-		DynamicFlags:  tmpl.DynamicFlags,
-		SpawnTimeSecs: spawn.SpawnTimeSecs,
-		Scale:         tmpl.Scale,
-		AggroRadius:   20.0, // default 20 yard aggro range
-		ChaseRadius:   50.0, // default 50 yard leash range
+		X:               spawn.PosX,
+		Y:               spawn.PosY,
+		Z:               spawn.PosZ,
+		O:               spawn.Orientation,
+		SpawnX:          spawn.PosX,
+		SpawnY:          spawn.PosY,
+		SpawnZ:          spawn.PosZ,
+		SpawnO:          spawn.Orientation,
+		Map:             spawn.MapID,
+		NpcFlags:        npcFlags,
+		UnitFlags:       tmpl.UnitFlags,
+		DynamicFlags:    tmpl.DynamicFlags,
+		SpawnTimeSecs:   spawn.SpawnTimeSecs,
+		Scale:           tmpl.Scale,
+		Rank:            tmpl.Rank,
+		AggroRadius:     20.0, // default 20 yard aggro range
+		ChaseRadius:     50.0, // default 50 yard leash range
+		ThreatList:      make(map[uint64]float32),
+		Attackers:       make(map[uint64]bool),
+		BaseAttackSpeed: 2000 * time.Millisecond,
+	}
+
+	// Determine movement type: spawn overrides template (0 in spawn means use template).
+	n.MovementType = uint8(tmpl.MovementType)
+	if spawn.MovementType != 0 {
+		n.MovementType = spawn.MovementType
+	}
+
+	// Wire wander distance from spawn data (random movement radius).
+	if spawn.WanderDistance > 0 {
+		n.WanderRadius = spawn.WanderDistance
+	} else if n.MovementType == store.MotionTypeRandom {
+		n.WanderRadius = 5.0 // sensible default for random-movement creatures without explicit distance
+	} else {
+		n.WanderRadius = 0 // idle/waypoint creatures don't wander
+	}
+
+	// Disable wander for waypoint creatures
+	if n.MovementType == store.MotionTypeWaypoint {
+		n.WanderRadius = 0
+	}
+
+	if tmpl.BaseAttackTime > 0 {
+		n.BaseAttackSpeed = time.Duration(tmpl.BaseAttackTime) * time.Millisecond
 	}
 
 	// Template speeds are multipliers of the base 2.5 / 7.0 yards per second
@@ -168,12 +247,7 @@ func (n *NPC) init() {
 	n.Object.SetUInt32Value(object.ObjectFieldGuid+1, uint32(uint64(guid)>>32))
 	n.Object.SetUInt32Value(object.ObjectFieldType, uint32(wow.TypeIDUnit))
 	n.Object.SetUInt32Value(object.ObjectFieldEntry, n.EntryID)
-	scale := n.Scale
-	if scale <= 0 {
-		scale = 1.0
-	}
-
-	n.Object.SetFloatValue(object.ObjectFieldScaleX, scale)
+	n.Object.SetFloatValue(object.ObjectFieldScaleX, ComputeCreatureScale(n.Scale, n.DisplayID))
 
 	// Unit fields
 	n.Object.SetUInt32Value(object.UnitFieldDisplayid, n.DisplayID)
@@ -305,6 +379,9 @@ func (n *NPC) GetWeaponDamage(_ uint8) (uint32, uint32) {
 
 // GetWeaponSpeed returns the base attack speed.
 func (n *NPC) GetWeaponSpeed(_ uint8) time.Duration {
+	if n.BaseAttackSpeed > 0 {
+		return n.BaseAttackSpeed
+	}
 	return 2000 * time.Millisecond // default 2.0s
 }
 
@@ -346,8 +423,89 @@ func (n *NPC) GetVictim() interface{} { return n.victim }
 // SetVictim sets the NPC's current target.
 func (n *NPC) SetVictim(v interface{}) { n.victim = v }
 
-// AddThreat adds threat from an attacker (placeholder).
-func (n *NPC) AddThreat(_ interface{}, _ float32) {}
+// AddThreat adds threat from an attacker.
+func (n *NPC) AddThreat(attacker interface{}, threat float32) {
+	if attacker == nil || !n.IsAlive() {
+		return
+	}
+	type guidGetter interface {
+		GetGUID() wow.GUID
+	}
+	type aliveChecker interface {
+		IsAlive() bool
+	}
+	gg, ok := attacker.(guidGetter)
+	if !ok {
+		return
+	}
+	if ac, ok := attacker.(aliveChecker); ok && !ac.IsAlive() {
+		return
+	}
+	attackerGUID := gg.GetGUID()
+	if attackerGUID == n.GUID() {
+		return
+	}
+
+	n.threatMu.Lock()
+	if n.ThreatList == nil {
+		n.ThreatList = make(map[uint64]float32)
+	}
+	n.ThreatList[uint64(attackerGUID)] += threat
+	currentThreat := n.ThreatList[uint64(attackerGUID)]
+	n.threatMu.Unlock()
+
+	n.AddAttacker(attackerGUID)
+	n.SetInCombat()
+
+	// Switch victim if none, or if new threat exceeds current victim by >10%
+	if n.victim == nil {
+		n.victim = attacker
+		n.ChaseTarget = attacker
+	} else if currentVictim, ok := n.victim.(guidGetter); ok {
+		n.threatMu.RLock()
+		victimThreat := n.ThreatList[uint64(currentVictim.GetGUID())]
+		n.threatMu.RUnlock()
+
+		if currentThreat > victimThreat*1.1 || !n.victimIsAlive() {
+			n.victim = attacker
+			n.ChaseTarget = attacker
+		}
+	}
+}
+
+// GetThreat returns the accumulated threat for a given GUID.
+func (n *NPC) GetThreat(guid wow.GUID) float32 {
+	n.threatMu.RLock()
+	defer n.threatMu.RUnlock()
+
+	if n.ThreatList == nil {
+		return 0
+	}
+
+	return n.ThreatList[uint64(guid)]
+}
+
+// ClearThreat clears all entries in the threat table.
+func (n *NPC) ClearThreat() {
+	n.threatMu.Lock()
+	defer n.threatMu.Unlock()
+
+	n.ThreatList = make(map[uint64]float32)
+}
+
+// victimIsAlive checks whether the current victim is alive.
+func (n *NPC) victimIsAlive() bool {
+	if n.victim == nil {
+		return false
+	}
+	type aliveChecker interface {
+		IsAlive() bool
+	}
+	if ac, ok := n.victim.(aliveChecker); ok {
+		return ac.IsAlive()
+	}
+	return true
+}
 
 // CombatStop stops NPC combat.
 func (n *NPC) CombatStop() {
@@ -475,6 +633,7 @@ func (n *NPC) ClearInCombat() {
 	n.InCombat = false
 	n.Attackers = nil
 	n.victim = nil
+	n.ClearThreat()
 	n.Object.RemoveFlag(object.UnitFieldFlags, UnitFlagInCombat)
 }
 
@@ -526,6 +685,120 @@ func (n *NPC) AttackStop() {
 	n.InCombat = false
 }
 
+// MoveTo sets a destination and begins movement towards it.
+func (n *NPC) MoveTo(destX, destY, destZ float32, now time.Time, flags uint32, sendPacket func(pkt *wow.Packet)) {
+	n.MoveToWithVelocity(destX, destY, destZ, 0, now, flags, sendPacket)
+}
+
+// MoveToWithVelocity moves the NPC to the destination with an optional custom velocity.
+// If velocity is 0, uses the default speed based on flags.
+func (n *NPC) MoveToWithVelocity(destX, destY, destZ, velocity float32, now time.Time, flags uint32, sendPacket func(pkt *wow.Packet)) {
+	dx := destX - n.X
+	dy := destY - n.Y
+	dz := destZ - n.Z
+	dist := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
+	if dist < 0.2 {
+		return
+	}
+
+	speed := float32(7.0) // default run speed
+	if flags&SplineFlagWalkMode != 0 {
+		speed = 2.5 // walk speed
+	}
+
+	// Use custom velocity if provided
+	if velocity > 0 {
+		speed = velocity
+	} else if n.Unit != nil {
+		if flags&SplineFlagWalkMode != 0 && n.Unit.Speed[wow.MoveTypeWalk] > 0 {
+			speed = n.Unit.Speed[wow.MoveTypeWalk]
+		} else if flags&SplineFlagWalkMode == 0 && n.Unit.Speed[wow.MoveTypeRun] > 0 {
+			speed = n.Unit.Speed[wow.MoveTypeRun]
+		}
+	}
+
+	durationMs := uint32((dist / speed) * 1000)
+	if durationMs < 100 {
+		durationMs = 100
+	}
+
+	n.SplineID++
+	n.IsMoving = true
+	n.MoveStartX = n.X
+	n.MoveStartY = n.Y
+	n.MoveStartZ = n.Z
+	n.MoveTargetX = destX
+	n.MoveTargetY = destY
+	n.MoveTargetZ = destZ
+	n.MoveStartTime = now.UnixMilli()
+	n.MoveDurationMs = durationMs
+
+	// Update orientation towards destination
+	n.O = float32(math.Atan2(float64(dy), float64(dx)))
+
+	if sendPacket != nil {
+		pkt := BuildMonsterMovePacket(n.GUID(), n.X, n.Y, n.Z, destX, destY, destZ, n.SplineID, durationMs, flags)
+		sendPacket(pkt)
+	}
+}
+
+// StopMoving stops active spline movement and broadcasts a stop packet.
+func (n *NPC) StopMoving(sendPacket func(pkt *wow.Packet)) {
+	if !n.IsMoving {
+		return
+	}
+	n.IsMoving = false
+	n.SplineID++
+	if sendPacket != nil {
+		pkt := BuildMonsterMoveStopPacket(n.GUID(), n.X, n.Y, n.Z, n.SplineID)
+		sendPacket(pkt)
+	}
+}
+
+// UpdatePositionFromSpline updates the NPC's world coordinates along its active spline.
+func (n *NPC) UpdatePositionFromSpline(now time.Time) {
+	if !n.IsMoving {
+		return
+	}
+
+	elapsed := now.UnixMilli() - n.MoveStartTime
+	if elapsed >= int64(n.MoveDurationMs) {
+		n.X = n.MoveTargetX
+		n.Y = n.MoveTargetY
+		n.Z = n.MoveTargetZ
+		n.IsMoving = false
+
+		// When a waypoint move completes, start the delay timer for the
+		// waypoint we just arrived at (looked up by the index that was
+		// advanced *before* MoveTo was called, i.e. one past the waypoint
+		// we arrived at).
+		if n.WaypointPath != nil && len(n.WaypointPath.Points) > 0 {
+			// The waypoint we arrived at is (WaypointIndex - 1) mod len,
+			// because WaypointIndex was advanced after the MoveTo call.
+			prevIdx := n.WaypointIndex - 1
+			if prevIdx < 0 {
+				prevIdx = len(n.WaypointPath.Points) - 1
+			}
+			wp := n.WaypointPath.Points[prevIdx]
+			if wp.Delay > 0 {
+				n.WaypointDelayEnd = now.UnixMilli() + int64(wp.Delay)
+			}
+		}
+
+		return
+	}
+
+	if n.MoveDurationMs > 0 {
+		progress := float32(elapsed) / float32(n.MoveDurationMs)
+		if progress > 1.0 {
+			progress = 1.0
+		}
+		n.X = n.MoveStartX + (n.MoveTargetX-n.MoveStartX)*progress
+		n.Y = n.MoveStartY + (n.MoveTargetY-n.MoveStartY)*progress
+		n.Z = n.MoveStartZ + (n.MoveTargetZ-n.MoveStartZ)*progress
+	}
+}
+
 // SpawnManager holds all spawned NPCs keyed by spawn ID. Sessions read it
 // while respawn goroutines add and remove NPCs, hence the lock.
 type SpawnManager struct {
@@ -533,6 +806,8 @@ type SpawnManager struct {
 	npcs map[uint64]*NPC
 	// templates by entry, for creature queries (nil without a world store)
 	templates map[uint32]*store.CreatureTemplate
+	// waypoint paths keyed by path_id (nil without a world store)
+	waypointPaths map[uint32]*store.WaypointPath
 }
 
 // Template returns the creature template of an entry, or nil.
@@ -593,8 +868,25 @@ func NewSpawnManagerFromDB(worldRepo store.WorldRepo) *SpawnManager {
 		return sm
 	}
 
+	// Load creature addons (per-spawn path_id, mount, etc.)
+	addons, err := worldRepo.GetAllCreatureAddons()
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to load creature addons")
+		addons = make(map[uint32]*store.CreatureAddon) // proceed without addons
+	}
+
+	// Load all waypoint paths so we can attach them to NPCs
+	waypointPaths, err := worldRepo.GetAllWaypointPaths()
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to load waypoint paths")
+		waypointPaths = make(map[uint32]*store.WaypointPath) // proceed without waypoints
+	}
+
 	sm.templates = templates
+	sm.waypointPaths = waypointPaths
 	spawned := 0
+	waypointNPCs := 0
+	randomNPCs := 0
 
 	for _, spawn := range spawns {
 		tmpl, ok := templates[spawn.Entry]
@@ -610,6 +902,22 @@ func NewSpawnManagerFromDB(worldRepo store.WorldRepo) *SpawnManager {
 		}
 
 		npc := NewNPCFromSpawn(spawn, tmpl)
+
+		// Attach creature_addon data (path_id → waypoint path)
+		if addon, ok := addons[uint32(npc.SpawnID)]; ok && addon.PathID > 0 {
+			if path, ok := waypointPaths[addon.PathID]; ok && len(path.Points) > 0 {
+				npc.WaypointPath = path
+				npc.MovementType = store.MotionTypeWaypoint
+				npc.WanderRadius = 0
+				waypointNPCs++
+			}
+		}
+
+		// Track random-movement creatures for logging
+		if npc.MovementType == store.MotionTypeRandom {
+			randomNPCs++
+		}
+
 		sm.npcs[npc.SpawnID] = npc
 		spawned++
 	}
@@ -617,6 +925,8 @@ func NewSpawnManagerFromDB(worldRepo store.WorldRepo) *SpawnManager {
 	log.Info().
 		Int("spawns", spawned).
 		Int("templates", len(templates)).
+		Int("waypoint", waypointNPCs).
+		Int("random", randomNPCs).
 		Msg("loaded creature spawns from database")
 
 	return sm

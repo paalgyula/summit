@@ -2,6 +2,7 @@ package world
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -340,4 +341,154 @@ func (gc *WorldSession) checkAreaTriggers() {
 			)
 		}
 	}
+}
+
+// MonsterMoveType defines the orientation / stop type for SMSG_MONSTER_MOVE.
+type MonsterMoveType uint8
+
+const (
+	MonsterMoveNormal       MonsterMoveType = 0
+	MonsterMoveStop         MonsterMoveType = 1
+	MonsterMoveFacingSpot   MonsterMoveType = 2
+	MonsterMoveFacingTarget MonsterMoveType = 3
+	MonsterMoveFacingAngle  MonsterMoveType = 4
+)
+
+// Spline flags (MoveSplineFlag).
+const (
+	SplineFlagNone       uint32 = 0x00000000
+	SplineFlagRunMode    uint32 = 0x00000000
+	SplineFlagWalkMode   uint32 = 0x00000100
+	SplineFlagFlying     uint32 = 0x00000200
+	SplineFlagCatmullRom uint32 = 0x00020000
+)
+
+// BuildMonsterMovePacket builds an SMSG_MONSTER_MOVE packet to move an NPC to dest.
+func BuildMonsterMovePacket(guid wow.GUID, startX, startY, startZ, destX, destY, destZ float32, splineID, durationMs, splineFlags uint32) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerMonsterMove)
+
+	pkt.WriteBytes(guid.Pack())
+	_ = pkt.Write(uint8(0)) // toggle byte (sets/unsets MOVEMENTFLAG2_UNK7)
+	_ = pkt.Write(startX)
+	_ = pkt.Write(startY)
+	_ = pkt.Write(startZ)
+	_ = pkt.Write(splineID)
+	_ = pkt.Write(uint8(MonsterMoveNormal))
+	_ = pkt.Write(splineFlags)
+	_ = pkt.Write(durationMs)
+	_ = pkt.Write(uint32(1)) // 1 waypoint
+	_ = pkt.Write(destX)
+	_ = pkt.Write(destY)
+	_ = pkt.Write(destZ)
+
+	return pkt
+}
+
+// BuildMonsterMoveStopPacket builds an SMSG_MONSTER_MOVE packet that stops NPC movement.
+func BuildMonsterMoveStopPacket(guid wow.GUID, x, y, z float32, splineID uint32) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerMonsterMove)
+
+	pkt.WriteBytes(guid.Pack())
+	_ = pkt.Write(uint8(0))
+	_ = pkt.Write(x)
+	_ = pkt.Write(y)
+	_ = pkt.Write(z)
+	_ = pkt.Write(splineID)
+	_ = pkt.Write(uint8(MonsterMoveStop))
+
+	return pkt
+}
+
+// BuildMonsterMoveSplinePacket builds an SMSG_MONSTER_MOVE packet with multiple spline points.
+func BuildMonsterMoveSplinePacket(guid wow.GUID, startX, startY, startZ float32, points [][3]float32, splineID, durationMs, splineFlags uint32) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerMonsterMove)
+
+	pkt.WriteBytes(guid.Pack())
+	_ = pkt.Write(uint8(0)) // toggle byte
+	_ = pkt.Write(startX)
+	_ = pkt.Write(startY)
+	_ = pkt.Write(startZ)
+	_ = pkt.Write(splineID)
+	_ = pkt.Write(uint8(MonsterMoveNormal))
+	_ = pkt.Write(splineFlags)
+	_ = pkt.Write(durationMs)
+	_ = pkt.Write(uint32(len(points))) // waypoint count
+
+	for _, p := range points {
+		_ = pkt.Write(p[0]) // X
+		_ = pkt.Write(p[1]) // Y
+		_ = pkt.Write(p[2]) // Z
+	}
+
+	return pkt
+}
+
+// CatmullRomInterpolate generates smooth spline points using Catmull-Rom interpolation.
+// p0, p1, p2, p3 are the four control points, t is the interpolation parameter [0, 1].
+func CatmullRomInterpolate(p0, p1, p2, p3 [3]float32, t float32) [3]float32 {
+	t2 := t * t
+	t3 := t2 * t
+
+	result := [3]float32{
+		0.5 * ((2*p1[0]) +
+			(-p0[0]+p2[0])*t +
+			(2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2 +
+			(-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+		0.5 * ((2*p1[1]) +
+			(-p0[1]+p2[1])*t +
+			(2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2 +
+			(-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3),
+		0.5 * ((2*p1[2]) +
+			(-p0[2]+p2[2])*t +
+			(2*p0[2]-5*p1[2]+4*p2[2]-p3[2])*t2 +
+			(-p0[2]+3*p1[2]-3*p2[2]+p3[2])*t3),
+	}
+
+	return result
+}
+
+// GenerateCatmullRomSpline generates a smooth spline path through waypoints using Catmull-Rom interpolation.
+// The path will loop if looping is true.
+func GenerateCatmullRomSpline(waypoints [][3]float32, pointsPerSegment int, looping bool) [][3]float32 {
+	if len(waypoints) < 2 {
+		return waypoints
+	}
+
+	var result [][3]float32
+
+	numWaypoints := len(waypoints)
+	numSegments := numWaypoints
+	if !looping {
+		numSegments = numWaypoints - 1
+	}
+
+	for i := 0; i < numSegments; i++ {
+		// Get four control points for Catmull-Rom
+		p0 := waypoints[(i-1+numWaypoints)%numWaypoints]
+		p1 := waypoints[i]
+		p2 := waypoints[(i+1)%numWaypoints]
+		p3 := waypoints[(i+2)%numWaypoints]
+
+		// Generate points along this segment
+		for j := 0; j < pointsPerSegment; j++ {
+			t := float32(j) / float32(pointsPerSegment)
+			point := CatmullRomInterpolate(p0, p1, p2, p3, t)
+			result = append(result, point)
+		}
+	}
+
+	// Add the final point if not looping
+	if !looping {
+		result = append(result, waypoints[numWaypoints-1])
+	}
+
+	return result
+}
+
+// Distance3D calculates the Euclidean distance between two 3D points.
+func Distance3D(x1, y1, z1, x2, y2, z2 float32) float32 {
+	dx := x2 - x1
+	dy := y2 - y1
+	dz := z2 - z1
+	return float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
 }
