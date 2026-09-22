@@ -174,8 +174,10 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 	}))
 	gc.opcodes.Handle(wow.ClientMoveTimeSkipped, gc.HandleMoveTimeSkipped)
 
-	// Quest handlers
+	// Quest & Gossip handlers
 	gc.opcodes.Handle(wow.ClientQuestgiverHello, gc.HandleQuestgiverHello)
+	gc.opcodes.Handle(wow.ClientGossipHello, gc.HandleQuestgiverHello)
+	gc.opcodes.Handle(wow.ClientGossipSelectOption, gc.HandleGossipSelectOption)
 	gc.opcodes.Handle(wow.ClientQuestgiverQueryQuest, gc.HandleQuestgiverQueryQuest)
 	gc.opcodes.Handle(wow.ClientQuestgiverAcceptQuest, gc.HandleQuestgiverAcceptQuest)
 	gc.opcodes.Handle(wow.ClientQuestgiverCompleteQuest, gc.HandleQuestgiverCompleteQuest)

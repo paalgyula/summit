@@ -10,7 +10,7 @@ import (
 type ActiveSpell struct {
 	Spell       *Spell
 	Caster      *player.Player
-	Target      *player.Player // can be nil for self-targeted spells
+	Target      CombatUnit // can be nil for self-targeted spells
 	TargetGUID  uint64
 	State       SpellState
 	StartTime   time.Time

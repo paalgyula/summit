@@ -52,8 +52,8 @@ func (gc *WorldSession) HandleAttackSwing(data wow.PacketData) {
 		return
 	}
 
-	// Validate attack target (AC's IsValidAttackTarget check)
-	if !gc.player.IsValidAttackTarget(target) {
+	// Validate attack target
+	if !gc.isValidAttackTarget(target) {
 		gc.sendAttackStop(gc.player.GUID(), wow.GUID(targetGUID))
 		return
 	}
@@ -72,7 +72,6 @@ func (gc *WorldSession) HandleAttackStop(data wow.PacketData) {
 	gc.playerAttackStop()
 }
 
-
 // ProcessCombatTick handles auto-attack swings.
 func (gc *WorldSession) ProcessCombatTick(now time.Time) {
 	if gc.player == nil || gc.player.AttackState != AttackStateSwinging {
@@ -86,7 +85,7 @@ func (gc *WorldSession) ProcessCombatTick(now time.Time) {
 	// Find target
 	target := gc.resolveCombatUnit(wow.GUID(gc.player.AttackTarget))
 	if target == nil || !target.IsAlive() {
-		gc.player.AttackStop()
+		gc.playerAttackStop()
 		return
 	}
 
@@ -97,7 +96,7 @@ func (gc *WorldSession) ProcessCombatTick(now time.Time) {
 // processCombatAttack handles a single melee swing against any CombatUnit.
 func (gc *WorldSession) processCombatAttack(target CombatUnit, now time.Time) {
 	if target == nil || !target.IsAlive() {
-		gc.player.AttackStop()
+		gc.playerAttackStop()
 		return
 	}
 
@@ -241,15 +240,62 @@ func (gc *WorldSession) resolveCombatUnit(guid wow.GUID) CombatUnit {
 		}
 	}
 
-	// Check NPCs
+	// Check NPCs (guid.Counter() matches the spawn ID)
 	server, ok := gc.ws.(*Server)
 	if ok {
+		if npc := server.spawns.GetNPC(uint64(guid.Counter())); npc != nil {
+			return npc
+		}
 		if npc := server.spawns.GetNPC(uint64(guid)); npc != nil {
 			return npc
 		}
 	}
 
 	return nil
+}
+
+// isValidAttackTarget checks if the player can attack the target.
+func (gc *WorldSession) isValidAttackTarget(target CombatUnit) bool {
+	if gc.player == nil || target == nil {
+		return false
+	}
+	if target.GetGUID() == gc.player.GUID() || !target.IsAlive() || gc.player.Mounted {
+		return false
+	}
+
+	// Duel exception
+	if gc.player.Duel != nil {
+		if di, ok := gc.player.Duel.(*player.DuelInfo); ok && di.Opponent != nil {
+			if di.Opponent.GUID() == target.GetGUID() && di.State == player.DuelStateInProgress {
+				return true
+			}
+		}
+	}
+
+	// Check NPCs
+	if npc, ok := target.(*NPC); ok {
+		// Non-attackable flags (Non-attackable, Not-attackable, Not-selectable)
+		const nonAttackableMask = 0x02 | 0x04 | 0x80
+		if npc.UnitFlags&nonAttackableMask != 0 {
+			return false
+		}
+
+		// If faction manager is loaded, check reaction
+		fm := GetFactionManager()
+		if fm.IsLoaded() {
+			return !fm.IsFriendlyTo(gc.player.FactionID, npc.Faction)
+		}
+
+		// Mobs / beasts are attackable; NPCs with service flags (vendor, trainer, etc.) are friendly
+		return npc.NpcFlags == 0
+	}
+
+	// Player PvP
+	if otherPlayer, ok := target.(*player.Player); ok {
+		return gc.player.IsPVP && otherPlayer.IsPVP
+	}
+
+	return true
 }
 
 // getGC returns the WorldSession for a player (avoids circular import).
@@ -516,7 +562,9 @@ func DealDamage(attacker, victim CombatUnit, damageInfo *CalcDamageInfo) uint32 
 
 // Kill handles the death of a unit.
 func Kill(attacker, victim CombatUnit, damageInfo *CalcDamageInfo) {
-	if victim == nil || victim.IsAlive() {
+	// Called from DealDamage before the health is written, so the victim is
+	// still alive here; only a unit that is already dead is skipped.
+	if victim == nil || !victim.IsAlive() {
 		return
 	}
 
@@ -543,9 +591,25 @@ func handlePlayerDeath(attacker CombatUnit, victim *player.Player, damageInfo *C
 	victim.AttackTarget = 0
 }
 
-// handleCreatureDeath processes creature death.
+// handleCreatureDeath processes creature death: the corpse stays lootable
+// for a while, then the respawn timer starts (Creature::setDeathState).
 func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *CalcDamageInfo) {
+	npc, ok := victim.(*NPC)
+	if !ok {
+		return
+	}
+
+	npc.OnDeath()
+
 	// TODO: loot, XP, achievements, script hooks
+
+	if p, ok := attacker.(*player.Player); ok {
+		if gc := getGC(p); gc != nil {
+			if server, ok := gc.ws.(*Server); ok && server.respawnMgr != nil {
+				server.respawnMgr.ScheduleRespawn(npc)
+			}
+		}
+	}
 }
 
 // --- Duel Helpers ---
@@ -671,8 +735,8 @@ func (gc *WorldSession) sendAttackerStateUpdateFromCalc(damageInfo *CalcDamageIn
 	pkt := wow.NewPacket(wow.ServerAttackerstateupdate)
 
 	_ = pkt.Write(uint32(damageInfo.HitInfo))
-	_ = pkt.Write(damageInfo.Attacker.GetGUID())
-	_ = pkt.Write(damageInfo.Target.GetGUID())
+	pkt.WriteBytes(damageInfo.Attacker.GetGUID().Pack())
+	pkt.WriteBytes(damageInfo.Target.GetGUID().Pack())
 
 	totalDamage := damageInfo.Damages[0].Damage
 	_ = pkt.Write(uint32(totalDamage))
@@ -682,18 +746,29 @@ func (gc *WorldSession) sendAttackerStateUpdateFromCalc(damageInfo *CalcDamageIn
 		overkill = totalDamage - damageInfo.Target.GetHealth()
 	}
 	_ = pkt.Write(uint32(overkill))
-	_ = pkt.Write(uint32(SpellSchoolMaskPhysical))
-	_ = pkt.Write(uint32(damageInfo.Damages[0].Absorb))
-	_ = pkt.Write(uint32(damageInfo.Damages[0].Resist))
 
-	victimState := int32(-1)
+	// Sub damage count
+	_ = pkt.Write(uint8(1))
+
+	// Sub damage details
+	_ = pkt.Write(uint32(SpellSchoolMaskPhysical)) // school mask
+	_ = pkt.Write(float32(totalDamage))            // damage (float)
+	_ = pkt.Write(uint32(totalDamage))             // damage (int)
+
+	if damageInfo.HitInfo&(0x20|0x40) != 0 { // HITINFO_FULL_ABSORB | HITINFO_PARTIAL_ABSORB
+		_ = pkt.Write(uint32(damageInfo.Damages[0].Absorb))
+	}
+	if damageInfo.HitInfo&(0x80|0x100) != 0 { // HITINFO_FULL_RESIST | HITINFO_PARTIAL_RESIST
+		_ = pkt.Write(uint32(damageInfo.Damages[0].Resist))
+	}
+
+	victimState := uint8(1)
 	if !damageInfo.Target.IsAlive() {
 		victimState = 0
 	}
-	_ = pkt.Write(victimState)
-	_ = pkt.Write(uint32(0))
-	_ = pkt.Write(uint32(SwingTimerMS))
-	_ = pkt.Write(uint32(0))
+	_ = pkt.Write(uint8(victimState))
+	_ = pkt.Write(uint32(0)) // attacker state
+	_ = pkt.Write(uint32(0)) // melee spell id
 
 	if damageInfo.HitOutcome == MeleeHitBlock {
 		_ = pkt.Write(uint32(damageInfo.Damages[0].Block))
@@ -713,8 +788,8 @@ func (gc *WorldSession) sendAttackerStateUpdateFromCalc(damageInfo *CalcDamageIn
 // sendAttackStop sends SMSG_ATTACKSTOP.
 func (gc *WorldSession) sendAttackStop(attacker, target wow.GUID) {
 	pkt := wow.NewPacket(wow.ServerAttackstop)
-	_ = pkt.Write(attacker)
-	_ = pkt.Write(target)
+	pkt.WriteBytes(attacker.Pack())
+	pkt.WriteBytes(target.Pack())
 	_ = pkt.Write(uint32(0))
 
 	server, ok := gc.ws.(*Server)

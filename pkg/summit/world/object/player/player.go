@@ -9,6 +9,9 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
+// UnitFlagInCombat is UNIT_FLAG_IN_COMBAT of UNIT_FIELD_FLAGS.
+const UnitFlagInCombat uint32 = 0x00080000
+
 // DuelState mirrors AC's DuelState enum (Player.h:355).
 type DuelState uint8
 
@@ -63,6 +66,34 @@ func (l *WorldLocation) Distance(point *WorldLocation) float64 {
 	dz := l.Z - point.Z
 
 	return math.Sqrt(float64(dx*dx + dy*dy + dz*dz))
+}
+
+// FactionTemplateFromRace maps playable races to their default faction template from ChrRaces.dbc.
+func FactionTemplateFromRace(race wow.PlayerRace) uint32 {
+	switch race {
+	case wow.RaceHuman:
+		return 1
+	case wow.RaceOrc:
+		return 2
+	case wow.RaceDwarf:
+		return 3
+	case wow.RaceNightElf:
+		return 4
+	case wow.RaceUndead:
+		return 5
+	case wow.RaceTauren:
+		return 6
+	case wow.RaceGnome:
+		return 115
+	case wow.RaceTroll:
+		return 116
+	case wow.RaceBloodElf:
+		return 1610
+	case wow.RaceDraenei:
+		return 1629
+	default:
+		return 1
+	}
 }
 
 func NewPlayer() *Player {
@@ -456,8 +487,11 @@ func (p *Player) Init() {
 	// Level
 	p.Object.SetUInt32Value(object.UnitFieldLevel, uint32(p.Level))
 
-	// Faction template (12 for human, 1 for generic hostile — use 1 for now)
-	p.Object.SetUInt32Value(object.UnitFieldFactiontemplate, 1)
+	// Faction template from ChrRaces.dbc
+	if p.FactionID == 0 {
+		p.FactionID = FactionTemplateFromRace(p.Race)
+	}
+	p.Object.SetUInt32Value(object.UnitFieldFactiontemplate, p.FactionID)
 
 	// Display ID
 	p.Object.SetUInt32Value(object.UnitFieldDisplayid, p.DisplayID)
@@ -1011,6 +1045,7 @@ func (p *Player) GetAttackers() map[uint64]bool {
 // SetInCombat puts the player into combat state.
 func (p *Player) SetInCombat() {
 	p.InCombat = true
+	p.Object.SetFlag(object.UnitFieldFlags, UnitFlagInCombat)
 	// TODO: set combat timer (5s rule)
 }
 
@@ -1018,6 +1053,7 @@ func (p *Player) SetInCombat() {
 func (p *Player) ClearInCombat() {
 	p.InCombat = false
 	p.Attackers = nil
+	p.Object.RemoveFlag(object.UnitFieldFlags, UnitFlagInCombat)
 }
 
 // IsInCombatState returns true if the player is in combat.

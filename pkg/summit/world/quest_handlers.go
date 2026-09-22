@@ -1,6 +1,8 @@
 package world
 
 import (
+	"fmt"
+
 	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
@@ -76,8 +78,9 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 
 	// Check if NPC is a quest giver or quest completer
 	if !qm.IsQuestGiver(npc.EntryID) && !qm.IsQuestCompleter(npc.EntryID) {
-		// Not a quest NPC — send gossip menu (TODO: gossip system)
-		gc.sendGossipComplete(wow.GUID(guid))
+		greeting := fmt.Sprintf("Greetings, %s. How can I help you?", gc.player.Name)
+		pkt := quest.BuildQuestGiverQuestList(wow.GUID(guid), greeting, nil)
+		gc.socket.Send(pkt)
 
 		return
 	}
@@ -141,15 +144,36 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 	}
 
 	if len(questList) == 0 {
-		// No quests — send basic gossip
-		gc.sendGossipComplete(wow.GUID(guid))
+		greeting := fmt.Sprintf("Greetings, %s. I have no tasks for you right now.", gc.player.Name)
+		pkt := quest.BuildQuestGiverQuestList(wow.GUID(guid), greeting, nil)
+		gc.socket.Send(pkt)
 
 		return
 	}
 
 	// Send quest list
-	pkt := quest.BuildQuestGiverQuestList(wow.GUID(guid), npc.Name, questList)
+	greeting := fmt.Sprintf("Greetings, %s. I have some tasks that might interest you.", gc.player.Name)
+	pkt := quest.BuildQuestGiverQuestList(wow.GUID(guid), greeting, questList)
 	gc.socket.Send(pkt)
+}
+
+// HandleGossipSelectOption handles CMSG_GOSSIP_SELECT_OPTION.
+func (gc *WorldSession) HandleGossipSelectOption(data wow.PacketData) {
+	if gc.player == nil {
+		return
+	}
+
+	reader := wow.NewPacketReader(data)
+
+	var guid uint64
+	var menuID uint32
+	var optionID uint32
+
+	_ = reader.Read(&guid)
+	_ = reader.Read(&menuID)
+	_ = reader.Read(&optionID)
+
+	gc.sendGossipComplete(wow.GUID(guid))
 }
 
 // HandleQuestgiverQueryQuest handles CMSG_QUESTGIVER_QUERY_QUEST — view quest details.

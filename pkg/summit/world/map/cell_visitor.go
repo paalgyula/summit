@@ -175,6 +175,16 @@ func (m *Map) AddObjectToGrid(obj *object.Object, x, y float32, z float32) {
 	grid.AddObject(localCX, localCY, obj)
 }
 
+// RemoveObjectFromGrid removes an object from the grid cell of the given position.
+func (m *Map) RemoveObjectFromGrid(obj *object.Object, x, y float32) {
+	gx, gy := ComputeGridCoord(float64(x), float64(y))
+	cx, cy := ComputeCellCoord(float64(x), float64(y))
+
+	if grid := m.getGrid(gx, gy); grid != nil {
+		grid.RemoveObject(cx%MaxNumberOfCells, cy%MaxNumberOfCells, obj)
+	}
+}
+
 // getOrCreateGrid returns the grid at (gx,gy), creating it if needed.
 func (m *Map) getOrCreateGrid(gx, gy uint32) *MapGrid {
 	if m.grids == nil {

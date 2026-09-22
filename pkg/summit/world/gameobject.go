@@ -3,6 +3,7 @@ package world
 import (
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -134,6 +135,7 @@ func NewGameObject(template *GameObjectTemplate, data *GameObjectData) *GameObje
 // init sets up the game object's update fields.
 func (g *GameObject) init() {
 	g.Object.InitValues(int(object.GameobjectEnd))
+	g.Object.SetObjectTypeID(wow.TypeIDGameObject)
 
 	// GUID
 	guid := wow.NewGUID(wow.GameObjectGUID, g.ID)
@@ -162,6 +164,22 @@ func (g *GameObject) init() {
 // GetGUID returns the game object's GUID.
 func (g *GameObject) GetGUID() wow.GUID {
 	return wow.NewGUID(wow.GameObjectGUID, g.ID)
+}
+
+// GetPosition returns the game object's world location (satisfies Map.AddGameObject positionProvider).
+func (g *GameObject) GetPosition() *player.WorldLocation {
+	return &player.WorldLocation{
+		X:   g.X,
+		Y:   g.Y,
+		Z:   g.Z,
+		O:   g.O,
+		Map: g.Map,
+	}
+}
+
+// GetObject returns the game object's underlying Object (satisfies Map.AddGameObject objectProvider).
+func (g *GameObject) GetObject() *object.Object {
+	return g.Object
 }
 
 // IsLooted returns whether the chest has been looted.
@@ -344,6 +362,16 @@ func (gm *GameObjectManager) GetObjectsInMap(mapID uint32) []*GameObject {
 		if gobj.Map == mapID {
 			result = append(result, gobj)
 		}
+	}
+
+	return result
+}
+
+// GetObjects returns all spawned game objects.
+func (gm *GameObjectManager) GetObjects() []*GameObject {
+	result := make([]*GameObject, 0, len(gm.spawns))
+	for _, gobj := range gm.spawns {
+		result = append(result, gobj)
 	}
 
 	return result

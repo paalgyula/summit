@@ -59,6 +59,8 @@ type FacialHair struct {
 // ItemDisplay is one ItemDisplayInfo.dbc row with the data needed to draw
 // the item on a character.
 type ItemDisplay struct {
+	// Icon is the inventory icon name (without Interface/Icons/ prefix and without extension).
+	Icon string `json:"icon,omitempty"`
 	// Models are the left / right model names without extension (weapons and
 	// shields use the first; shoulders one per side; helmets add _<Race><Sex>).
 	// Trailing empty entries are dropped from every list below.
@@ -87,10 +89,10 @@ type StartOutfitItem struct {
 // CharacterData is everything the web client needs to dress a character:
 // the customization tables and the item display table.
 type CharacterData struct {
-	Races         map[int]Race                 `json:"races"`
-	Sections      []Section                    `json:"sections"`
-	HairGeosets   []HairGeoset                 `json:"hairGeosets"`
-	FacialHair    []FacialHair                 `json:"facialHair"`
+	Races       map[int]Race `json:"races"`
+	Sections    []Section    `json:"sections"`
+	HairGeosets []HairGeoset `json:"hairGeosets"`
+	FacialHair  []FacialHair `json:"facialHair"`
 	// HelmetGeosets maps a HelmetGeosetVisData id to its seven race masks:
 	// hair, facial 1-3, ears and two more groups hidden for race bit (race-1).
 	HelmetGeosets map[int][7]uint32            `json:"helmetGeosets"`
@@ -211,6 +213,7 @@ func BuildCharacterData(t Tables) *CharacterData {
 		// helmet geoset vis, 15-22 texture components, 23 item visual, 24 particles
 		for r := 0; r < f.Records; r++ {
 			d := ItemDisplay{
+				Icon:          f.String(r, 5),
 				Models:        trimStrings([]string{ModelName(f.String(r, 1)), ModelName(f.String(r, 2))}),
 				Textures:      trimStrings([]string{f.String(r, 3), f.String(r, 4)}),
 				Geosets:       [3]int{int(f.Uint32(r, 7)), int(f.Uint32(r, 8)), int(f.Uint32(r, 9))},
@@ -222,8 +225,8 @@ func BuildCharacterData(t Tables) *CharacterData {
 				components[i] = f.String(r, 15+i)
 			}
 			d.Components = trimStrings(components)
-			if len(d.Models) == 0 && len(d.Textures) == 0 && len(d.Components) == 0 && d.Geosets == [3]int{} {
-				continue // icon-only items (trade goods, quest items, ...)
+			if d.Icon == "" && len(d.Models) == 0 && len(d.Textures) == 0 && len(d.Components) == 0 && d.Geosets == [3]int{} {
+				continue
 			}
 			id := int(f.Uint32(r, 0))
 			d.Sheathe = sheathe[id]
@@ -244,7 +247,7 @@ func BuildCharacterData(t Tables) *CharacterData {
 
 			hasMainHand := false
 			var items []StartOutfitItem
-			for i := 0; i < 24; i++ {
+			for i := range 24 {
 				dispID := int32(f.Uint32(r, 26+i))
 				invType := int32(f.Uint32(r, 50+i))
 				if dispID <= 0 || invType <= 0 {

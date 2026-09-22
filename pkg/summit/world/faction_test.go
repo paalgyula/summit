@@ -1,13 +1,87 @@
 package world_test
 
 import (
+	"encoding/json"
+	"os"
 	"testing"
 
+	"github.com/paalgyula/summit/pkg/summit/tools/dbc"
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
 	"github.com/paalgyula/summit/pkg/summit/world"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRealFactionDBC(t *testing.T) {
+	templates, err := dbc.Load[wotlk.FactionTemplateEntry]("factiontemplate.dbc", "../../../dbc")
+	if err != nil {
+		t.Skipf("cannot load factiontemplate.dbc: %v", err)
+	}
+	t.Logf("Loaded %d faction templates", len(templates))
+
+	factions, errF := dbc.Load[wotlk.FactionEntry]("faction.dbc", "../../../dbc")
+	if errF == nil {
+		for _, f := range factions {
+			switch f.ID {
+			case 1, 7, 22, 25, 29, 31, 72:
+				t.Logf("Faction %d: RepListID=%d Team=%d Name=%s", f.ID, f.ReputationListID, f.Team, f.Field23.Value())
+			}
+		}
+	}
+	for _, tmpl := range templates {
+		switch tmpl.ID {
+		case 1, 7, 22, 25, 32, 35, 38:
+			t.Logf("Tmpl %d: Faction=%d Flags=0x%x OurMask=0x%x FriendlyMask=0x%x HostileMask=0x%x Enemies=[%d,%d,%d,%d] Friends=[%d,%d,%d,%d]",
+				tmpl.ID, tmpl.Faction, tmpl.FactionFlags, tmpl.OurMask, tmpl.FriendlyMask, tmpl.HostileMask,
+				tmpl.Field6, tmpl.Field7, tmpl.Field8, tmpl.Field9,
+				tmpl.Field10, tmpl.Field11, tmpl.Field12, tmpl.Field13)
+		}
+	}
+
+	type TemplateData struct {
+		Faction      uint32   `json:"f"`
+		OurMask      uint32   `json:"o"`
+		FriendlyMask uint32   `json:"fr"`
+		HostileMask  uint32   `json:"h"`
+		Enemies      []uint32 `json:"e,omitempty"`
+		Friends      []uint32 `json:"r,omitempty"`
+	}
+
+	result := make(map[uint32]TemplateData, len(templates))
+	for _, tmpl := range templates {
+		if tmpl.ID == 0 {
+			continue
+		}
+		var enemies []uint32
+		for _, e := range []uint32{tmpl.Field6, tmpl.Field7, tmpl.Field8, tmpl.Field9} {
+			if e != 0 {
+				enemies = append(enemies, e)
+			}
+		}
+		var friends []uint32
+		for _, f := range []uint32{tmpl.Field10, tmpl.Field11, tmpl.Field12, tmpl.Field13} {
+			if f != 0 {
+				friends = append(friends, f)
+			}
+		}
+		result[tmpl.ID] = TemplateData{
+			Faction:      tmpl.Faction,
+			OurMask:      tmpl.OurMask,
+			FriendlyMask: tmpl.FriendlyMask,
+			HostileMask:  tmpl.HostileMask,
+			Enemies:      enemies,
+			Friends:      friends,
+		}
+	}
+
+	data, err := json.Marshal(result)
+	require.NoError(t, err)
+
+	err = os.WriteFile("../../../client/src/net/world/factionTemplates.json", data, 0644)
+	require.NoError(t, err)
+	t.Logf("Wrote %d faction templates to client/src/net/world/factionTemplates.json (%d bytes)", len(result), len(data))
+}
+
 
 // testFactionManager creates a FactionManager with test data matching AC's
 // typical faction layout:
@@ -214,11 +288,11 @@ func TestFactionManager_NeutralFactions(t *testing.T) {
 func TestFactionManager_IsHostileTo(t *testing.T) {
 	fm := testFactionManager()
 
-	assert.True(t, fm.IsHostileTo(1, 3))   // Alliance vs Horde
-	assert.True(t, fm.IsHostileTo(3, 1))   // Horde vs Alliance
-	assert.True(t, fm.IsHostileTo(1, 5))   // Alliance vs Monster
-	assert.False(t, fm.IsHostileTo(1, 1))  // Alliance vs Alliance
-	assert.False(t, fm.IsHostileTo(1, 2))  // Alliance vs Alliance player
+	assert.True(t, fm.IsHostileTo(1, 3))  // Alliance vs Horde
+	assert.True(t, fm.IsHostileTo(3, 1))  // Horde vs Alliance
+	assert.True(t, fm.IsHostileTo(1, 5))  // Alliance vs Monster
+	assert.False(t, fm.IsHostileTo(1, 1)) // Alliance vs Alliance
+	assert.False(t, fm.IsHostileTo(1, 2)) // Alliance vs Alliance player
 }
 
 func TestFactionManager_IsFriendlyTo(t *testing.T) {

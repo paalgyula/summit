@@ -52,8 +52,9 @@ const (
 
 // spellTables holds the parsed spell DBCs, loaded on first use.
 type spellTables struct {
-	once sync.Once
-	err  error
+	mu     sync.Mutex
+	loaded bool
+	err    error
 
 	spells    map[uint32]int // id → row
 	file      *dbc.File
@@ -65,10 +66,18 @@ type spellTables struct {
 // Spell resolves one spell id from Spell.dbc and its lookup tables.
 func (s *Server) Spell(id uint32) (*SpellInfo, error) {
 	t := &s.spells
-	t.once.Do(func() { t.err = t.load(s) })
+	t.mu.Lock()
+	if !t.loaded {
+		t.err = t.load(s)
+		if t.err == nil {
+			t.loaded = true
+		}
+	}
+	err := t.err
+	t.mu.Unlock()
 
-	if t.err != nil {
-		return nil, t.err
+	if err != nil {
+		return nil, err
 	}
 
 	r, ok := t.spells[id]
@@ -105,7 +114,7 @@ func (s *Server) Spell(id uint32) (*SpellInfo, error) {
 // load parses Spell.dbc (3.3.5a, 234 columns), SpellIcon, SpellCastTimes and SpellRange.
 func (t *spellTables) load(s *Server) error {
 	read := func(name string) (*dbc.File, error) {
-		data, err := s.readSource("DBFilesClient/" + name + ".dbc")
+		data, err := s.readDBC(name)
 		if err != nil {
 			return nil, fmt.Errorf("%s.dbc: %w", name, err)
 		}

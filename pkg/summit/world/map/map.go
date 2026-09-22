@@ -159,6 +159,91 @@ func (m *Map) AddNPC(npc interface{}) {
 			}
 		}
 	}
+
+	// Field changes (health, flags, ...) are queued on the map and sent as
+	// value updates to the players that can see the NPC, like for players.
+	if obj, ok := npc.(objectProvider); ok && obj.GetNPCObject() != nil {
+		m.attachUpdater(obj.GetNPCObject())
+	}
+}
+
+// attachUpdater makes the map the object's update sink. The initial field
+// setup already dirtied every value, so the mask is cleared first; the create
+// block carries the full state anyway.
+func (m *Map) attachUpdater(obj *object.Object) {
+	obj.ClearChanges()
+	obj.SetUpdater(m)
+}
+
+// RemoveNPC takes an NPC out of the map (corpse decay, despawn): it leaves
+// the grid, and every player that had it in view gets a destroy packet.
+func (m *Map) RemoveNPC(guid wow.GUID) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	npc, ok := m.npcs[uint32(guid)]
+	if !ok {
+		return
+	}
+
+	delete(m.npcs, uint32(guid))
+
+	obj := m.getNPCObject(npc)
+	if obj == nil {
+		return
+	}
+
+	if pos := m.getNPCPosition(npc); pos != nil {
+		m.RemoveObjectFromGrid(obj, pos.X, pos.Y)
+	}
+
+	// Drop any pending value update (RemoveFromObjectUpdate would re-lock)
+	delete(m.updateObjects, obj)
+	obj.MarkUpdateSent()
+
+	for _, p := range m.players {
+		if m.visibilityTracker.IsVisible(p.GUID(), obj.GUID()) {
+			m.visibilityTracker.ClearVisible(p.GUID(), obj.GUID())
+			m.sendNPCDestroyToPlayer(obj, p)
+		}
+	}
+}
+
+// AddGameObject adds a game object to the map.
+func (m *Map) AddGameObject(gobj interface{}) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	type guidGetter interface {
+		GetGUID() wow.GUID
+	}
+	type positionProvider interface {
+		GetPosition() *player.WorldLocation
+	}
+	type objectProvider interface {
+		GetObject() *object.Object
+	}
+
+	g, ok := gobj.(guidGetter)
+	if !ok {
+		return
+	}
+
+	m.objects[uint32(g.GetGUID())] = gobj
+
+	// Also add to grid for spatial queries
+	if pos, ok := gobj.(positionProvider); ok {
+		if obj, ok := gobj.(objectProvider); ok {
+			loc := pos.GetPosition()
+			if loc != nil && obj.GetObject() != nil {
+				m.AddObjectToGrid(obj.GetObject(), loc.X, loc.Y, loc.Z)
+			}
+		}
+	}
+
+	if obj, ok := gobj.(objectProvider); ok && obj.GetObject() != nil {
+		m.attachUpdater(obj.GetObject())
+	}
 }
 
 // HavePlayers returns true if there are players on the map.
@@ -358,12 +443,12 @@ func (m *Map) sendNPCDestroyToPlayer(obj *object.Object, target *player.Player) 
 
 // getNPCObject extracts the Object from an NPC interface.
 func (m *Map) getNPCObject(npc interface{}) *object.Object {
-	type objectProvider interface {
-		GetObject() *object.Object
+	type npcObjectProvider interface {
+		GetNPCObject() *object.Object
 	}
 
-	if provider, ok := npc.(objectProvider); ok {
-		return provider.GetObject()
+	if provider, ok := npc.(npcObjectProvider); ok {
+		return provider.GetNPCObject()
 	}
 	return nil
 }
@@ -378,6 +463,112 @@ func (m *Map) getNPCPosition(npc interface{}) *player.WorldLocation {
 		return provider.GetPosition()
 	}
 	return nil
+}
+
+// getGameObjectObject extracts the Object from a game object interface.
+func (m *Map) getGameObjectObject(gobj interface{}) *object.Object {
+	type objectProvider interface {
+		GetObject() *object.Object
+	}
+
+	if provider, ok := gobj.(objectProvider); ok {
+		return provider.GetObject()
+	}
+	return nil
+}
+
+// getGameObjectPosition extracts the position from a game object interface.
+func (m *Map) getGameObjectPosition(gobj interface{}) *player.WorldLocation {
+	type positionProvider interface {
+		GetPosition() *player.WorldLocation
+	}
+
+	if provider, ok := gobj.(positionProvider); ok {
+		return provider.GetPosition()
+	}
+	return nil
+}
+
+// sendGameObjectCreateToPlayer sends a create object packet for a game object to a player.
+func (m *Map) sendGameObjectCreateToPlayer(gobj interface{}, target *player.Player) {
+	if target.Sender == nil {
+		return
+	}
+
+	type guidProvider interface {
+		GetGUID() wow.GUID
+	}
+	type objectProvider interface {
+		GetObject() *object.Object
+	}
+	type positionProvider interface {
+		GetPosition() *player.WorldLocation
+	}
+
+	guid, ok := gobj.(guidProvider)
+	if !ok {
+		return
+	}
+	obj, ok := gobj.(objectProvider)
+	if !ok {
+		return
+	}
+	pos, ok := gobj.(positionProvider)
+	if !ok {
+		return
+	}
+
+	loc := pos.GetPosition()
+	if loc == nil {
+		return
+	}
+
+	buf := object.NewUpdateBlockBuffer()
+
+	// Update type: CreateObject
+	_ = buf.WriteOne(int(wow.UpdateTypeCreateObject))
+
+	// GUID
+	_ = buf.Write(guid.GetGUID())
+
+	// Object type ID
+	_ = buf.WriteOne(int(wow.TypeIDGameObject))
+
+	// Update flags
+	flags := wow.UpdateFlagLowGUID | wow.UpdateFlagStationaryPosition | wow.UpdateFlagRotation
+	_ = buf.Write(flags)
+
+	object.WriteMovementBlock(buf, flags, &object.MovementBlock{
+		X: loc.X, Y: loc.Y, Z: loc.Z, O: loc.O,
+		LowGUID: uint32(guid.GetGUID().Counter()),
+	})
+
+	// Values update - full mask for create
+	goObj := obj.GetObject()
+	if goObj != nil {
+		mask := goObj.BuildFilteredUpdateMask(target.Object, false)
+		block := goObj.BuildValuesUpdateBlock(mask, target.Object)
+		buf.WriteBytes(block)
+	}
+
+	// Build packet
+	ud := object.NewUpdateData()
+	ud.AddUpdateBlock(buf.Bytes())
+	pkt := ud.BuildPacket()
+
+	target.Sender.Send(pkt)
+}
+
+// sendGameObjectDestroyToPlayer sends a destroy object packet for a game object to a player.
+func (m *Map) sendGameObjectDestroyToPlayer(obj *object.Object, target *player.Player) {
+	if target.Sender == nil || obj == nil {
+		return
+	}
+
+	pkt := wow.NewPacket(wow.ServerDestroyObject)
+	_ = pkt.Write(obj.GUID())
+	_ = pkt.WriteOne(0) // not despawn animation
+	target.Sender.Send(pkt)
 }
 
 // AddUpdateObject implements object.ObjectUpdater. It queues an object
@@ -443,6 +634,12 @@ func (m *Map) SendObjectUpdatesLocked() {
 func (m *Map) sendUpdateForObject(obj *object.Object, players []*player.Player) {
 	for _, target := range players {
 		if target.Sender == nil {
+			continue
+		}
+
+		// Only players that have the object created client-side get updates
+		// for it; the player itself is never in its own visibility set.
+		if target.GUID() != obj.GUID() && !m.visibilityTracker.IsVisible(target.GUID(), obj.GUID()) {
 			continue
 		}
 
@@ -566,6 +763,37 @@ func (m *Map) updatePlayerVisibilityLocked(p *player.Player) {
 			m.sendNPCDestroyToPlayer(npcObj, p)
 		}
 	}
+
+	// Check all game objects
+	for _, gobj := range m.objects {
+		gobjObj := m.getGameObjectObject(gobj)
+		if gobjObj == nil {
+			continue
+		}
+
+		gobjPos := m.getGameObjectPosition(gobj)
+		if gobjPos == nil {
+			continue
+		}
+
+		dist := Distance2DPositions(
+			p.Location.X, p.Location.Y,
+			gobjPos.X, gobjPos.Y,
+		)
+
+		isVisible := m.visibilityTracker.IsVisible(playerGUID, gobjObj.GUID())
+		inRange := dist <= sightRange
+
+		if inRange && !isVisible {
+			// Game object just came into range - send create
+			m.visibilityTracker.SetVisible(playerGUID, gobjObj.GUID())
+			m.sendGameObjectCreateToPlayer(gobj, p)
+		} else if !inRange && isVisible {
+			// Game object went out of range - send destroy
+			m.visibilityTracker.ClearVisible(playerGUID, gobjObj.GUID())
+			m.sendGameObjectDestroyToPlayer(gobjObj, p)
+		}
+	}
 }
 
 // AddAreaTrigger adds an areatrigger to this map.
@@ -622,6 +850,11 @@ func (m *Map) IsWorldMap() bool {
 		return false
 	}
 	return m.Entry.InstanceType == 0 // INSTANCE_NONE
+}
+
+// GetVisibilityRange returns the map's default visibility range.
+func (m *Map) GetVisibilityRange() float32 {
+	return m.visibilityRange
 }
 
 // IsInstanceable returns true if this map supports instancing.

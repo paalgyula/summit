@@ -1,8 +1,10 @@
 package world
 
 import (
+	"fmt"
 	"sync"
 
+	"github.com/paalgyula/summit/pkg/summit/tools/dbc"
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
 )
 
@@ -70,6 +72,24 @@ func (fm *FactionManager) LoadFromDBC(templates []*wotlk.FactionTemplateEntry) {
 		}
 	}
 	fm.loaded = true
+}
+
+// LoadDBC loads faction templates from FactionTemplate.dbc in the given directory.
+func (fm *FactionManager) LoadDBC(dbcPath string) error {
+	entries, err := dbc.Load[wotlk.FactionTemplateEntry]("FactionTemplate.dbc", dbcPath)
+	if err != nil {
+		entries, err = dbc.Load[wotlk.FactionTemplateEntry]("factiontemplate.dbc", dbcPath)
+	}
+	if err != nil {
+		return fmt.Errorf("load faction templates: %w", err)
+	}
+
+	ptrEntries := make([]*wotlk.FactionTemplateEntry, len(entries))
+	for i := range entries {
+		ptrEntries[i] = &entries[i]
+	}
+	fm.LoadFromDBC(ptrEntries)
+	return nil
 }
 
 // GetTemplate returns the faction template for the given ID.

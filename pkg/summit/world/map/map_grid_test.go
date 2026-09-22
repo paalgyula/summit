@@ -320,3 +320,136 @@ func (n *testNPC) GetObject() *object.Object {
 func (n *testNPC) GetPosition() *player.WorldLocation {
 	return &player.WorldLocation{X: n.X, Y: n.Y, Z: n.Z}
 }
+
+// ---------------------------------------------------------------------------
+// Game object visibility tests
+// ---------------------------------------------------------------------------
+
+// testGO is a minimal game object for integration tests.
+type testGO struct {
+	Object *object.Object
+	ID     uint32
+	X, Y, Z float32
+}
+
+func newTestGO(id uint32, x, y, z float32) *testGO {
+	obj := object.NewObject()
+	obj.InitValues(int(object.GameobjectEnd))
+	obj.SetGUID(wow.NewGUID(wow.GameObjectGUID, id))
+	return &testGO{
+		Object: obj,
+		ID:     id,
+		X:      x,
+		Y:      y,
+		Z:      z,
+	}
+}
+
+func (g *testGO) GetGUID() wow.GUID {
+	return g.Object.GUID()
+}
+
+func (g *testGO) GetObject() *object.Object {
+	return g.Object
+}
+
+func (g *testGO) GetPosition() *player.WorldLocation {
+	return &player.WorldLocation{X: g.X, Y: g.Y, Z: g.Z}
+}
+
+// TestGridIntegration_GameObjectVisibility verifies that game objects
+// within range are visible to players.
+func TestGridIntegration_GameObjectVisibility(t *testing.T) {
+	m := NewMap(0, 0, nil)
+	m.InitVisibilityDistance()
+
+	p := player.NewPlayer()
+	p.ID = 1
+	p.Race, p.Class = wow.RaceOrc, wow.ClassWarior
+	p.Init()
+	p.Location.X = 0
+	p.Location.Y = 0
+	s := &spySender{}
+	p.Sender = s
+	m.AddPlayer(p)
+
+	// Add game object near player
+	gobj := newTestGO(200, 10, 0, 0)
+	m.AddGameObject(gobj)
+
+	// Run update cycle
+	m.Update(50)
+
+	// Player should see game object
+	assert.Greater(t, s.create, 0, "player should see nearby game object")
+	vis := m.visibilityTracker.IsVisible(p.GUID(), gobj.Object.GUID())
+	assert.True(t, vis, "game object should be marked visible")
+}
+
+// TestGridIntegration_GameObjectOutOfRange verifies that game objects
+// outside range are NOT visible.
+func TestGridIntegration_GameObjectOutOfRange(t *testing.T) {
+	m := NewMap(0, 0, nil)
+	m.InitVisibilityDistance()
+
+	p := player.NewPlayer()
+	p.ID = 1
+	p.Race, p.Class = wow.RaceOrc, wow.ClassWarior
+	p.Init()
+	p.Location.X = 0
+	p.Location.Y = 0
+	s := &spySender{}
+	p.Sender = s
+	m.AddPlayer(p)
+
+	// Add game object far away
+	gobj := newTestGO(200, 200, 0, 0)
+	m.AddGameObject(gobj)
+
+	// Run update cycle
+	m.Update(50)
+
+	// Player should NOT see game object
+	assert.Equal(t, 0, s.create, "player should NOT see distant game object")
+	vis := m.visibilityTracker.IsVisible(p.GUID(), gobj.Object.GUID())
+	assert.False(t, vis, "game object should NOT be marked visible")
+}
+
+// TestGridIntegration_NPCCreatePacketContent verifies that the create
+// packet sent for an NPC contains the correct update type and block count.
+func TestGridIntegration_NPCCreatePacketContent(t *testing.T) {
+	m := NewMap(0, 0, nil)
+	m.InitVisibilityDistance()
+
+	p := player.NewPlayer()
+	p.ID = 1
+	p.Race, p.Class = wow.RaceOrc, wow.ClassWarior
+	p.Init()
+	p.Location.X = 0
+	p.Location.Y = 0
+	s := &spySender{}
+	p.Sender = s
+	m.AddPlayer(p)
+
+	npc := newTestNPC(42, 5, 0, 0)
+	m.AddNPC(npc)
+
+	m.Update(50)
+
+	require.Greater(t, s.create, 0, "should receive create packet")
+
+	// The create packet should be an SMSG_UPDATE_OBJECT
+	pkt := s.packets[0]
+	assert.Equal(t, wow.ServerUpdateObject, pkt.Opcode())
+
+	// Verify the packet has at least one update block (block count > 0)
+	data := pkt.Bytes()
+	require.GreaterOrEqual(t, len(data), 8, "packet should have block count + at least one block")
+
+	// Block count is first 4 bytes (little-endian u32)
+	blockCount := uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16 | uint32(data[3])<<24
+	assert.Greater(t, blockCount, uint32(0), "should have at least one update block")
+
+	// First block should be a CreateObject type (0x03)
+	assert.Equal(t, byte(wow.UpdateTypeCreateObject), data[4], "first block should be CreateObject")
+}

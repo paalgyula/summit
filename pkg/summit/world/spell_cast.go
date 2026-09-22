@@ -75,10 +75,10 @@ func (gc *WorldSession) HandleCastSpell(data wow.PacketData) {
 	// Set up targets
 	targets := SpellCastTargets{}
 
-	// Find target player if needed
-	var target *player.Player
+	// Find target unit if needed
+	var target CombatUnit
 	if !spellInfo.IsSelfCast() && targetGUID != 0 {
-		target = gc.findPlayerByGUID(server, targetGUID)
+		target = gc.resolveCombatUnit(wow.GUID(targetGUID))
 		if target == nil {
 			gc.sendCastFailed(spellID, SpellCastResult(5)) // Invalid target
 			return
@@ -225,7 +225,7 @@ func (gc *WorldSession) sendCastFailed(spellID uint32, result SpellCastResult) {
 }
 
 // sendSpellGo sends SMSG_SPELL_GO when a spell is cast.
-func (gc *WorldSession) sendSpellGo(castID uint32, spellInfo *SpellInfo, target *player.Player) {
+func (gc *WorldSession) sendSpellGo(castID uint32, spellInfo *SpellInfo, target CombatUnit) {
 	pkt := wow.NewPacket(wow.ServerSpellGo)
 
 	// Spell ID
@@ -246,7 +246,7 @@ func (gc *WorldSession) sendSpellGo(castID uint32, spellInfo *SpellInfo, target 
 	// Hit target count
 	if target != nil {
 		_ = pkt.WriteOne(1)
-		_ = pkt.Write(target.GUID())
+		_ = pkt.Write(target.GetGUID())
 	} else {
 		_ = pkt.WriteOne(0)
 	}
@@ -257,18 +257,22 @@ func (gc *WorldSession) sendSpellGo(castID uint32, spellInfo *SpellInfo, target 
 	// Target flags
 	if target != nil {
 		_ = pkt.Write(uint32(1)) // TARGET_FLAG_UNIT
-		_ = pkt.Write(target.GUID())
+		_ = pkt.Write(target.GetGUID())
 	}
 
 	gc.socket.Send(pkt)
 }
 
 // sendSpellLog sends SMSG_SPELLLOGEXECUTE with damage/heal information.
-func (gc *WorldSession) sendSpellLog(spellInfo *SpellInfo, target *player.Player, damage, heal uint32) {
+func (gc *WorldSession) sendSpellLog(spellInfo *SpellInfo, target CombatUnit, damage, heal uint32) {
 	pkt := wow.NewPacket(wow.ServerSpelllogexecute)
 
 	_ = pkt.Write(spellInfo.Id)
-	_ = pkt.Write(target.GUID())
+	if target != nil {
+		_ = pkt.Write(target.GetGUID())
+	} else {
+		_ = pkt.Write(uint64(0))
+	}
 	_ = pkt.Write(uint32(0)) // spell log flags
 	_ = pkt.Write(uint32(0)) // amount
 	_ = pkt.Write(uint32(0)) // overkill
@@ -280,10 +284,14 @@ func (gc *WorldSession) sendSpellLog(spellInfo *SpellInfo, target *player.Player
 }
 
 // sendAuraUpdate sends SMSG_AURA_UPDATE for an aura change.
-func (gc *WorldSession) sendAuraUpdate(target *player.Player, aura *Aura) {
+func (gc *WorldSession) sendAuraUpdate(target CombatUnit, aura *Aura) {
 	pkt := wow.NewPacket(wow.ServerAuraUpdate)
 
-	_ = pkt.Write(target.GUID())
+	if target != nil {
+		_ = pkt.Write(target.GetGUID())
+	} else {
+		_ = pkt.Write(uint64(0))
+	}
 	_ = pkt.WriteOne(0) // removed (0 = add/update)
 
 	// Aura slot (0 = first slot)

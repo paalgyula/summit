@@ -182,6 +182,7 @@ func EntityToPlayer(e CharacterEntity) *player.Player {
 	p.Race = wow.PlayerRace(e.Race)
 	p.Class = wow.PlayerClass(e.Class)
 	p.Gender = wow.PlayerGender(e.Gender)
+	p.FactionID = player.FactionTemplateFromRace(p.Race)
 
 	p.Skin = e.Skin
 	p.Face = e.Face

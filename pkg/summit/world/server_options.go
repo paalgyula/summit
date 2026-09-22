@@ -118,11 +118,15 @@ func WithAuthManagement(ms auth.ManagementService) ServerOption {
 	}
 }
 
-// WithSpellDBC loads spell data from DBC files in the given directory.
+// WithSpellDBC loads spell and faction data from DBC files in the given directory.
 func WithSpellDBC(dbcPath string) ServerOption {
 	return func(s *Server) error {
 		if err := s.spellMgr.LoadSpells(dbcPath); err != nil {
 			return fmt.Errorf("world.LoadSpells: %w", err)
+		}
+
+		if err := GetFactionManager().LoadDBC(dbcPath); err != nil {
+			return fmt.Errorf("world.LoadFactionDBC: %w", err)
 		}
 
 		return nil

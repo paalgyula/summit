@@ -5,11 +5,11 @@ import (
 )
 
 // BuildQuestGiverStatus builds SMSG_QUESTGIVER_STATUS.
-// Format: [ObjectGuid npcGUID] [uint8 questStatus]
+// Format: [ObjectGuid npcGUID] [uint32 questStatus]
 func BuildQuestGiverStatus(guid wow.GUID, status QuestGiverStatus) *wow.Packet {
 	pkt := wow.NewPacket(wow.ServerQuestgiverStatus)
 	_ = pkt.Write(guid)
-	_ = pkt.WriteOne(int(status))
+	_ = pkt.Write(uint32(status))
 
 	return pkt
 }
@@ -134,9 +134,16 @@ func BuildQuestGiverRequestItems(npcGUID wow.GUID, quest *Quest, canComplete boo
 	_ = pkt.WriteUint32(int(quest.ID))
 
 	pkt.WriteString(quest.Title)
-	pkt.WriteString("") // request items text
+	reqText := quest.Objectives
+	if reqText == "" {
+		reqText = quest.Description
+	}
+	pkt.WriteString(reqText) // request items text
 
 	_ = pkt.WriteUint32(0) // completion emote
+
+	reqCount := countRequiredItems(quest)
+	_ = pkt.WriteUint32(int(reqCount))
 
 	// Required items
 	for i := 0; i < 6; i++ {
@@ -166,7 +173,11 @@ func BuildQuestGiverOfferReward(npcGUID wow.GUID, quest *Quest, autoFinish bool)
 	_ = pkt.WriteUint32(int(quest.ID))
 
 	pkt.WriteString(quest.Title)
-	pkt.WriteString("") // reward text
+	rewardText := quest.QuestCompletionLog
+	if rewardText == "" {
+		rewardText = quest.Description
+	}
+	pkt.WriteString(rewardText) // reward text
 
 	_ = pkt.WriteOne(boolToInt(autoFinish))
 	_ = pkt.WriteUint32(int(quest.Flags))
@@ -323,3 +334,61 @@ func countRewardItems(q *Quest) uint32 {
 
 	return count
 }
+
+func countRequiredItems(q *Quest) uint32 {
+	count := uint32(0)
+	for i := 0; i < 6; i++ {
+		if q.RequiredItemId[i] > 0 {
+			count++
+		}
+	}
+
+	return count
+}
+
+// GossipOption is one selectable gossip menu item.
+type GossipOption struct {
+	Index    uint32
+	Icon     uint8
+	BoxCoded uint8
+	BoxMoney uint32
+	Text     string
+	BoxText  string
+}
+
+// BuildGossipMessage builds SMSG_GOSSIP_MESSAGE.
+func BuildGossipMessage(guid wow.GUID, menuID, textID uint32, options []GossipOption, quests []QuestListItem) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerGossipMessage)
+	_ = pkt.Write(guid)
+	_ = pkt.WriteUint32(int(menuID))
+	_ = pkt.WriteUint32(int(textID))
+
+	_ = pkt.WriteUint32(len(options))
+	for _, opt := range options {
+		_ = pkt.WriteUint32(int(opt.Index))
+		_ = pkt.WriteOne(int(opt.Icon))
+		_ = pkt.WriteOne(int(opt.BoxCoded))
+		_ = pkt.WriteUint32(int(opt.BoxMoney))
+		pkt.WriteString(opt.Text)
+		pkt.WriteString(opt.BoxText)
+	}
+
+	_ = pkt.WriteUint32(len(quests))
+	for _, q := range quests {
+		_ = pkt.WriteUint32(int(q.QuestID))
+		_ = pkt.WriteUint32(int(q.QuestIcon))
+		_ = pkt.Write(q.QuestLevel)
+		_ = pkt.WriteUint32(int(q.QuestFlags))
+
+		if q.IsRepeatable {
+			_ = pkt.WriteOne(1)
+		} else {
+			_ = pkt.WriteOne(0)
+		}
+
+		pkt.WriteString(q.Title)
+	}
+
+	return pkt
+}
+

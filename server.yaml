@@ -10,6 +10,7 @@ world:
   enabled: true
   listen: "127.0.0.1:8129"
   ws_listen: "127.0.0.1:5002"
+  dbc_path: "dbc"
   realm:
     name: "The Highest Summit"
     slug: "highest-summit"

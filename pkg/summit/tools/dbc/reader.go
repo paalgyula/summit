@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 
 	"github.com/paalgyula/summit/pkg/summit/tools/dbc/wotlk"
@@ -180,19 +181,40 @@ func parseByteArray(data []byte, obj interface{}) error {
 		fmt.Sscanf(dbcTag, "offset=%d,byte=%d", &offset, &b)
 		fmt.Sscanf(dbcTag, "offset=%d,len=%d", &offset, &size)
 
-		offset *= 4 + b // Bytes to columns + byte
+		offset = offset*4 + b // Bytes to columns + byte
 		size *= 4
+
+		if offset >= len(data) {
+			continue
+		}
 
 		var value any
 
 		switch field.Kind() {
 		case reflect.Int8:
-			value = int8(data[offset])
+			if offset < len(data) {
+				value = int8(data[offset])
+			}
 		case reflect.Uint8:
-			value = data[offset]
+			if offset < len(data) {
+				value = data[offset]
+			}
+		case reflect.Float32:
+			if offset+4 <= len(data) {
+				value = math.Float32frombits(binary.LittleEndian.Uint32(data[offset:]))
+			}
+		case reflect.Float64:
+			if offset+8 <= len(data) {
+				value = math.Float64frombits(binary.LittleEndian.Uint64(data[offset:]))
+			}
 		case reflect.String:
-			value = string(data[offset : offset+size])
+			if offset+size <= len(data) {
+				value = string(data[offset : offset+size])
+			}
 		case reflect.Slice:
+			if offset+size > len(data) {
+				continue
+			}
 			if field.Type().Elem().Kind() == reflect.Uint8 {
 				value = data[offset : offset+size]
 			} else if field.Type().Elem().Kind() == reflect.Uint32 {
@@ -206,7 +228,6 @@ func parseByteArray(data []byte, obj interface{}) error {
 				field.Set(reflect.ValueOf(value))
 
 				continue
-				// fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
 			} else if field.Type().Elem().Kind() == reflect.Uint16 {
 				value := make([]uint16, size/4)
 				br := bytes.NewReader(data[offset : offset+size])
@@ -218,7 +239,6 @@ func parseByteArray(data []byte, obj interface{}) error {
 				field.Set(reflect.ValueOf(value))
 
 				continue
-				// fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
 			} else if field.Type().Elem().Kind() == reflect.Int32 {
 				value := make([]int32, size/4)
 				br := bytes.NewReader(data[offset : offset+size])
@@ -230,22 +250,33 @@ func parseByteArray(data []byte, obj interface{}) error {
 				field.Set(reflect.ValueOf(value))
 
 				continue
-				// fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
 			} else {
 				fmt.Printf("data type not supported: %v\n", field.Type().Elem().Kind())
 			}
 		case reflect.Int16:
-			value = int16(binary.LittleEndian.Uint16(data[offset:]))
+			if offset+2 <= len(data) {
+				value = int16(binary.LittleEndian.Uint16(data[offset:]))
+			}
 		case reflect.Uint16:
-			value = binary.LittleEndian.Uint16(data[offset:])
+			if offset+2 <= len(data) {
+				value = binary.LittleEndian.Uint16(data[offset:])
+			}
 		case reflect.Int32:
-			value = int32(binary.LittleEndian.Uint32(data[offset:]))
+			if offset+4 <= len(data) {
+				value = int32(binary.LittleEndian.Uint32(data[offset:]))
+			}
 		case reflect.Uint32:
-			value = binary.LittleEndian.Uint32(data[offset:])
+			if offset+4 <= len(data) {
+				value = binary.LittleEndian.Uint32(data[offset:])
+			}
 		case reflect.Int64:
-			value = int64(binary.LittleEndian.Uint64(data[offset:]))
+			if offset+8 <= len(data) {
+				value = int64(binary.LittleEndian.Uint64(data[offset:]))
+			}
 		case reflect.Uint64:
-			value = binary.LittleEndian.Uint64(data[offset:])
+			if offset+8 <= len(data) {
+				value = binary.LittleEndian.Uint64(data[offset:])
+			}
 		case reflect.Pointer:
 			value = parsePointer(field, data, offset)
 		default:

@@ -7,6 +7,9 @@ import (
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
+// UnitFlagInCombat is UNIT_FLAG_IN_COMBAT of UNIT_FIELD_FLAGS (shared with the player package).
+const UnitFlagInCombat = player.UnitFlagInCombat
+
 // DamageEffectType mirrors AC's DamageEffectType enum (Unit.h:253).
 type DamageEffectType uint8
 
@@ -241,6 +244,7 @@ type CombatUnit interface {
 	GetPrimaryPowerType() wow.PowerType
 	GetPower(pt wow.PowerType) uint32
 	SetPower(pt wow.PowerType, v uint32)
+	GetMaxPower(pt wow.PowerType) uint32
 
 	// Combat state
 	GetVictim() interface{}

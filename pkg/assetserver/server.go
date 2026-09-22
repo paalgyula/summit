@@ -71,7 +71,13 @@ func NewServer(cfg Config) (*Server, error) {
 		cfg.ListenAddr = ":8080"
 	}
 	if cfg.AssetDir == "" {
-		cfg.AssetDir = "./assets"
+		if fi, err := os.Stat("client/assets"); err == nil && fi.IsDir() {
+			cfg.AssetDir = "client/assets"
+		} else if fi, err := os.Stat("assets"); err == nil && fi.IsDir() {
+			cfg.AssetDir = "assets"
+		} else {
+			cfg.AssetDir = "./assets"
+		}
 	}
 	if cfg.CacheDir == "" {
 		cfg.CacheDir = filepath.Join(cfg.AssetDir, ".cache")
@@ -277,6 +283,8 @@ func (s *Server) handleAsset(c echo.Context) error {
 	diskPath := filepath.Join(s.cfg.AssetDir, relPath)
 	if fi, err := os.Stat(diskPath); err == nil && !fi.IsDir() {
 		return c.File(diskPath)
+	} else if resolved, err := findPathCaseInsensitive(s.cfg.AssetDir, relPath); err == nil {
+		return c.File(resolved)
 	}
 
 	// Deduplicate in-flight conversions so concurrent requests don't duplicate work
@@ -311,11 +319,17 @@ func (s *Server) handleAsset(c echo.Context) error {
 
 	// 5. Creature display manifests (CreatureDisplayInfo + CreatureModelData)
 	if id, ok := creatureDisplayID(relPath); ok {
-		if err := s.tryJITCreatureDisplay(id, cachedPath); err != nil {
+		canonicalCachePath := filepath.Join(s.cfg.CacheDir, "creature", fmt.Sprintf("%d.json", id))
+		if fi, err := os.Stat(canonicalCachePath); err == nil && !fi.IsDir() {
+			c.Response().Header().Set("Content-Type", "application/json; charset=UTF-8")
+			return c.File(canonicalCachePath)
+		}
+		if err := s.tryJITCreatureDisplay(id, canonicalCachePath); err != nil {
 			s.log.Debug().Err(err).Uint32("display", id).Msg("creature display unavailable")
 			return echo.ErrNotFound
 		}
-		return c.File(cachedPath)
+		c.Response().Header().Set("Content-Type", "application/json; charset=UTF-8")
+		return c.File(canonicalCachePath)
 	}
 
 	// 5a. Spell manifests (Spell.dbc + SpellIcon / SpellCastTimes / SpellRange)
@@ -482,7 +496,7 @@ func (s *Server) tryJITCharacterData(cachedPath string) error {
 	}
 	loaded := 0
 	for i, name := range dbc.CharacterTableNames {
-		data, err := s.readSource("DBFilesClient/" + name)
+		data, err := s.readDBC(name)
 		if err != nil {
 			s.log.Warn().Str("file", name).Msg("DBC unavailable for character data")
 			continue
@@ -536,13 +550,106 @@ func writeCacheFile(cachedPath string, write func(w io.Writer) error) error {
 // readSource returns a raw source file from the asset directory, the MPQs
 // or, failing both, the upstream asset server (cached on disk from then on).
 func (s *Server) readSource(relPath string) ([]byte, error) {
-	if data, err := os.ReadFile(filepath.Join(s.cfg.AssetDir, relPath)); err == nil {
+	if data, err := readFileCaseInsensitive(s.cfg.AssetDir, relPath); err == nil {
 		return data, nil
 	}
 	if data, err := s.findInMPQs(relPath); err == nil {
 		return data, nil
 	}
 	return s.fetchUpstream(relPath)
+}
+
+// readDBC reads a DBC table by name, checking standard DBC locations and casing.
+func (s *Server) readDBC(name string) ([]byte, error) {
+	name = strings.TrimSuffix(name, ".dbc")
+	lower := strings.ToLower(name)
+	candidates := []string{
+		"DBFilesClient/" + name + ".dbc",
+		"DBFilesClient/" + lower + ".dbc",
+		"dbc/" + name + ".dbc",
+		"dbc/" + lower + ".dbc",
+		name + ".dbc",
+		lower + ".dbc",
+	}
+
+	for _, cand := range candidates {
+		if data, err := s.readSource(cand); err == nil && len(data) > 0 {
+			return data, nil
+		}
+	}
+
+	// Fallback to relative roots in case AssetDir is configured differently or running tests
+	fallbackRoots := []string{
+		s.cfg.AssetDir,
+		"client/assets",
+		"../client/assets",
+		"../../client/assets",
+		"dbc",
+		"../dbc",
+		"../../dbc",
+		".",
+	}
+
+	for _, root := range fallbackRoots {
+		if root == "" {
+			continue
+		}
+		for _, cand := range candidates {
+			if data, err := readFileCaseInsensitive(root, cand); err == nil && len(data) > 0 {
+				return data, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("DBC file %s.dbc not found in assets, MPQs, or fallback paths", name)
+}
+
+// findPathCaseInsensitive finds a file path within baseDir case-insensitively.
+func findPathCaseInsensitive(baseDir, relPath string) (string, error) {
+	direct := filepath.Join(baseDir, relPath)
+	if fi, err := os.Stat(direct); err == nil && !fi.IsDir() {
+		return direct, nil
+	}
+
+	norm := filepath.Clean(filepath.ToSlash(relPath))
+	parts := strings.Split(strings.TrimPrefix(norm, "/"), "/")
+
+	curr := baseDir
+	for _, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		entries, err := os.ReadDir(curr)
+		if err != nil {
+			return "", err
+		}
+		found := false
+		for _, entry := range entries {
+			if strings.EqualFold(entry.Name(), part) {
+				curr = filepath.Join(curr, entry.Name())
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", os.ErrNotExist
+		}
+	}
+
+	fi, err := os.Stat(curr)
+	if err != nil || fi.IsDir() {
+		return "", os.ErrNotExist
+	}
+	return curr, nil
+}
+
+// readFileCaseInsensitive reads a file within baseDir case-insensitively.
+func readFileCaseInsensitive(baseDir, relPath string) ([]byte, error) {
+	p, err := findPathCaseInsensitive(baseDir, relPath)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(p)
 }
 
 // fetchUpstream downloads a raw source file from the upstream asset server

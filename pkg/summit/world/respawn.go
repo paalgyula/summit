@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/rs/zerolog/log"
 )
 
@@ -15,13 +14,17 @@ const DefaultRespawnDelaySecs = 300 // 5 minutes
 // Default corpse decay time in seconds.
 const DefaultCorpseDecaySecs = 60 // 1 minute
 
-// RespawnManager handles NPC respawn timers using per-NPC goroutines.
+// RespawnManager drives a killed NPC through corpse decay and respawn using
+// one goroutine per dead NPC. The NPC object is kept and reused: the corpse
+// stays in the map until it decays, then leaves the map, and after the
+// respawn delay it is reset and added back, so the grid visibility pass
+// sends the create packets to whoever is near.
 type RespawnManager struct {
-	mu      sync.Mutex
-	spawns  *SpawnManager
-	server  *Server
-	cancel  map[uint64]context.CancelFunc // spawnID → cancel function
-	dead    map[uint64]bool               // spawnID → is dead and waiting
+	mu     sync.Mutex
+	spawns *SpawnManager
+	server *Server
+	cancel map[uint64]context.CancelFunc // spawnID → cancel function
+	dead   map[uint64]bool               // spawnID → is dead and waiting
 }
 
 // NewRespawnManager creates a new respawn manager.
@@ -33,13 +36,13 @@ func NewRespawnManager(spawns *SpawnManager) *RespawnManager {
 	}
 }
 
-// SetServer sets the server reference for broadcasting.
+// SetServer sets the server reference used to reach the maps.
 func (rm *RespawnManager) SetServer(server *Server) {
 	rm.server = server
 }
 
-// ScheduleRespawn starts a goroutine that waits for the respawn delay
-// then recreates the NPC. Calling CancelRespawn aborts it.
+// ScheduleRespawn starts the corpse decay → respawn cycle of a killed NPC.
+// Calling CancelRespawn aborts it.
 func (rm *RespawnManager) ScheduleRespawn(npc *NPC) {
 	rm.mu.Lock()
 
@@ -48,9 +51,9 @@ func (rm *RespawnManager) ScheduleRespawn(npc *NPC) {
 		cancel()
 	}
 
-	respawnDelay := time.Duration(DefaultRespawnDelaySecs+DefaultCorpseDecaySecs) * time.Second
+	respawnDelay := time.Duration(DefaultRespawnDelaySecs) * time.Second
 	if npc.SpawnTimeSecs > 0 {
-		respawnDelay = time.Duration(npc.SpawnTimeSecs+DefaultCorpseDecaySecs) * time.Second
+		respawnDelay = time.Duration(npc.SpawnTimeSecs) * time.Second
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,96 +68,70 @@ func (rm *RespawnManager) ScheduleRespawn(npc *NPC) {
 		Dur("delay", respawnDelay).
 		Msg("NPC respawn scheduled")
 
-	// Snapshot the NPC data we need to recreate it
-	snapshot := &deadNPC{
-		EntryID:      npc.EntryID,
-		SpawnID:      npc.SpawnID,
-		Name:         npc.Name,
-		DisplayID:    npc.DisplayID,
-		Faction:      npc.Faction,
-		Level:        npc.Level,
-		X:            npc.X,
-		Y:            npc.Y,
-		Z:            npc.Z,
-		O:            npc.O,
-		MapID:        npc.Map,
-		NpcFlags:     npc.NpcFlags,
-		UnitFlags:    npc.UnitFlags,
-		SpawnTimeSecs: npc.SpawnTimeSecs,
-	}
-
-	go rm.respawnLoop(ctx, snapshot, respawnDelay)
+	go rm.respawnLoop(ctx, npc, DefaultCorpseDecaySecs*time.Second, respawnDelay)
 }
 
-// respawnLoop waits for the delay then recreates the NPC.
-func (rm *RespawnManager) respawnLoop(ctx context.Context, dead *deadNPC, delay time.Duration) {
-	timer := time.NewTimer(delay)
+// respawnLoop waits out the corpse, despawns it, waits the respawn delay and
+// brings the NPC back.
+func (rm *RespawnManager) respawnLoop(ctx context.Context, npc *NPC, corpseDecay, respawnDelay time.Duration) {
+	if !sleepCtx(ctx, corpseDecay) {
+		return
+	}
+
+	rm.despawnNPC(npc)
+
+	if !sleepCtx(ctx, respawnDelay) {
+		return
+	}
+
+	rm.respawnNPC(npc)
+}
+
+// sleepCtx waits for d; false when ctx was cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
 	defer timer.Stop()
 
 	select {
 	case <-ctx.Done():
-		// Cancelled — NPC was manually respawned or server shutting down
-		return
+		return false
 	case <-timer.C:
-		// Timer expired — respawn the NPC
-		rm.respawnNPC(dead)
+		return true
 	}
 }
 
-// respawnNPC recreates an NPC from a dead snapshot and adds it to the world.
-func (rm *RespawnManager) respawnNPC(dead *deadNPC) {
-	rm.mu.Lock()
-
-	// Check if already respawned (someone else did it)
-	if rm.spawns.GetNPC(dead.SpawnID) != nil {
-		delete(rm.dead, dead.SpawnID)
-		delete(rm.cancel, dead.SpawnID)
-		rm.mu.Unlock()
-
-		return
+// despawnNPC removes the corpse from the world.
+func (rm *RespawnManager) despawnNPC(npc *NPC) {
+	if rm.server != nil && rm.server.mapManager != nil {
+		rm.server.mapManager.CreateBaseMap(npc.Map).RemoveNPC(npc.GUID())
 	}
 
-	delete(rm.dead, dead.SpawnID)
-	delete(rm.cancel, dead.SpawnID)
-	rm.mu.Unlock()
-
-	npc := &NPC{
-		Object:        object.NewObject(),
-		Unit:          object.NewUnit(),
-		SpawnID:       dead.SpawnID,
-		EntryID:       dead.EntryID,
-		Name:          dead.Name,
-		DisplayID:     dead.DisplayID,
-		Faction:       dead.Faction,
-		Level:         dead.Level,
-		Health:        100,
-		MaxHealth:     100,
-		X:             dead.X,
-		Y:             dead.Y,
-		Z:             dead.Z,
-		O:             dead.O,
-		Map:           dead.MapID,
-		NpcFlags:      dead.NpcFlags,
-		UnitFlags:     dead.UnitFlags,
-		SpawnTimeSecs: dead.SpawnTimeSecs,
-	}
-	npc.init()
-
-	rm.spawns.SpawnNPC(npc)
+	rm.spawns.RemoveNPC(npc.SpawnID)
 
 	log.Debug().
-		Uint64("spawn", dead.SpawnID).
-		Str("name", dead.Name).
-		Msg("NPC respawned")
+		Uint64("spawn", npc.SpawnID).
+		Str("name", npc.Name).
+		Msg("NPC corpse despawned")
+}
 
-	// Notify all players in the map
-	if rm.server != nil {
-		for _, gc := range rm.server.GetOnlineSessions() {
-			if gc.player != nil && gc.player.IsInWorld && gc.player.Location.Map == dead.MapID {
-				gc.sendCreateObjectForNPC(npc)
-			}
-		}
+// respawnNPC resets the NPC and puts it back into the world.
+func (rm *RespawnManager) respawnNPC(npc *NPC) {
+	rm.mu.Lock()
+	delete(rm.dead, npc.SpawnID)
+	delete(rm.cancel, npc.SpawnID)
+	rm.mu.Unlock()
+
+	npc.Reset()
+	rm.spawns.SpawnNPC(npc)
+
+	if rm.server != nil && rm.server.mapManager != nil {
+		rm.server.mapManager.CreateBaseMap(npc.Map).AddNPC(npc)
 	}
+
+	log.Debug().
+		Uint64("spawn", npc.SpawnID).
+		Str("name", npc.Name).
+		Msg("NPC respawned")
 }
 
 // CancelRespawn cancels a pending respawn for a spawn ID.
@@ -196,19 +173,4 @@ func (rm *RespawnManager) Shutdown() {
 	}
 
 	rm.dead = make(map[uint64]bool)
-}
-
-// deadNPC holds the snapshot of a dead NPC needed to recreate it.
-type deadNPC struct {
-	EntryID       uint32
-	SpawnID       uint64
-	Name          string
-	DisplayID     uint32
-	Faction       uint32
-	Level         uint8
-	X, Y, Z, O   float32
-	MapID         uint32
-	NpcFlags      uint32
-	UnitFlags     uint32
-	SpawnTimeSecs uint32
 }

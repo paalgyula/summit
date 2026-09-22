@@ -38,6 +38,7 @@ func init() {
 
 	viper.SetDefault("world.listen", "127.0.0.1:8129")
 	viper.SetDefault("world.ws_listen", "127.0.0.1:5002")
+	viper.SetDefault("world.dbc_path", "dbc")
 
 	viper.SetDefault("auth.listen", "127.0.0.1:5000")
 	viper.SetDefault("auth.ws_listen", "127.0.0.1:5001")

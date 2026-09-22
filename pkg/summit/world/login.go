@@ -3,6 +3,7 @@ package world
 import (
 	"time"
 
+	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -191,54 +192,59 @@ func (gc *WorldSession) sendLoginSetTimeSpeed() {
 }
 
 // addPlayerToMap adds the player to the world map.
-// This is a simplified version of Map::AddPlayerToMap.
+// This mirrors Map::AddPlayerToMap in AzerothCore: adds to grid, then
+// triggers a visibility pass so nearby objects are sent to the client.
 func (gc *WorldSession) addPlayerToMap(p *player.Player) {
 	// Mark player as in world
 	p.IsInWorld = true
 
-	// Add player to the map for update queue tracking
+	// Add player to the map for update queue tracking and grid visibility
 	server, ok := gc.ws.(*Server)
 	if ok && server.mapManager != nil {
 		m := server.mapManager.CreateBaseMap(p.Location.Map)
 		m.AddPlayer(p)
+		// Trigger initial visibility update through the grid system —
+		// this sends create packets for nearby players, NPCs, and objects.
+		m.UpdatePlayerVisibility(p)
 	}
 
-	// Send existing players to the new player, and the new player to existing players
-	gc.sendVisiblePlayers(p)
+	// Send nearby players to the new player, and the new player to nearby players
+	gc.sendNearbyPlayers(p)
 
 	gc.log.Debug().Str("name", p.Name).Msg("player added to map")
 }
 
-// sendVisiblePlayers handles visibility: sends CreateObject for existing players
-// to the new player, and sends CreateObject for the new player to existing players.
-// Also sends all NPCs to the new player.
-func (gc *WorldSession) sendVisiblePlayers(p *player.Player) {
+// sendNearbyPlayers sends CreateObject for nearby players only.
+// The new player receives create blocks for players within sight range,
+// and existing players receive a create block for the new player.
+// NPCs and game objects are handled by the map's grid-based visibility
+// system (UpdatePlayerVisibility), not here.
+func (gc *WorldSession) sendNearbyPlayers(p *player.Player) {
 	server, ok := gc.ws.(*Server)
 	if !ok {
 		return
 	}
 
-	// Send existing players to the new player, and the new player to existing players
+	sightRange := mapmanager.DefaultVisibilityDistance
+
 	for _, other := range server.GetOtherSessions(gc) {
 		if other.player == nil || !other.player.IsInWorld {
 			continue
 		}
 
-		// Send the existing player to the new player
-		gc.sendCreateObjectForPlayer(other.player, p)
+		// Only send players within visibility range
+		dist := mapmanager.Distance2DPositions(
+			p.Location.X, p.Location.Y,
+			other.player.Location.X, other.player.Location.Y,
+		)
 
-		// Send the new player to the existing player
-		other.sendCreateObjectForPlayer(p, other.player)
-	}
+		if dist <= sightRange {
+			// Send the existing player to the new player
+			gc.sendCreateObjectForPlayer(other.player, p)
 
-	// Send all NPCs to the new player
-	for _, npc := range server.spawns.GetNPCsInMap(p.Location.Map) {
-		gc.sendCreateObjectForNPC(npc)
-	}
-
-	// Send all game objects to the new player
-	for _, gobj := range server.gameObjects.GetObjectsInMap(p.Location.Map) {
-		gc.sendCreateObjectForGameObject(gobj)
+			// Send the new player to the existing player
+			other.sendCreateObjectForPlayer(p, other.player)
+		}
 	}
 }
 

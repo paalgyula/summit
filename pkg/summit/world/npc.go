@@ -2,10 +2,12 @@ package world
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paalgyula/summit/pkg/store"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
 )
@@ -37,11 +39,11 @@ type NPC struct {
 	Scale float32
 
 	// Combat state
-	FactionID uint32    // faction template ID (from creature_template)
-	victim    interface{} // current target (CombatUnit)
-	InCombat  bool      // NPC is in combat
+	FactionID uint32          // faction template ID (from creature_template)
+	victim    interface{}     // current target (CombatUnit)
+	InCombat  bool            // NPC is in combat
 	Attackers map[uint64]bool // GUIDs of units attacking this NPC
-	
+
 	// Chase state
 	ChaseTarget interface{} // target being chased
 	ChaseRadius float32     // max chase distance (leash)
@@ -152,6 +154,10 @@ func NewNPCFromSpawn(spawn *store.CreatureSpawn, tmpl *store.CreatureTemplate) *
 // init sets up the NPC's update fields.
 func (n *NPC) init() {
 	n.Object.InitValues(int(object.UnitEnd))
+	// The type id selects the per-field visibility table used by
+	// BuildFilteredUpdateMask; without it every unit field is dropped
+	// from create blocks.
+	n.Object.SetObjectTypeID(wow.TypeIDUnit)
 
 	// GUID — uses SpawnID as the counter so each spawn gets a unique GUID
 	guid := wow.NewGUID(wow.UnitGUID, uint32(n.SpawnID))
@@ -210,6 +216,22 @@ func (n *NPC) GUID() wow.GUID {
 // GetGUID returns the NPC's GUID (satisfies world.Unit interface).
 func (n *NPC) GetGUID() wow.GUID {
 	return n.GUID()
+}
+
+// GetPosition returns the NPC's world location (satisfies Map.AddNPC positionProvider).
+func (n *NPC) GetPosition() *player.WorldLocation {
+	return &player.WorldLocation{
+		X:   n.X,
+		Y:   n.Y,
+		Z:   n.Z,
+		O:   n.O,
+		Map: n.Map,
+	}
+}
+
+// GetNPCObject returns the NPC's underlying Object (satisfies Map.AddNPC objectProvider).
+func (n *NPC) GetNPCObject() *object.Object {
+	return n.Object
 }
 
 // GetHealth returns the NPC's current health.
@@ -445,6 +467,7 @@ func (n *NPC) GetAttackers() map[uint64]bool {
 // SetInCombat puts the NPC into combat state.
 func (n *NPC) SetInCombat() {
 	n.InCombat = true
+	n.Object.SetFlag(object.UnitFieldFlags, UnitFlagInCombat)
 }
 
 // ClearInCombat removes the NPC from combat state.
@@ -452,6 +475,23 @@ func (n *NPC) ClearInCombat() {
 	n.InCombat = false
 	n.Attackers = nil
 	n.victim = nil
+	n.Object.RemoveFlag(object.UnitFieldFlags, UnitFlagInCombat)
+}
+
+// OnDeath switches the NPC into its corpse state: no more services, no
+// combat, and the client shows it dead through UNIT_FIELD_HEALTH = 0.
+func (n *NPC) OnDeath() {
+	n.ClearInCombat()
+	n.ChaseTarget = nil
+	n.Object.SetUInt32Value(object.UnitNpcFlags, 0)
+}
+
+// Reset brings a despawned NPC back to its spawn state for respawning.
+func (n *NPC) Reset() {
+	n.ClearInCombat()
+	n.ChaseTarget = nil
+	n.SetHealth(n.MaxHealth)
+	n.Object.SetUInt32Value(object.UnitNpcFlags, n.NpcFlags)
 }
 
 // IsInCombatState returns true if the NPC is in combat.
@@ -486,8 +526,10 @@ func (n *NPC) AttackStop() {
 	n.InCombat = false
 }
 
-// SpawnManager holds all spawned NPCs keyed by spawn ID.
+// SpawnManager holds all spawned NPCs keyed by spawn ID. Sessions read it
+// while respawn goroutines add and remove NPCs, hence the lock.
 type SpawnManager struct {
+	mu   sync.RWMutex
 	npcs map[uint64]*NPC
 	// templates by entry, for creature queries (nil without a world store)
 	templates map[uint32]*store.CreatureTemplate
@@ -582,21 +624,46 @@ func NewSpawnManagerFromDB(worldRepo store.WorldRepo) *SpawnManager {
 
 // SpawnNPC adds an NPC to the world.
 func (sm *SpawnManager) SpawnNPC(npc *NPC) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
 	sm.npcs[npc.SpawnID] = npc
 }
 
 // RemoveNPC removes an NPC from the world by spawn ID.
 func (sm *SpawnManager) RemoveNPC(spawnID uint64) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
 	delete(sm.npcs, spawnID)
 }
 
 // GetNPC returns an NPC by spawn ID.
 func (sm *SpawnManager) GetNPC(spawnID uint64) *NPC {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
 	return sm.npcs[spawnID]
+}
+
+// GetNPCs returns all spawned NPCs.
+func (sm *SpawnManager) GetNPCs() []*NPC {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	result := make([]*NPC, 0, len(sm.npcs))
+	for _, npc := range sm.npcs {
+		result = append(result, npc)
+	}
+
+	return result
 }
 
 // GetNPCsInMap returns all NPCs in the given map.
 func (sm *SpawnManager) GetNPCsInMap(mapID uint32) []*NPC {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
 	var result []*NPC
 
 	for _, npc := range sm.npcs {
@@ -610,5 +677,8 @@ func (sm *SpawnManager) GetNPCsInMap(mapID uint32) []*NPC {
 
 // Count returns the total number of spawned NPCs.
 func (sm *SpawnManager) Count() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
 	return len(sm.npcs)
 }

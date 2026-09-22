@@ -175,6 +175,9 @@ func (ws *Server) StartServer(worldStore store.WorldRepo, charStore store.Charac
 	// Load creature spawns from database (falls back to hardcoded if no world store)
 	ws.spawns = NewSpawnManagerFromDB(worldStore)
 
+	// Register all spawned NPCs into their respective maps for grid visibility
+	ws.registerSpawnsWithMaps()
+
 	// Initialize respawn manager
 	ws.respawnMgr = NewRespawnManager(ws.spawns)
 	ws.respawnMgr.SetServer(ws)
@@ -525,6 +528,53 @@ func (ws *Server) GetAreaTriggerManager() *areatrigger.Manager {
 // GetWorldStateManager returns the worldstate manager.
 func (ws *Server) GetWorldStateManager() *worldstate.Manager {
 	return ws.worldStateManager
+}
+
+// registerSpawnsWithMaps registers all spawned NPCs and game objects into
+// their respective Map instances so the grid-based visibility system can
+// find them. This must be called after SpawnManager is loaded.
+func (ws *Server) registerSpawnsWithMaps() {
+	if ws.mapManager == nil {
+		return
+	}
+
+	// Register NPCs into their maps
+	if ws.spawns != nil {
+		npcsByMap := make(map[uint32][]*NPC)
+		for _, npc := range ws.spawns.GetNPCs() {
+			npcsByMap[npc.Map] = append(npcsByMap[npc.Map], npc)
+		}
+
+		for mapID, npcs := range npcsByMap {
+			m := ws.mapManager.CreateBaseMap(mapID)
+			for _, npc := range npcs {
+				m.AddNPC(npc)
+			}
+		}
+
+		ws.log.Info().
+			Int("totalNPCs", ws.spawns.Count()).
+			Msg("registered NPCs into maps")
+	}
+
+	// Register game objects into their maps
+	if ws.gameObjects != nil {
+		gobsByMap := make(map[uint32][]*GameObject)
+		for _, gobj := range ws.gameObjects.GetObjects() {
+			gobsByMap[gobj.Map] = append(gobsByMap[gobj.Map], gobj)
+		}
+
+		for mapID, gobs := range gobsByMap {
+			m := ws.mapManager.CreateBaseMap(mapID)
+			for _, gobj := range gobs {
+				m.AddGameObject(gobj)
+			}
+		}
+
+		ws.log.Info().
+			Int("totalGameObjects", len(ws.gameObjects.GetObjects())).
+			Msg("registered game objects into maps")
+	}
 }
 
 func MemUsage() string {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,8 +48,9 @@ type CreatureDisplayExtra struct {
 
 // creatureTables holds the parsed creature DBCs, loaded on first use.
 type creatureTables struct {
-	once sync.Once
-	err  error
+	mu     sync.Mutex
+	loaded bool
+	err    error
 
 	displays map[uint32]creatureDisplayRow
 	models   map[uint32]creatureModelRow
@@ -70,10 +72,18 @@ type creatureModelRow struct {
 // CreatureDisplay resolves one display id from the DBCs.
 func (s *Server) CreatureDisplay(displayID uint32) (*CreatureDisplay, error) {
 	t := &s.creatures
-	t.once.Do(func() { t.err = t.load(s) })
+	t.mu.Lock()
+	if !t.loaded {
+		t.err = t.load(s)
+		if t.err == nil {
+			t.loaded = true
+		}
+	}
+	err := t.err
+	t.mu.Unlock()
 
-	if t.err != nil {
-		return nil, t.err
+	if err != nil {
+		return nil, err
 	}
 
 	row, ok := t.displays[displayID]
@@ -81,30 +91,40 @@ func (s *Server) CreatureDisplay(displayID uint32) (*CreatureDisplay, error) {
 		return nil, fmt.Errorf("creature display %d: not in CreatureDisplayInfo", displayID)
 	}
 
-	model, ok := t.models[row.modelID]
-	if !ok {
-		return nil, fmt.Errorf("creature display %d: model %d not in CreatureModelData", displayID, row.modelID)
-	}
-
 	scale := row.scale
 	if scale <= 0 {
 		scale = 1
 	}
 
-	if model.scale > 0 {
-		scale *= model.scale
+	var modelPath string
+	if model, ok := t.models[row.modelID]; ok {
+		modelPath = model.path
+		if model.scale > 0 {
+			scale *= model.scale
+		}
+	} else if row.extraID == 0 {
+		return nil, fmt.Errorf("creature display %d: model %d not in CreatureModelData", displayID, row.modelID)
 	}
 
 	out := &CreatureDisplay{
 		DisplayID: displayID,
-		Model:     model.path,
+		Model:     modelPath,
 		Scale:     scale,
 	}
 
-	dir := path.Dir(model.path)
+	dir := path.Dir(modelPath)
 
-	for i, tex := range row.textures {
-		if tex != "" {
+	for i, rawTex := range row.textures {
+		if rawTex == "" {
+			continue
+		}
+		tex := strings.ReplaceAll(rawTex, "\\", "/")
+		tex = strings.TrimRight(tex, ".")
+		tex = strings.TrimSuffix(tex, ".blp")
+		tex = strings.TrimSuffix(tex, ".BLP")
+		if strings.Contains(tex, "/") || dir == "." || dir == "" {
+			out.Textures[i] = tex
+		} else {
 			out.Textures[i] = dir + "/" + tex
 		}
 	}
@@ -119,10 +139,10 @@ func (s *Server) CreatureDisplay(displayID uint32) (*CreatureDisplay, error) {
 	return out, nil
 }
 
-// load parses CreatureDisplayInfo, CreatureModelData and CreatureDisplayInfoExtra (3.3.5a layouts).
+// load parses CreatureDisplayInfo, CreatureModelData and optionally CreatureDisplayInfoExtra (3.3.5a layouts).
 func (t *creatureTables) load(s *Server) error {
 	read := func(name string) (*dbc.File, error) {
-		data, err := s.readSource("DBFilesClient/" + name + ".dbc")
+		data, err := s.readDBC(name)
 		if err != nil {
 			return nil, fmt.Errorf("%s.dbc: %w", name, err)
 		}
@@ -145,9 +165,10 @@ func (t *creatureTables) load(s *Server) error {
 		return err
 	}
 
-	cde, err := read("CreatureDisplayInfoExtra")
-	if err != nil {
-		return err
+	// CreatureDisplayInfoExtra is optional; non-humanoid displays can still work without it
+	cde, errExtra := read("CreatureDisplayInfoExtra")
+	if errExtra != nil {
+		s.log.Warn().Err(errExtra).Msg("CreatureDisplayInfoExtra.dbc unavailable, humanoid displays will have limited appearance")
 	}
 
 	t.displays = make(map[uint32]creatureDisplayRow, cdi.Records)
@@ -168,27 +189,29 @@ func (t *creatureTables) load(s *Server) error {
 		}
 	}
 
-	t.extras = make(map[uint32]CreatureDisplayExtra, cde.Records)
-	for r := 0; r < cde.Records; r++ {
-		e := CreatureDisplayExtra{
-			Race:       cde.Uint32(r, 1),
-			Gender:     cde.Uint32(r, 2),
-			Skin:       cde.Uint32(r, 3),
-			Face:       cde.Uint32(r, 4),
-			HairStyle:  cde.Uint32(r, 5),
-			HairColor:  cde.Uint32(r, 6),
-			FacialHair: cde.Uint32(r, 7),
-		}
+	if cde != nil {
+		t.extras = make(map[uint32]CreatureDisplayExtra, cde.Records)
+		for r := 0; r < cde.Records; r++ {
+			e := CreatureDisplayExtra{
+				Race:       cde.Uint32(r, 1),
+				Gender:     cde.Uint32(r, 2),
+				Skin:       cde.Uint32(r, 3),
+				Face:       cde.Uint32(r, 4),
+				HairStyle:  cde.Uint32(r, 5),
+				HairColor:  cde.Uint32(r, 6),
+				FacialHair: cde.Uint32(r, 7),
+			}
 
-		for i := range e.Items {
-			e.Items[i] = cde.Uint32(r, 8+i)
-		}
+			for i := range e.Items {
+				e.Items[i] = cde.Uint32(r, 8+i)
+			}
 
-		if bake := cde.String(r, 20); bake != "" {
-			e.BakedTexture = "Textures/BakedNpcTextures/" + strings.TrimSuffix(bake, path.Ext(bake))
-		}
+			if bake := cde.String(r, 20); bake != "" {
+				e.BakedTexture = "Textures/BakedNpcTextures/" + strings.TrimSuffix(bake, path.Ext(bake))
+			}
 
-		t.extras[cde.Uint32(r, 0)] = e
+			t.extras[cde.Uint32(r, 0)] = e
+		}
 	}
 
 	return nil
@@ -203,12 +226,25 @@ func modelAssetPath(p string) string {
 }
 
 // creatureDisplayID parses creature/<id>.json; ok is false for any other path.
+// It accepts variations like /creature/123.json, /Creature/123.json, /creatures/123, api/creature/123.json.
 func creatureDisplayID(relPath string) (uint32, bool) {
-	if !strings.HasPrefix(relPath, CreatureDisplayPrefix) || !strings.HasSuffix(relPath, ".json") {
+	norm := filepath.ToSlash(strings.ToLower(relPath))
+	norm = strings.TrimPrefix(norm, "/")
+	norm = strings.TrimPrefix(norm, "api/")
+	norm = strings.TrimPrefix(norm, "assets/")
+	norm = strings.TrimPrefix(norm, "/")
+
+	var idStr string
+	if strings.HasPrefix(norm, "creature/") {
+		idStr = strings.TrimPrefix(norm, "creature/")
+	} else if strings.HasPrefix(norm, "creatures/") {
+		idStr = strings.TrimPrefix(norm, "creatures/")
+	} else {
 		return 0, false
 	}
 
-	id, err := strconv.ParseUint(strings.TrimSuffix(strings.TrimPrefix(relPath, CreatureDisplayPrefix), ".json"), 10, 32)
+	idStr = strings.TrimSuffix(idStr, ".json")
+	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
 		return 0, false
 	}

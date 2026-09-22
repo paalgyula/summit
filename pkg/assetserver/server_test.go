@@ -270,3 +270,107 @@ func head(s []string, n int) []string {
 	}
 	return s
 }
+
+func TestAssetServerCreatureDisplay(t *testing.T) {
+	tmpDir := t.TempDir()
+	srv, err := NewServer(Config{
+		AssetDir:    tmpDir,
+		UpstreamURL: "https://assets-summit.dev.pilab.hu",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test endpoints with different URL casings and path variations
+	routes := []string{
+		"/creature/12473.json",
+		"/Creature/12473.json",
+		"/creatures/12473.json",
+		"/creature/12473",
+		"/api/creature/12473.json",
+	}
+
+	for _, route := range routes {
+		req := httptest.NewRequest(http.MethodGet, route, nil)
+		w := httptest.NewRecorder()
+		srv.Echo().ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("route %s failed with status %d: %s", route, w.Code, w.Body.String())
+		}
+
+		ct := w.Header().Get("Content-Type")
+		if !strings.HasPrefix(ct, "application/json") {
+			t.Fatalf("route %s expected application/json content type, got: %s", route, ct)
+		}
+
+		var cd CreatureDisplay
+		if err := json.Unmarshal(w.Body.Bytes(), &cd); err != nil {
+			t.Fatalf("route %s invalid json: %v", route, err)
+		}
+		if cd.DisplayID != 12473 {
+			t.Fatalf("route %s expected display 12473, got %d", route, cd.DisplayID)
+		}
+		if cd.Model == "" {
+			t.Fatalf("route %s expected non-empty model", route)
+		}
+	}
+
+	// Verify cached file exists at canonical cache location
+	canonicalCache := filepath.Join(tmpDir, ".cache", "creature", "12473.json")
+	if _, err := os.Stat(canonicalCache); err != nil {
+		t.Fatalf("expected canonical cache file at %s: %v", canonicalCache, err)
+	}
+
+	// Test humanoid display with Extra appearance (e.g. 27869)
+	reqExtra := httptest.NewRequest(http.MethodGet, "/creature/27869.json", nil)
+	wExtra := httptest.NewRecorder()
+	srv.Echo().ServeHTTP(wExtra, reqExtra)
+
+	if wExtra.Code != http.StatusOK {
+		t.Fatalf("creature 27869 failed with status %d: %s", wExtra.Code, wExtra.Body.String())
+	}
+	var cdExtra CreatureDisplay
+	if err := json.Unmarshal(wExtra.Body.Bytes(), &cdExtra); err != nil {
+		t.Fatalf("invalid json for 27869: %v", err)
+	}
+	if cdExtra.Extra == nil {
+		t.Fatalf("expected Extra appearance for display 27869")
+	}
+	if cdExtra.Extra.Race == 0 {
+		t.Fatalf("expected non-zero race in Extra appearance")
+	}
+
+	for _, m := range []string{"Creature/Tarantula/Tarantula.glb", "Creature/Wolf/Wolf.glb", "Creature/DireWolf/RidingDireWolf.glb"} {
+		req := httptest.NewRequest(http.MethodGet, "/"+m, nil)
+		w := httptest.NewRecorder()
+		srv.Echo().ServeHTTP(w, req)
+		t.Logf("GET /%s -> Status %d (bytes %d)", m, w.Code, w.Body.Len())
+	}
+}
+
+func TestCreatureDisplayRetryOnFailure(t *testing.T) {
+	// Create server with non-existent asset dir and no DBCs available
+	emptyDir := t.TempDir()
+	srv, err := NewServer(Config{
+		AssetDir: emptyDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First attempt: simulate tables.load() error by querying non-existent display
+	_, err = srv.CreatureDisplay(999999)
+	if err == nil {
+		t.Fatal("expected error for non-existent display ID")
+	}
+
+	// Now query a valid display (12473) - should not be poisoned by previous failure
+	cd, err := srv.CreatureDisplay(12473)
+	if err != nil {
+		t.Fatalf("expected success on valid display after previous error, got: %v", err)
+	}
+	if cd.DisplayID != 12473 {
+		t.Fatalf("expected display 12473, got %d", cd.DisplayID)
+	}
+}
