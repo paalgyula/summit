@@ -271,6 +271,9 @@ func (gc *WorldSession) sendInitialPacketsAfterAddToMap(p *player.Player) {
 	// Send initial world states
 	gc.sendInitWorldStates(p)
 
+	// Rebuild the client quest log from the character's persisted quests.
+	gc.rebuildQuestLog()
+
 	// Send player create update to self (SMSG_UPDATE_OBJECT with player values)
 	gc.sendPlayerCreate(p)
 }

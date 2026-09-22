@@ -1,6 +1,8 @@
 package world
 
 import (
+	"sort"
+
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -24,12 +26,21 @@ func questLogField(slot, offset int) object.UpdateField {
 // addQuestToLog records the quest in a free client quest-log slot and pushes
 // the PLAYER_QUEST_LOG_n_* update fields. Mirrors Player::SetQuestSlot.
 func (gc *WorldSession) addQuestToLog(q *quest.Quest) {
-	if gc.player == nil || gc.player.Object == nil || q == nil {
+	if q == nil {
+		return
+	}
+
+	gc.addQuestIDToLog(q.ID)
+}
+
+// addQuestIDToLog records a quest id in a free client quest-log slot.
+func (gc *WorldSession) addQuestIDToLog(questID uint32) {
+	if gc.player == nil || gc.player.Object == nil || questID == 0 {
 		return
 	}
 
 	for slot := 0; slot < maxQuestLogSlots; slot++ {
-		if gc.questLog[slot] == q.ID {
+		if gc.questLog[slot] == questID {
 			return // already logged
 		}
 	}
@@ -51,19 +62,66 @@ func (gc *WorldSession) addQuestToLog(q *quest.Quest) {
 		return
 	}
 
-	gc.questLog[slot] = q.ID
+	gc.questLog[slot] = questID
 
 	obj := gc.player.Object
-	obj.SetUInt32Value(questLogField(slot, 0), q.ID) // quest id
-	obj.SetUInt32Value(questLogField(slot, 1), 0)    // state
-	obj.SetUInt32Value(questLogField(slot, 2), 0)    // objective counters 0-1
-	obj.SetUInt32Value(questLogField(slot, 3), 0)    // objective counters 2-3
-	obj.SetUInt32Value(questLogField(slot, 4), 0)    // timer
+	obj.SetUInt32Value(questLogField(slot, 0), questID) // quest id
+	obj.SetUInt32Value(questLogField(slot, 1), 0)       // state
+	obj.SetUInt32Value(questLogField(slot, 2), 0)       // objective counters 0-1
+	obj.SetUInt32Value(questLogField(slot, 3), 0)       // objective counters 2-3
+	obj.SetUInt32Value(questLogField(slot, 4), 0)       // timer
 }
 
-// updateQuestLogCounters writes the packed objective counters for a logged
-// quest (quest kill/collect progress). Counters are packed two per uint32.
-func (gc *WorldSession) updateQuestLogCounters(questID uint32, creatureOrGO, item [4]uint16) {
+// rebuildQuestLog repopulates the client quest log from the player's persisted
+// quest state (called on login). Quests are ordered by id for stable slots.
+func (gc *WorldSession) rebuildQuestLog() {
+	if gc.player == nil {
+		return
+	}
+
+	status, ok := gc.player.QuestStatus.(map[uint32]*quest.QuestStatusData)
+	if !ok || len(status) == 0 {
+		return
+	}
+
+	ids := make([]uint32, 0, len(status))
+	for id := range status {
+		ids = append(ids, id)
+	}
+
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+
+	for _, id := range ids {
+		s := status[id]
+		if s == nil || s.Status == quest.QuestStatusRewarded {
+			continue // rewarded quests are not part of the active log
+		}
+
+		gc.addQuestIDToLog(id)
+		gc.updateQuestLogCounters(id, s.CreatureOrGOCount)
+	}
+}
+
+// saveQuests persists the character's quest progress to the character document
+// with a single partial update (embedded quests, no extra collection).
+func (gc *WorldSession) saveQuests() {
+	if gc.player == nil {
+		return
+	}
+
+	server, ok := gc.ws.(*Server)
+	if !ok || server.charStore == nil {
+		return
+	}
+
+	if err := server.charStore.UpdateCharacterQuests(gc.player); err != nil {
+		gc.log.Error().Err(err).Msg("failed to persist quest progress")
+	}
+}
+
+// updateQuestLogCounters writes the packed kill/use objective counters for a
+// logged quest. Counters are packed two per uint32 (creature or GO counts).
+func (gc *WorldSession) updateQuestLogCounters(questID uint32, creatureOrGO [4]uint16) {
 	if gc.player == nil || gc.player.Object == nil {
 		return
 	}
@@ -74,10 +132,8 @@ func (gc *WorldSession) updateQuestLogCounters(questID uint32, creatureOrGO, ite
 		}
 
 		obj := gc.player.Object
-		// Player quest slots pack creature/GO counts (4) into two uint32.
 		obj.SetUInt32Value(questLogField(slot, 2), uint32(creatureOrGO[0])|uint32(creatureOrGO[1])<<16)
 		obj.SetUInt32Value(questLogField(slot, 3), uint32(creatureOrGO[2])|uint32(creatureOrGO[3])<<16)
-		_ = item
 
 		return
 	}

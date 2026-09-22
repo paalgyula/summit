@@ -272,6 +272,9 @@ func (gc *WorldSession) handleAcceptQuest(npcGUID wow.GUID, questID uint32) {
 	// Add the quest to the client's quest log (PLAYER_QUEST_LOG_n_* fields).
 	gc.addQuestToLog(qDef)
 
+	// Persist quest progress immediately (embedded in the character document).
+	gc.saveQuests()
+
 	// Send close gossip
 	gc.sendGossipComplete(npcGUID)
 
@@ -422,6 +425,15 @@ func (gc *WorldSession) HandleQuestgiverChooseReward(data wow.PacketData) {
 	// Close gossip
 	gc.sendGossipComplete(wow.GUID(npcGUID))
 
+	// Remove from the active log and record it as rewarded, then persist.
+	gc.removeQuestFromLog(questID)
+
+	if rw, ok := gc.player.RewardedQuests.(map[uint32]bool); ok {
+		rw[questID] = true
+	}
+
+	gc.saveQuests()
+
 	log.Debug().
 		Uint32("quest", questID).
 		Uint32("xp", result.XP).
@@ -492,6 +504,7 @@ func (gc *WorldSession) HandleQuestLogRemoveQuest(data wow.PacketData) {
 	qm.RemoveQuest(playerQuests, questID)
 
 	gc.removeQuestFromLog(questID)
+	gc.saveQuests()
 
 	log.Debug().Uint32("quest", questID).Msg("quest abandoned")
 }
