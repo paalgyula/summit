@@ -3,6 +3,7 @@ package world
 import (
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/loot"
+	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -39,9 +40,22 @@ func (gc *WorldSession) HandleLoot(data wow.PacketData) {
 
 	switch guid.High() {
 	case wow.UnitGUID:
-		// Creature corpse loot — TODO: look up creature's lootId from creature_template
+		// Creature corpse loot — check lootable flag and look up loot ID
+		// Source: AzerothCore Player.cpp:8248-8255 (SendLoot checks DYNFLAG_LOOTABLE)
+		npc := gc.getNPCByGUID(guid)
+		if npc == nil {
+			gc.sendLootError(guid, loot.ErrorDidntKill)
+			return
+		}
+
+		// Must have the lootable flag set (creature was killed and not yet looted)
+		if npc.DynamicFlags&UnitDynFlagLootable == 0 {
+			gc.sendLootError(guid, loot.ErrorDidntKill)
+			return
+		}
+
 		lt = loot.LootCorpse
-		lootID = 0 // placeholder until creature loot integration
+		lootID = 0 // TODO: look up creature's lootId from creature_template
 	case wow.GameObjectGUID:
 		lt = loot.LootCorpse
 		lootID = gc.getGameObjectLootID(guid)
@@ -223,6 +237,12 @@ func (gc *WorldSession) HandleLootRelease(data wow.PacketData) {
 	_ = pkt.WriteOne(1) // always 1
 	gc.Send(pkt)
 
+	// Clear lootable flag on the creature corpse
+	// Source: AzerothCore LootHandler.cpp:447-454 (DoLootRelease)
+	if src.Loot != nil && src.Loot.Empty() {
+		gc.clearLootableFlag(src.GUID)
+	}
+
 	// Clear loot state
 	gc.player.LootGUID = 0
 	gc.player.ActiveLoot = nil
@@ -340,4 +360,22 @@ func (gc *WorldSession) getLootStore(lt loot.LootType) *loot.LootStore {
 	}
 
 	return store
+}
+
+// clearLootableFlag clears UNIT_DYNFLAG_LOOTABLE on a creature corpse.
+// Called when loot is fully exhausted or the player releases the loot window.
+// Source: AzerothCore LootHandler.cpp:447-454, Creature.cpp:1334.
+func (gc *WorldSession) clearLootableFlag(guid wow.GUID) {
+	server, ok := gc.ws.(*Server)
+	if !ok || server.spawns == nil {
+		return
+	}
+
+	npc := server.spawns.GetNPC(uint64(guid.Counter()))
+	if npc == nil {
+		return
+	}
+
+	npc.DynamicFlags &^= UnitDynFlagLootable
+	npc.Object.SetUInt32Value(object.UnitDynamicFlags, npc.DynamicFlags)
 }

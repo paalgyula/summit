@@ -16,6 +16,20 @@ const (
 	AttackStateSwinging = 1
 )
 
+// Unit dynamic flags (UNIT_DYNAMIC_FLAGS).
+// Source: AzerothCore SharedDefines.h:3351-3362.
+const (
+	UnitDynFlagNone               uint32 = 0x0000
+	UnitDynFlagLootable           uint32 = 0x0001
+	UnitDynFlagTrackUnit          uint32 = 0x0002
+	UnitDynFlagTapped             uint32 = 0x0004
+	UnitDynFlagTappedByPlayer     uint32 = 0x0008
+	UnitDynFlagSpecialInfo        uint32 = 0x0010
+	UnitDynFlagDead               uint32 = 0x0020
+	UnitDynFlagReferAFriend       uint32 = 0x0040
+	UnitDynFlagTappedByAllThreat  uint32 = 0x0080
+)
+
 // Swing timer in milliseconds.
 const SwingTimerMS = 2000
 
@@ -613,6 +627,11 @@ func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *Cal
 	}
 
 	npc.OnDeath()
+
+	// Mark corpse as lootable — client shows open-hands icon and allows CMSG_LOOT
+	// Source: AzerothCore Unit.cpp:13744-13754 (DealDamage death flow)
+	npc.DynamicFlags |= UnitDynFlagLootable
+	npc.Object.SetUInt32Value(object.UnitDynamicFlags, npc.DynamicFlags)
 
 	// Grant XP to the killing player
 	// Source: AzerothCore KillRewarder.cpp, Player.cpp:GiveXP
