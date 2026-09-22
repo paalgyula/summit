@@ -25,3 +25,29 @@ func GetItemInventoryType(entry uint32) wow.InventoryType {
 func GetItemTemplate(entry uint32) *ItemTemplate {
 	return GetInstance().LookupItem(entry)
 }
+
+// MergeItemTemplates overlays full item templates (item_template from the
+// world store) on the DBC-derived ones: the DBC only knows display id,
+// class and inventory type, the database has names, stats and prices.
+func (bd *Store) MergeItemTemplates(templates map[uint32]*ItemTemplate) {
+	if bd == nil || len(templates) == 0 {
+		return
+	}
+
+	if bd.items == nil {
+		bd.items = make(map[uint32]*ItemTemplate, len(templates))
+	}
+
+	for entry, t := range templates {
+		if t == nil {
+			continue
+		}
+
+		// Keep the DBC display id when the database row has none
+		if prev := bd.items[entry]; prev != nil && t.DisplayID == 0 {
+			t.DisplayID = prev.DisplayID
+		}
+
+		bd.items[entry] = t
+	}
+}

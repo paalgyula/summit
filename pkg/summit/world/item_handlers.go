@@ -1,8 +1,6 @@
 package world
 
 import (
-	"fmt"
-
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -298,25 +296,19 @@ func (gc *WorldSession) HandleItemQuerySingle(data wow.PacketData) {
 func (gc *WorldSession) sendItemQueryResponse(entry uint32) {
 	pkt := wow.NewPacket(wow.ServerItemQuerySingleResponse)
 
-	// Write item entry (with error bit cleared)
-	_ = pkt.Write(entry)
-
 	// Try to look up the full template
 	tpl := gc.getItemTemplate(entry)
 	if tpl == nil {
-		// Item not found - send minimal response with error
-		_ = pkt.Write(uint32(tpl.Class))
-		_ = pkt.Write(uint32(tpl.SubClass))
-		pkt.WriteString(tpl.Name)
-
-		// Write remaining fields as zeros
-		for i := 0; i < 32; i++ {
-			_ = pkt.Write(uint32(0))
-		}
-
+		// Unknown item: the entry with the high bit set is the whole answer
+		// (WorldSession::HandleItemQuerySingleOpcode)
+		_ = pkt.Write(entry | 0x80000000)
 		gc.socket.Send(pkt)
+
 		return
 	}
+
+	// Write item entry (with error bit cleared)
+	_ = pkt.Write(entry)
 
 	// Write item class
 	_ = pkt.Write(tpl.Class)
@@ -335,8 +327,8 @@ func (gc *WorldSession) sendItemQueryResponse(entry uint32) {
 	_ = pkt.Write(uint32(tpl.BuyPrice))
 	// Write sell price
 	_ = pkt.Write(tpl.SellPrice)
-	// Write inventory type
-	_ = pkt.Write(tpl.InventoryType)
+	// Write inventory type (InventoryType is a byte in Go, u32 on the wire)
+	_ = pkt.Write(uint32(tpl.InventoryType))
 	// Write allowable class
 	_ = pkt.Write(uint32(tpl.AllowableClass))
 	// Write allowable race
@@ -483,6 +475,7 @@ func (gc *WorldSession) getItemTemplate(entry uint32) *basedata.ItemTemplate {
 }
 
 // sendInventoryChangeFailure sends SMSG_INVENTORY_CHANGE_FAILURE.
+// item/other may be nil (AC writes empty GUIDs in that case).
 func (gc *WorldSession) sendInventoryChangeFailure(item *player.Item, other *player.Item, result player.EquipResult) {
 	if gc.player == nil {
 		return
@@ -491,13 +484,21 @@ func (gc *WorldSession) sendInventoryChangeFailure(item *player.Item, other *pla
 	pkt := wow.NewPacket(wow.ServerInventoryChangeFailure)
 
 	_ = pkt.Write(uint8(result))
-	_ = pkt.Write(uint64(item.GUID()))
+
+	if item != nil {
+		_ = pkt.Write(uint64(item.GUID()))
+	} else {
+		_ = pkt.Write(uint64(0))
+	}
 
 	if other != nil {
 		_ = pkt.Write(uint64(other.GUID()))
 	} else {
 		_ = pkt.Write(uint64(0))
 	}
+
+	// bag type subclass (AC SendEquipError always writes this byte)
+	_ = pkt.Write(uint8(0))
 
 	gc.socket.Send(pkt)
 }
@@ -552,5 +553,297 @@ func (gc *WorldSession) equipStartingItems() {
 	gc.player.UpdateInventoryFields()
 }
 
-// unused import guard
-var _ = fmt.Sprintf
+// maxGlyphSlotIndex matches AC MAX_GLYPH_SLOT_INDEX.
+const maxGlyphSlotIndex = 6
+
+// resolveUseItemByPos looks up an item for CMSG_USE_ITEM the way AC
+// Player::GetItemByPos does: bag 0 addresses the player frame by absolute
+// slot (equipment 0-18, bag slots 19-22, backpack 23-38). Other bag indices
+// (19-22) address items inside equipped containers — not implemented yet.
+func (gc *WorldSession) resolveUseItemByPos(bag, slot uint8) *player.Item {
+	if bag == 0 {
+		return gc.player.Inventory.GetItem(int(slot))
+	}
+
+	// Bag containers live in slots 19-22 of the player frame; items inside
+	// them are not modelled yet.
+	gc.log.Debug().Uint8("bag", bag).Msg("use item from bag container not implemented")
+	return nil
+}
+
+// canUseItemInCombat reports whether every ON_USE spell on the template may be
+// cast while the player is in combat (AC combat branch of HandleUseItemOpcode).
+func canUseItemInCombat(spellMgr *SpellMgr, tpl *basedata.ItemTemplate) bool {
+	if spellMgr == nil || tpl == nil {
+		return true
+	}
+
+	for i := range tpl.Spells {
+		if tpl.Spells[i].SpellID == 0 || tpl.Spells[i].Trigger != 0 {
+			continue
+		}
+		spellInfo := spellMgr.GetSpellInfo(uint32(tpl.Spells[i].SpellID))
+		if spellInfo == nil {
+			continue
+		}
+		if !spellInfo.CanBeUsedInCombat() {
+			return false
+		}
+	}
+
+	return true
+}
+
+// consumeItemSpellCharge decrements the remaining charges for the ON_USE spell
+// at spellIdx. Charges > 0 are consumable; the item is destroyed at 0.
+// Returns true when the item was removed from the inventory.
+func (gc *WorldSession) consumeItemSpellCharge(item *player.Item, spellIdx int) bool {
+	if item == nil || spellIdx < 0 || spellIdx >= len(item.SpellCharges) {
+		return false
+	}
+
+	// -1 / 0 means "no charge tracking" for this slot — leave the item alone
+	// unless the template told us charges exist (checked by the caller).
+	charges := item.SpellCharges[spellIdx]
+	if charges <= 0 {
+		return false
+	}
+
+	charges--
+	item.SpellCharges[spellIdx] = charges
+	item.UpdateFields()
+
+	if charges == 0 {
+		gc.player.Inventory.RemoveItem(item.SlotIndex)
+		gc.player.UpdateInventoryFields()
+		gc.sendDestroyObject(item.GUID())
+		return true
+	}
+
+	return false
+}
+
+// HandleUseItem handles CMSG_USE_ITEM — right-click use of a consumable,
+// hearthstone, wand, etc. Mirrors AzerothCore WorldSession::HandleUseItemOpcode.
+//
+// Layout (3.3.5a):
+//
+//	u8 bag, u8 slot, u8 castCount, u32 spellId, packed itemGUID,
+//	u32 glyphIndex, u8 castFlags, SpellCastTargets[, cast flags tail]
+func (gc *WorldSession) HandleUseItem(data wow.PacketData) {
+	if gc.player == nil {
+		return
+	}
+
+	// ignore for remote control state (AC: m_mover != pUser)
+	// TODO: remote control / possession
+
+	reader := wow.NewPacketReader(data)
+
+	var bagIndex, slot, castCount uint8
+	if err := reader.Read(&bagIndex); err != nil {
+		return
+	}
+	if err := reader.Read(&slot); err != nil {
+		return
+	}
+	if err := reader.Read(&castCount); err != nil {
+		return
+	}
+
+	var spellID uint32
+	if err := reader.Read(&spellID); err != nil {
+		return
+	}
+
+	// The item GUID is a raw little-endian u64 (wowm `Guid item`); AC, TC and
+	// cmangos all stream it as a plain 8-byte value here, not a packed GUID.
+	var itemGUIDRaw uint64
+	if err := reader.Read(&itemGUIDRaw); err != nil {
+		return
+	}
+	itemGUID := wow.GUID(itemGUIDRaw)
+
+	var glyphIndex uint32
+	if err := reader.Read(&glyphIndex); err != nil {
+		return
+	}
+
+	var castFlags uint8
+	if err := reader.Read(&castFlags); err != nil {
+		return
+	}
+
+	gc.log.Debug().
+		Uint8("bag", bagIndex).
+		Uint8("slot", slot).
+		Uint8("castCount", castCount).
+		Uint32("spellId", spellID).
+		Uint32("glyphIndex", glyphIndex).
+		Msg("use item")
+
+	if glyphIndex >= maxGlyphSlotIndex {
+		gc.sendInventoryChangeFailure(nil, nil, player.EquipResultItemNotFound)
+		return
+	}
+
+	item := gc.resolveUseItemByPos(bagIndex, slot)
+	if item == nil {
+		gc.sendInventoryChangeFailure(nil, nil, player.EquipResultItemNotFound)
+		return
+	}
+
+	// Packet spell id must resolve (AC logs and drops unknown ids).
+	server, ok := gc.ws.(*Server)
+	if !ok || server.spellMgr == nil {
+		return
+	}
+
+	if server.spellMgr.GetSpellInfo(spellID) == nil {
+		gc.log.Warn().Uint32("spellId", spellID).Msg("unknown spell in CMSG_USE_ITEM")
+		return
+	}
+
+	// Item GUID must match the resolved item (AC rejects mismatches).
+	if itemGUID != item.GUID() {
+		gc.sendInventoryChangeFailure(item, nil, player.EquipResultItemNotFound)
+		return
+	}
+
+	tpl := gc.getItemTemplate(uint32(item.ItemEntry))
+	if tpl == nil {
+		gc.sendInventoryChangeFailure(item, nil, player.EquipResultItemNotFound)
+		return
+	}
+
+	// Equip-only InventoryTypes may only be used from an equipment slot.
+	if tpl.InventoryType != wow.InventoryTypeNonEquip &&
+		(item.SlotIndex < 0 || item.SlotIndex >= player.EquipmentSlotEnd) {
+		gc.sendInventoryChangeFailure(item, nil, player.EquipResultItemNotFound)
+		return
+	}
+
+	if result := player.CanUseItem(gc.player, item, tpl); result != player.EquipResultOK {
+		gc.sendInventoryChangeFailure(item, nil, result)
+		return
+	}
+
+	// Combat: every ON_USE spell must allow combat use.
+	if gc.player.InCombat && !canUseItemInCombat(server.spellMgr, tpl) {
+		gc.sendInventoryChangeFailure(item, nil, player.EquipResultNotInCombat)
+		return
+	}
+
+	// Soulbind on use / pickup / quest items.
+	switch wow.ItemBonding(tpl.Bonding) {
+	case wow.BondingOnUse, wow.BondingOnPickup, wow.BondingOnQuest:
+		if !item.IsSoulBound() {
+			item.SetBinding(true)
+		}
+	}
+
+	// SpellCastTargets + optional cast-flags tail.
+	targets, err := readSpellCastTargets(reader, func(guid wow.GUID) Unit {
+		return gc.resolveCombatUnit(guid)
+	})
+	if err != nil || targets == nil {
+		targets = &SpellCastTargets{TargetMask: TargetFlagNone}
+	}
+
+	_ = readClientCastFlags(reader, castFlags)
+
+	// Prefer an explicit unit target from the packet; otherwise self for
+	// self-cast item spells.
+	var goTarget CombatUnit
+	if targets.UnitTarget != nil {
+		goTarget, _ = targets.UnitTarget.(CombatUnit)
+	} else {
+		targets.UnitTarget = gc.player
+	}
+
+	castCount32 := uint32(castCount)
+
+	// AC CastItemUseSpell: the learn wrappers (483 / 55884) live in block 0;
+	// otherwise the client names the block it clicked (castCount).
+	block := useSpellBlock(tpl, castCount)
+	if block < 0 {
+		return
+	}
+
+	sp := &tpl.Spells[block]
+	spellIDUse := uint32(sp.SpellID)
+
+	spellInfo := server.spellMgr.GetSpellInfo(spellIDUse)
+	if spellInfo == nil {
+		gc.log.Warn().
+			Uint32("entry", item.ItemEntry).
+			Int32("spellId", sp.SpellID).
+			Msg("item has unknown on-use spell")
+		return
+	}
+
+	if IsSpellOnCooldown(gc.player, spellIDUse) {
+		gc.sendCastFailed(spellIDUse, SpellCastFailedSpellOnCooldown)
+		return
+	}
+
+	spell := NewSpell(gc.player, spellInfo, TriggeredNone)
+	if spell == nil {
+		return
+	}
+	spell.CastItem = item
+
+	result := spell.Prepare(targets)
+	if result != SpellCastSuccess {
+		gc.sendCastFailed(spellIDUse, result)
+		return
+	}
+
+	gc.beginSpellCast(castCount32, item.GUID(), spell, goTarget)
+
+	// Track the charge slot that matches this ON_USE spell index.
+	removed := false
+	if sp.Charges > 0 {
+		if item.SpellCharges[block] <= 0 {
+			item.SpellCharges[block] = sp.Charges
+		}
+		if gc.consumeItemSpellCharge(item, block) {
+			removed = true
+		}
+	}
+
+	if !removed {
+		gc.sendInventoryUpdate()
+	}
+
+	gc.log.Info().
+		Uint32("entry", item.ItemEntry).
+		Str("name", tpl.Name).
+		Uint32("spellId", spellIDUse).
+		Msg("item used")
+}
+
+// useSpellBlock picks the item spell block a use maps to: the learn wrappers
+// (483 / 55884) always sit in block 0; otherwise the block the client named
+// (castCount), falling back to the first ON_USE block. Returns -1 when the
+// template has no usable on-use spell.
+func useSpellBlock(tpl *basedata.ItemTemplate, castCount uint8) int {
+	if tpl.Spells[0].SpellID == 483 || tpl.Spells[0].SpellID == 55884 {
+		return 0
+	}
+
+	if int(castCount) < len(tpl.Spells) {
+		sp := &tpl.Spells[castCount]
+		if sp.SpellID != 0 && sp.Trigger == 0 {
+			return int(castCount)
+		}
+	}
+
+	for i := range tpl.Spells {
+		if tpl.Spells[i].SpellID != 0 && tpl.Spells[i].Trigger == 0 {
+			return i
+		}
+	}
+
+	return -1
+}

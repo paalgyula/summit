@@ -23,6 +23,15 @@ const (
 	EquipResultTwoHandRequired EquipResult = 9
 	EquipResultCantDualWield   EquipResult = 10
 	EquipResultLocked          EquipResult = 11
+
+	// AzerothCore InventoryResult codes used by item-use validation
+	// (SMSG_INVENTORY_CHANGE_FAILURE). Values match AC Item.h InventoryResult.
+	EquipResultYouCanNeverUse EquipResult = 10
+	EquipResultNoRequiredProf EquipResult = 8
+	EquipResultItemNotFound   EquipResult = 23
+	EquipResultYouAreDead     EquipResult = 38
+	EquipResultCantDoRightNow EquipResult = 39
+	EquipResultNotInCombat    EquipResult = 60
 )
 
 // getValidEquipSlots returns the valid equipment slots for an item template.
@@ -183,6 +192,41 @@ func CanEquipItem(p *Player, item *Item, tpl *basedata.ItemTemplate, slot int) E
 			return EquipResultWrongSlot
 		}
 	}
+
+	return EquipResultOK
+}
+
+// CanUseItem checks whether the player may use an item with the given template
+// (AzerothCore Player::CanUseItem template overload): alive, class/race, level,
+// required skill/spell. slot is unused and kept for API symmetry with equip.
+func CanUseItem(p *Player, _ *Item, tpl *basedata.ItemTemplate) EquipResult {
+	if p == nil || tpl == nil {
+		return EquipResultItemNotFound
+	}
+
+	if !p.IsAlive() {
+		return EquipResultYouAreDead
+	}
+
+	if tpl.AllowableClass != -1 {
+		classBit := int32(1) << (p.Class - 1)
+		if tpl.AllowableClass&classBit == 0 {
+			return EquipResultYouCanNeverUse
+		}
+	}
+
+	if tpl.AllowableRace != -1 {
+		raceBit := int32(1) << (p.Race - 1)
+		if tpl.AllowableRace&raceBit == 0 {
+			return EquipResultYouCanNeverUse
+		}
+	}
+
+	if tpl.RequiredLevel > 0 && p.Level < uint8(tpl.RequiredLevel) {
+		return EquipResultCantEquipLevel
+	}
+
+	// Required skill/proficiency is not modelled yet; skip RequiredSkillRank.
 
 	return EquipResultOK
 }

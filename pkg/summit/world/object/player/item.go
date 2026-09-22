@@ -1,9 +1,20 @@
 package player
 
 import (
+	"sync/atomic"
+
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/wow"
 )
+
+// itemGUIDCounter hands out item GUIDs for the lifetime of the process. Item
+// GUIDs are not persisted; the client only needs them unique per session.
+var itemGUIDCounter uint32
+
+// NextItemGUID allocates a fresh item GUID.
+func NextItemGUID() wow.GUID {
+	return wow.NewGUID(wow.ItemGUID, atomic.AddUint32(&itemGUIDCounter, 1))
+}
 
 // Item represents a game item in a player's inventory.
 type Item struct {
@@ -54,6 +65,7 @@ type Item struct {
 func NewItem(entry uint32, owner wow.GUID) *Item {
 	obj := object.NewObject()
 	obj.SetObjectType(obj.ObjectType() | wow.TypeMaskItem)
+	obj.SetObjectTypeID(wow.TypeIDItem)
 
 	item := &Item{
 		Object:       obj,
@@ -124,9 +136,35 @@ func (i *Item) UpdateFields() {
 	}
 }
 
-// GUID returns the item's GUID (set externally via Object.guid).
+// GUID returns the item's GUID (0 until SetGUID / EnsureGUID).
 func (i *Item) GUID() wow.GUID {
 	return i.Object.GUID()
+}
+
+// SetGUID sets the item's GUID and the matching object fields.
+func (i *Item) SetGUID(guid wow.GUID) {
+	i.Object.SetGUID(guid)
+	i.Object.SetUInt32Value(object.ObjectFieldGuid, uint32(guid))
+	i.Object.SetUInt32Value(object.ObjectFieldGuid+1, uint32(uint64(guid)>>32))
+}
+
+// EnsureGUID allocates a GUID for an item that has none yet (items loaded
+// from the store or created by InitInventory).
+func (i *Item) EnsureGUID() {
+	if i.Object.GUID() == 0 {
+		i.SetGUID(NextItemGUID())
+	}
+}
+
+// SetOwner makes the player own and contain the item (ITEM_FIELD_OWNER /
+// ITEM_FIELD_CONTAINED); items in the backpack are contained by the player.
+func (i *Item) SetOwner(owner wow.GUID) {
+	i.Owner = owner
+	i.Contained = owner
+	i.Object.SetUInt32Value(object.ItemFieldOwner, uint32(owner))
+	i.Object.SetUInt32Value(object.ItemFieldOwner+1, uint32(uint64(owner)>>32))
+	i.Object.SetUInt32Value(object.ItemFieldContained, uint32(owner))
+	i.Object.SetUInt32Value(object.ItemFieldContained+1, uint32(uint64(owner)>>32))
 }
 
 // GetEnchant returns the enchantment ID for the given enchant slot.
@@ -150,6 +188,24 @@ func (i *Item) SetEnchant(slot int, enchantID uint32) {
 // IsStackable returns true if the item can stack with others.
 func (i *Item) IsStackable() bool {
 	return i.StackCount > 1
+}
+
+// ItemFieldFlagSoulbound is ITEM_FIELD_FLAG_SOULBOUND in ITEM_FIELD_FLAGS.
+const ItemFieldFlagSoulbound uint32 = 0x00000001
+
+// IsSoulBound reports whether the item has the soulbound flag set.
+func (i *Item) IsSoulBound() bool {
+	return i.ItemFlags&ItemFieldFlagSoulbound != 0
+}
+
+// SetBinding sets or clears the soulbound flag and refreshes update fields.
+func (i *Item) SetBinding(bound bool) {
+	if bound {
+		i.ItemFlags |= ItemFieldFlagSoulbound
+	} else {
+		i.ItemFlags &^= ItemFieldFlagSoulbound
+	}
+	i.UpdateFields()
 }
 
 // HasEnchant returns true if any enchantment slot is non-zero.
