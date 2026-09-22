@@ -13,6 +13,7 @@ import (
 	reflect "reflect"
 
 	store "github.com/paalgyula/summit/pkg/store"
+	basedata "github.com/paalgyula/summit/pkg/summit/world/basedata"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -158,6 +159,21 @@ func (m *MockWorldRepo) GetCreatureTemplates() (map[uint32]*store.CreatureTempla
 func (mr *MockWorldRepoMockRecorder) GetCreatureTemplates() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureTemplates", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureTemplates))
+}
+
+// GetItemTemplates mocks base method.
+func (m *MockWorldRepo) GetItemTemplates() (map[uint32]*basedata.ItemTemplate, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetItemTemplates")
+	ret0, _ := ret[0].(map[uint32]*basedata.ItemTemplate)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetItemTemplates indicates an expected call of GetItemTemplates.
+func (mr *MockWorldRepoMockRecorder) GetItemTemplates() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetItemTemplates", reflect.TypeOf((*MockWorldRepo)(nil).GetItemTemplates))
 }
 
 // GetPlayerCreateActions mocks base method.

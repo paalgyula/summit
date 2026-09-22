@@ -1,6 +1,9 @@
 package store
 
-import "github.com/paalgyula/summit/pkg/summit/world/object/player"
+import (
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+)
 
 // AccountRepo is the interface for account persistence.
 type AccountRepo interface {
@@ -38,6 +41,17 @@ type WorldRepo interface {
 	// Creature spawns
 	GetCreatureSpawns(mapID uint32) ([]*CreatureSpawn, error)
 	GetCreatureSpawn(spawnID uint64) (*CreatureSpawn, error)
+
+	// Creature addons (per-spawn visual/movement overrides)
+	GetCreatureAddon(creatureGUID uint32) (*CreatureAddon, error)
+	GetAllCreatureAddons() (map[uint32]*CreatureAddon, error)
+
+	// Waypoint paths
+	GetWaypointPath(pathID uint32) (*WaypointPath, error)
+	GetAllWaypointPaths() (map[uint32]*WaypointPath, error)
+
+	// Item templates (item_template), keyed by entry
+	GetItemTemplates() (map[uint32]*basedata.ItemTemplate, error)
 
 	// Quest templates
 	GetQuestTemplate(id uint32) (*QuestTemplate, error)
@@ -151,12 +165,54 @@ type QuestTemplate struct {
 	ObjectiveText      [4]string
 
 	PrevQuestId          int32
-	NextQuestId          uint32
+	NextQuestId          int32
 	ExclusiveGroup       int32
 	BreadcrumbForQuestId uint32
 	RequiredSkillId      uint16
 	RequiredSkillPoints  uint16
 }
+
+// Waypoint is a single waypoint along a creature's path.
+type Waypoint struct {
+	Point            uint32
+	X, Y, Z         float32
+	Orientation      float32
+	Delay            uint32    // wait time at this waypoint (ms)
+	MoveType         uint8     // 0 = walk, 1 = run
+	Action           int32     // scripted action ID
+	ActionChance     int32     // chance for action (0-100)
+	Velocity         float32   // custom speed for this segment (0 = use default)
+	SmoothTransition bool      // enable catmull-rom spline interpolation
+	SplinePoints     []Vector3 // extra intermediate spline points
+}
+
+// Vector3 represents a 3D point for spline interpolation.
+type Vector3 struct {
+	X, Y, Z float32
+}
+
+// WaypointPath represents an ordered list of waypoints for a creature path.
+type WaypointPath struct {
+	PathID uint32
+	Points []Waypoint
+}
+
+// CreatureAddon holds per-spawn visual and movement overrides from creature_addon.
+type CreatureAddon struct {
+	Creature               uint32 // spawn GUID
+	PathID                 uint32 // references WaypointPath.PathID
+	Mount                  uint32
+	Bytes1                 uint32
+	Emote                  uint32
+	VisibilityDistanceType uint32
+}
+
+// Movement type constants matching AzerothCore's MovementGeneratorType.
+const (
+	MotionTypeIdle     uint8 = 0
+	MotionTypeRandom   uint8 = 1
+	MotionTypeWaypoint uint8 = 2
+)
 
 //go:generate mockgen -destination=mock_store/mock_account_repo.go -package=mock_store . AccountRepo
 //go:generate mockgen -destination=mock_store/mock_character_repo.go -package=mock_store . CharacterRepo

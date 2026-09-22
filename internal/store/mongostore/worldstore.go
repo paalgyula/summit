@@ -3,6 +3,8 @@ package mongostore
 import (
 	"context"
 	"fmt"
+	"github.com/paalgyula/summit/pkg/summit/world/basedata"
+	"github.com/paalgyula/summit/pkg/wow"
 	"time"
 
 	"github.com/paalgyula/summit/pkg/store"
@@ -18,9 +20,12 @@ type WorldStore struct {
 	db                  *mongo.Database
 	creatureTemplates   *mongo.Collection
 	creatureSpawns      *mongo.Collection
+	creatureAddons      *mongo.Collection
+	waypointData        *mongo.Collection
 	questTemplates      *mongo.Collection
 	creatureQuestRel    *mongo.Collection
 	creatureQuestInvRel *mongo.Collection
+	itemTemplates       *mongo.Collection
 }
 
 // NewWorldStore creates a new WorldStore using the given database.
@@ -29,10 +34,129 @@ func NewWorldStore(db *mongo.Database) *WorldStore {
 		db:                  db,
 		creatureTemplates:   db.Collection("creature_template"),
 		creatureSpawns:      db.Collection("creature"),
+		creatureAddons:      db.Collection("creature_addon"),
+		waypointData:        db.Collection("waypoint_data"),
 		questTemplates:      db.Collection("quest_template"),
 		creatureQuestRel:    db.Collection("creature_queststarter"),
 		creatureQuestInvRel: db.Collection("creature_questender"),
+		itemTemplates:       db.Collection("item_template"),
 	}
+}
+
+// GetItemTemplates retrieves every item template, keyed by entry.
+func (w *WorldStore) GetItemTemplates() (map[uint32]*basedata.ItemTemplate, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	cursor, err := w.itemTemplates.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, fmt.Errorf("GetItemTemplates: %w", err)
+	}
+
+	defer cursor.Close(ctx) //nolint:errcheck
+
+	result := make(map[uint32]*basedata.ItemTemplate)
+
+	for cursor.Next(ctx) {
+		var e model.ItemTemplateEntity
+		if err := cursor.Decode(&e); err != nil {
+			return nil, fmt.Errorf("GetItemTemplates decode: %w", err)
+		}
+
+		result[e.Entry] = itemEntityToTemplate(e)
+	}
+
+	return result, cursor.Err()
+}
+
+// itemEntityToTemplate converts an item_template document to the server template.
+func itemEntityToTemplate(e model.ItemTemplateEntity) *basedata.ItemTemplate {
+	t := &basedata.ItemTemplate{
+		Entry:              e.Entry,
+		Class:              e.Class,
+		SubClass:           e.SubClass,
+		DisplayID:          e.DisplayID,
+		Name:               e.Name,
+		Quality:            e.Quality,
+		InventoryType:      wow.InventoryType(e.InventoryType),
+		AllowableClass:     e.AllowableClass,
+		AllowableRace:      e.AllowableRace,
+		RequiredLevel:      e.RequiredLevel,
+		RequiredSkill:      e.RequiredSkill,
+		RequiredSkillRank:  e.RequiredSkillRank,
+		RequiredHonorRank:  e.RequiredHonorRank,
+		RequiredCityRank:   e.RequiredCityRank,
+		RequiredRepFaction: e.RequiredRepFaction,
+		RequiredRepRank:    e.RequiredRepRank,
+		ItemLevel:          e.ItemLevel,
+		StatsCount:         e.StatsCount,
+		Armor:              e.Armor,
+		HolyRes:            e.HolyRes,
+		FireRes:            e.FireRes,
+		NatureRes:          e.NatureRes,
+		FrostRes:           e.FrostRes,
+		ShadowRes:          e.ShadowRes,
+		ArcaneRes:          e.ArcaneRes,
+		Delay:              e.Delay,
+		AmmoType:           e.AmmoType,
+		RangedModRange:     e.RangedModRange,
+		SocketBonus:        e.SocketBonus,
+		BuyPrice:           int32(e.BuyPrice),
+		SellPrice:          e.SellPrice,
+		BuyCount:           e.BuyCount,
+		MaxDurability:      e.MaxDurability,
+		MaxCount:           e.MaxCount,
+		Stackable:          e.Stackable,
+		ContainerSlots:     e.ContainerSlots,
+		Flags:              e.Flags,
+		Bonding:            e.Bonding,
+		SheatheType:        e.Sheath,
+		Material:           e.Material,
+		BagFamily:          e.BagFamily,
+		Block:              uint32(e.Block),
+		ItemSet:            e.ItemSet,
+		LockID:             e.LockID,
+		RandomProperty:     e.RandomProperty,
+		RandomSuffix:       e.RandomSuffix,
+		PageText:           e.PageText,
+		LanguageID:         e.LanguageID,
+		PageMaterial:       e.PageMaterial,
+		StartQuest:         e.StartQuest,
+		DisenchantID:       e.DisenchantID,
+		FoodType:           e.FoodType,
+		Duration:           e.Duration,
+		MinMoneyLoot:       e.MinMoneyLoot,
+		MaxMoneyLoot:       e.MaxMoneyLoot,
+	}
+
+	for i, st := range e.Stats {
+		if i < len(t.Stats) {
+			t.Stats[i] = basedata.ItemStat{Type: st.Type, Value: st.Value}
+		}
+	}
+
+	for i, d := range e.Damage {
+		if i < len(t.Damage) {
+			t.Damage[i] = basedata.ItemDamage{Type: d.Type, Min: d.Min, Max: d.Max}
+		}
+	}
+
+	for i, sp := range e.Spells {
+		if i < len(t.Spells) {
+			t.Spells[i] = basedata.ItemSpell{
+				SpellID: sp.SpellID, Trigger: sp.Trigger, Charges: sp.Charges, PPMRate: sp.PPMRate,
+				Cooldown: sp.Cooldown, Category: sp.Category, CategoryCooldown: sp.CategoryCooldown,
+			}
+		}
+	}
+
+	for i, so := range e.Sockets {
+		if i < len(t.Sockets) {
+			t.Sockets[i] = basedata.ItemSocket{Color: so.Color, Content: so.Content}
+		}
+	}
+
+	return t
 }
 
 // GetCreatureTemplate retrieves a creature template by entry.
@@ -385,6 +509,133 @@ func questEntityToTemplate(e model.QuestTemplateEntity) *store.QuestTemplate {
 	}
 }
 
+// GetCreatureAddon retrieves the creature_addon entry for a given spawn GUID.
+func (w *WorldStore) GetCreatureAddon(creatureGUID uint32) (*store.CreatureAddon, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var e model.CreatureAddonEntity
+	err := w.creatureAddons.FindOne(ctx, bson.M{"creature": creatureGUID}).Decode(&e)
+	if err != nil {
+		if err.Error() == "mongo: no documents in result" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("GetCreatureAddon: %w", err)
+	}
+
+	return &store.CreatureAddon{
+		Creature:               e.Creature,
+		PathID:                 e.PathID,
+		Mount:                  e.Mount,
+		Bytes1:                 e.Bytes1,
+		Emote:                  e.Emote,
+		VisibilityDistanceType: e.VisibilityDistanceType,
+	}, nil
+}
+
+// GetAllCreatureAddons retrieves all creature_addon entries, keyed by creature GUID.
+func (w *WorldStore) GetAllCreatureAddons() (map[uint32]*store.CreatureAddon, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cursor, err := w.creatureAddons.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, fmt.Errorf("GetAllCreatureAddons: %w", err)
+	}
+	defer cursor.Close(ctx) //nolint:errcheck
+
+	result := make(map[uint32]*store.CreatureAddon)
+	for cursor.Next(ctx) {
+		var e model.CreatureAddonEntity
+		if err := cursor.Decode(&e); err != nil {
+			return nil, fmt.Errorf("GetAllCreatureAddons decode: %w", err)
+		}
+		result[e.Creature] = &store.CreatureAddon{
+			Creature:               e.Creature,
+			PathID:                 e.PathID,
+			Mount:                  e.Mount,
+			Bytes1:                 e.Bytes1,
+			Emote:                  e.Emote,
+			VisibilityDistanceType: e.VisibilityDistanceType,
+		}
+	}
+	return result, cursor.Err()
+}
+
+// GetWaypointPath retrieves a single waypoint path by its ID.
+func (w *WorldStore) GetWaypointPath(pathID uint32) (*store.WaypointPath, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var e model.WaypointDataEntity
+	err := w.waypointData.FindOne(ctx, bson.M{"_id": pathID}).Decode(&e)
+	if err != nil {
+		if err.Error() == "mongo: no documents in result" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("GetWaypointPath: %w", err)
+	}
+
+	return waypointEntityToPath(e), nil
+}
+
+// GetAllWaypointPaths retrieves all waypoint paths, keyed by path_id.
+func (w *WorldStore) GetAllWaypointPaths() (map[uint32]*store.WaypointPath, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cursor, err := w.waypointData.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, fmt.Errorf("GetAllWaypointPaths: %w", err)
+	}
+	defer cursor.Close(ctx) //nolint:errcheck
+
+	result := make(map[uint32]*store.WaypointPath)
+	for cursor.Next(ctx) {
+		var e model.WaypointDataEntity
+		if err := cursor.Decode(&e); err != nil {
+			return nil, fmt.Errorf("GetAllWaypointPaths decode: %w", err)
+		}
+		path := waypointEntityToPath(e)
+		result[path.PathID] = path
+	}
+	return result, cursor.Err()
+}
+
+func waypointEntityToPath(e model.WaypointDataEntity) *store.WaypointPath {
+	points := make([]store.Waypoint, len(e.Points))
+	for i, p := range e.Points {
+		wp := store.Waypoint{
+			Point:            p.Point,
+			X:                p.PositionX,
+			Y:                p.PositionY,
+			Z:                p.PositionZ,
+			Orientation:      p.Orientation,
+			Delay:            p.Delay,
+			MoveType:         p.MoveType,
+			Action:           p.Action,
+			ActionChance:     p.ActionChance,
+			Velocity:         p.Velocity,
+			SmoothTransition: p.SmoothTransition,
+		}
+
+		// Convert spline points
+		if len(p.SplinePoints) > 0 {
+			wp.SplinePoints = make([]store.Vector3, len(p.SplinePoints))
+			for j, sp := range p.SplinePoints {
+				wp.SplinePoints[j] = store.Vector3{
+					X: sp.PositionX,
+					Y: sp.PositionY,
+					Z: sp.PositionZ,
+				}
+			}
+		}
+
+		points[i] = wp
+	}
+	return &store.WaypointPath{PathID: e.PathID, Points: points}
+}
+
 // Compile-time interface check.
 var _ store.WorldRepo = (*WorldStore)(nil)
 
@@ -460,6 +711,3 @@ func (w *WorldStore) GetPlayerCreateActions(race, class uint8) ([]store.PlayerCr
 
 	return actions, nil
 }
-
-// Compile-time interface check.
-var _ store.WorldRepo = (*WorldStore)(nil)
