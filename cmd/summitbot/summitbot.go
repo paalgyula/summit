@@ -21,15 +21,17 @@ const (
 )
 
 var (
-	account     string
-	password    string
-	logonServer string
-	worldServer string
-	character   string
-	timeout     int
-	spellIDs    []uint32
-	autoCast    bool
-	leash       float64
+	account      string
+	password     string
+	logonServer  string
+	worldServer  string
+	character    string
+	timeout      int
+	spellIDs     []uint32
+	autoCast     bool
+	leash        float64
+	levelOffset  int
+	attackElites bool
 )
 
 func main() {
@@ -42,6 +44,8 @@ func main() {
 	flag.IntVar(&timeout, "timeout", 15, "how long the bot stays in the world, in seconds")
 	flag.BoolVar(&autoCast, "cast", true, "auto-cast known spells when no -spell is given")
 	flag.Float64Var(&leash, "leash", 80, "max distance from spawn the bot chases")
+	flag.IntVar(&levelOffset, "level-offset", 2, "ignore creatures more than this many levels above the bot")
+	flag.BoolVar(&attackElites, "attack-elites", false, "also attack elite/rare creatures")
 
 	flag.Func("spell", "spell id to cast at targets (repeatable)", func(s string) error {
 		id, err := strconv.ParseUint(s, 10, 32)
@@ -152,6 +156,8 @@ func main() {
 	cfg.Spells = spellIDs
 	cfg.AutoCast = autoCast
 	cfg.LeashRadius = float32(leash)
+	cfg.LevelMaxOffset = levelOffset
+	cfg.SkipElite = !attackElites
 
 	ai := bot.New(wc, cfg)
 

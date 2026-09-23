@@ -34,59 +34,53 @@ func (gc *WorldSession) HandleLoot(data wow.PacketData) {
 		Uint64("target", targetGUID).
 		Msg("CMSG_LOOT")
 
+	server, ok := gc.ws.(*Server)
+	if !ok || server.lootMgr == nil {
+		gc.sendLootError(guid, loot.ErrorDidntKill)
+		return
+	}
+
 	// Determine what we're looting
 	var lt loot.LootType
-	var lootID uint32
+
+	l := loot.NewLoot()
 
 	switch guid.High() {
 	case wow.UnitGUID:
-		// Creature corpse loot — check lootable flag and look up loot ID
+		// Creature corpse loot — check the lootable flag and roll the creature's
+		// lootid from the loot manager.
 		// Source: AzerothCore Player.cpp:8248-8255 (SendLoot checks DYNFLAG_LOOTABLE)
 		npc := gc.getNPCByGUID(guid)
-		if npc == nil {
-			gc.sendLootError(guid, loot.ErrorDidntKill)
-			return
-		}
-
-		// Must have the lootable flag set (creature was killed and not yet looted)
-		if npc.DynamicFlags&UnitDynFlagLootable == 0 {
+		if npc == nil || npc.DynamicFlags&UnitDynFlagLootable == 0 {
 			gc.sendLootError(guid, loot.ErrorDidntKill)
 			return
 		}
 
 		lt = loot.LootCorpse
-		lootID = 0 // TODO: look up creature's lootId from creature_template
+
+		if !server.lootMgr.FillLoot(l, loot.StoreCreature, npc.LootID, loot.LootModeDefault) {
+			gc.log.Warn().Uint32("entry", npc.EntryID).Uint32("lootId", npc.LootID).
+				Msg("creature has no loot template")
+			gc.sendLootError(guid, loot.ErrorDidntKill)
+
+			return
+		}
+
+		l.GenerateMoneyLoot(npc.MinGold, npc.MaxGold)
 	case wow.GameObjectGUID:
 		lt = loot.LootCorpse
-		lootID = gc.getGameObjectLootID(guid)
+
+		lootID := gc.getGameObjectLootID(guid)
+		if lootID == 0 || !server.lootMgr.FillLoot(l, loot.StoreGameObject, lootID, loot.LootModeDefault) {
+			gc.sendLootError(guid, loot.ErrorDidntKill)
+
+			return
+		}
 	default:
 		gc.sendLootError(guid, loot.ErrorPlayerNotFound)
+
 		return
 	}
-
-	if lootID == 0 {
-		gc.sendLootError(guid, loot.ErrorDidntKill)
-		return
-	}
-
-	// Build loot from template
-	l := loot.NewLoot()
-
-	bd := basedata.GetInstance()
-	if bd == nil {
-		gc.sendLootError(guid, loot.ErrorDidntKill)
-		return
-	}
-
-	var refStore *loot.LootStore
-	if len(bd.ReferenceLootEntries) > 0 {
-		refStore = loot.NewLootStore("reference")
-		for _, e := range bd.ReferenceLootEntries {
-			refStore.AddEntry(*e)
-		}
-	}
-
-	_ = l.FillLoot(lootID, gc.getLootStore(lt), loot.LootModeDefault, refStore)
 
 	// Store loot on the player
 	gc.player.LootGUID = targetGUID
@@ -332,34 +326,6 @@ func (gc *WorldSession) getGameObjectLootID(guid wow.GUID) uint32 {
 	}
 
 	return tpl.GetLootID()
-}
-
-// getLootStore returns the appropriate LootStore for the given loot type.
-func (gc *WorldSession) getLootStore(lt loot.LootType) *loot.LootStore {
-	bd := basedata.GetInstance()
-	if bd == nil {
-		return loot.NewLootStore("empty")
-	}
-
-	store := loot.NewLootStore("runtime")
-
-	switch lt {
-	case loot.LootCorpse:
-		// Load creature loot entries into the store
-		for _, entries := range bd.CreatureLoots {
-			for _, e := range entries {
-				store.AddEntry(e)
-			}
-		}
-		// Also load gameobject loot (for GO loot)
-		for _, entries := range bd.GameObjectLoots {
-			for _, e := range entries {
-				store.AddEntry(e)
-			}
-		}
-	}
-
-	return store
 }
 
 // clearLootableFlag clears UNIT_DYNFLAG_LOOTABLE on a creature corpse.

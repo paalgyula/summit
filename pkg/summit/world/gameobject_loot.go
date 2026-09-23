@@ -1,17 +1,16 @@
 package world
 
 import (
-	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
 )
 
 // FillLoot generates the game object's loot from its template loot id, if it
-// has not been generated yet. Uses the game object loot store plus the
-// reference_loot_template store for `-ref` entries.
-func (g *GameObject) FillLoot(bd *basedata.Store) {
-	if g.Loot != nil || g.Template == nil || bd == nil {
+// has not been generated yet. Uses the loot manager's game object table plus
+// the reference_loot_template table for `-ref` entries.
+func (g *GameObject) FillLoot(mgr *loot.Manager) {
+	if g.Loot != nil || g.Template == nil || mgr == nil {
 		return
 	}
 
@@ -20,24 +19,11 @@ func (g *GameObject) FillLoot(bd *basedata.Store) {
 		return
 	}
 
-	store := loot.NewLootStore("gameobject")
-	for _, e := range bd.LookupGameObjectLoot(lootID) {
-		store.AddEntry(e)
-	}
-
-	var refStore *loot.LootStore
-
-	if len(bd.ReferenceLoots) > 0 {
-		refStore = loot.NewLootStore("reference")
-		for _, entries := range bd.ReferenceLoots {
-			for _, e := range entries {
-				refStore.AddEntry(e)
-			}
-		}
-	}
-
 	l := loot.NewLoot()
-	_ = l.FillLoot(lootID, store, loot.LootModeDefault, refStore)
+	if !mgr.FillLoot(l, loot.StoreGameObject, lootID, loot.LootModeDefault) {
+		return
+	}
+
 	l.GenerateMoneyLoot(g.Template.MinGold, g.Template.MaxGold)
 
 	g.Loot = l
@@ -66,12 +52,12 @@ func (gc *WorldSession) openGameObjectLoot(g *GameObject) {
 		return
 	}
 
-	bd := basedata.GetInstance()
-	if bd == nil {
+	server, ok := gc.ws.(*Server)
+	if !ok || server.lootMgr == nil {
 		return
 	}
 
-	g.FillLoot(bd)
+	g.FillLoot(server.lootMgr)
 
 	if g.Loot == nil {
 		g.Loot = loot.NewLoot()

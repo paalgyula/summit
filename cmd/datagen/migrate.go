@@ -35,6 +35,10 @@ It imports:
   - quest_template → world.questTemplate
   - player_levelstats → world.playerLevelStats
   - player_classlevelstats → world.playerClassLevelStats
+  - creature_loot_template → world.creatureLootTemplate
+  - gameobject_loot_template → world.gameobjectLootTemplate
+  - item_loot_template → world.itemLootTemplate
+  - reference_loot_template → world.referenceLootTemplate
 
 Existing documents in the target collections are replaced.`,
 	RunE: runMigrate,
@@ -115,7 +119,8 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 			"playercreateinfo_spell", "item_template", "creature_template",
 			"creature", "quest_template", "player_levelstats", "player_classlevelstats",
 			"creature_queststarter", "creature_questender",
-			"gameobjectTemplate", "gameobject", "gameobjectLootTemplate",
+			"gameobjectTemplate", "gameobject",
+			"creatureLootTemplate", "gameobjectLootTemplate", "itemLootTemplate", "referenceLootTemplate",
 			"creature_addon", "waypoint_data",
 		}
 
@@ -129,30 +134,35 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Import tables
+	// Import tables. `name` is the MySQL table (also the --tables filter key);
+	// `collection` is the target MongoDB collection (defaults to `name`).
 	type importJob struct {
-		name    string
-		importF func(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Collection) error
+		name       string
+		collection string
+		importF    func(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Collection) error
 	}
 
 	jobs := []importJob{
-		{"playercreateinfo", importPlayerCreateInfo},
-		{"playercreateinfo_item", importPlayerCreateInfoItem},
-		{"playercreateinfo_action", importPlayerCreateInfoAction},
-		{"playercreateinfo_spell", importPlayerCreateInfoSpell},
-		{"item_template", importItemTemplate},
-		{"creature_template", importCreatureTemplate},
-		{"creature", importCreature},
-		{"creature_addon", importCreatureAddon},
-		{"waypoint_data", importWaypointData},
-		{"quest_template", importQuestTemplate},
-		{"creature_queststarter", importCreatureQuestStarter},
-		{"creature_questender", importCreatureQuestEnder},
-		{"player_levelstats", importPlayerLevelStats},
-		{"player_classlevelstats", importPlayerClassLevelStats},
-		{"gameobject_template", importGameObjectTemplate},
-		{"gameobject", importGameObjectSpawn},
-		{"gameobject_loot_template", importGameObjectLootTemplate},
+		{name: "playercreateinfo", importF: importPlayerCreateInfo},
+		{name: "playercreateinfo_item", importF: importPlayerCreateInfoItem},
+		{name: "playercreateinfo_action", importF: importPlayerCreateInfoAction},
+		{name: "playercreateinfo_spell", importF: importPlayerCreateInfoSpell},
+		{name: "item_template", importF: importItemTemplate},
+		{name: "creature_template", importF: importCreatureTemplate},
+		{name: "creature", importF: importCreature},
+		{name: "creature_addon", importF: importCreatureAddon},
+		{name: "waypoint_data", importF: importWaypointData},
+		{name: "quest_template", importF: importQuestTemplate},
+		{name: "creature_queststarter", importF: importCreatureQuestStarter},
+		{name: "creature_questender", importF: importCreatureQuestEnder},
+		{name: "player_levelstats", importF: importPlayerLevelStats},
+		{name: "player_classlevelstats", importF: importPlayerClassLevelStats},
+		{name: "gameobject_template", importF: importGameObjectTemplate},
+		{name: "gameobject", importF: importGameObjectSpawn},
+		{name: "creature_loot_template", collection: "creatureLootTemplate", importF: importLootTemplateTable("creature_loot_template")},
+		{name: "gameobject_loot_template", collection: "gameobjectLootTemplate", importF: importLootTemplateTable("gameobject_loot_template")},
+		{name: "item_loot_template", collection: "itemLootTemplate", importF: importLootTemplateTable("item_loot_template")},
+		{name: "reference_loot_template", collection: "referenceLootTemplate", importF: importLootTemplateTable("reference_loot_template")},
 	}
 
 	total := len(jobs)
@@ -165,7 +175,13 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		log.Info().Msgf("[%d/%d] Importing %s...", i+1, total, job.name)
 
 		start := time.Now()
-		coll := db.Collection(job.name)
+
+		collection := job.collection
+		if collection == "" {
+			collection = job.name
+		}
+
+		coll := db.Collection(collection)
 
 		if err := job.importF(ctx, mysqlDB, coll); err != nil {
 			log.Error().Err(err).Str("table", job.name).Msg("Import failed")
@@ -1435,48 +1451,80 @@ func importGameObjectSpawn(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Col
 	return insertDocs(ctx, coll, docs)
 }
 
-func importGameObjectLootTemplate(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Collection) error {
-	rows, err := mysqlDB.QueryContext(ctx,
-		`SELECT entry, item, ChanceOrQuestChance, lootmode, groupid, mincountOrRef, maxcount
-		 FROM gameobject_loot_template`)
-	if err != nil {
-		return err
-	}
+// importLootTemplateTable returns an importer for a *_loot_template table. All
+// four tables share the AzerothCore schema:
+//
+//	entry, item, ChanceOrQuestChance, lootmode, groupid, mincountOrRef, maxcount
+//
+// A negative ChanceOrQuestChance marks a quest-only row (its absolute value is
+// the chance); a negative mincountOrRef is a reference into
+// reference_loot_template (its absolute value is the referenced loot id).
+func importLootTemplateTable(table string) func(context.Context, *sql.DB, *mongo.Collection) error {
+	return func(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Collection) error {
+		//nolint:gosec // table name comes from a fixed internal list
+		query := fmt.Sprintf(
+			"SELECT entry, item, ChanceOrQuestChance, lootmode, groupid, mincountOrRef, maxcount FROM %s", table)
 
-	defer rows.Close() //nolint:errcheck
-
-	var docs []interface{}
-
-	for rows.Next() {
-		var (
-			entry         uint32
-			item          uint32
-			chance        float32
-			lootMode      uint16
-			groupID       uint8
-			mincountOrRef int32
-			maxCount      uint8
-		)
-
-		if err := rows.Scan(
-			&entry, &item, &chance, &lootMode, &groupID, &mincountOrRef, &maxCount,
-		); err != nil {
+		rows, err := mysqlDB.QueryContext(ctx, query)
+		if err != nil {
 			return err
 		}
 
-		docs = append(docs, bson.M{
-			"_id":           fmt.Sprintf("%d_%d", entry, item),
-			"entry":         entry,
-			"item":          item,
-			"challenge":     chance,
-			"lootMode":      lootMode,
-			"groupId":       groupID,
-			"mincountOrRef": mincountOrRef,
-			"maxCount":      maxCount,
-		})
-	}
+		defer rows.Close() //nolint:errcheck
 
-	return insertDocs(ctx, coll, docs)
+		var docs []interface{}
+
+		for rows.Next() {
+			var (
+				entry         uint32
+				item          uint32
+				chance        float32
+				lootMode      uint16
+				groupID       uint8
+				mincountOrRef int32
+				maxCount      uint8
+			)
+
+			if err := rows.Scan(
+				&entry, &item, &chance, &lootMode, &groupID, &mincountOrRef, &maxCount,
+			); err != nil {
+				return err
+			}
+
+			needQuest := chance < 0
+			if needQuest {
+				chance = -chance
+			}
+
+			var reference int32
+
+			minCount := mincountOrRef
+			if mincountOrRef < 0 {
+				reference = mincountOrRef
+				minCount = 0
+			}
+
+			// minCount is stored as a u8; clamp defensively.
+			if minCount > 255 {
+				minCount = 255
+			}
+
+			docs = append(docs, bson.M{
+				"_id":           fmt.Sprintf("%d_%d", entry, item),
+				"entry":         entry,
+				"item":          item,
+				"reference":     reference,
+				"chance":        chance,
+				"questRequired": needQuest,
+				"lootMode":      lootMode,
+				"groupId":       groupID,
+				"minCount":      uint8(minCount),
+				"maxCount":      maxCount,
+			})
+		}
+
+		return upsertDocs(ctx, coll, docs)
+	}
 }
 
 // --- Helpers ---

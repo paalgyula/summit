@@ -16,7 +16,9 @@ const (
 	fieldEntry = 0x0003
 
 	unitFieldHealth          = objectEnd + 0x0012
+	unitFieldPower1          = objectEnd + 0x0013
 	unitFieldMaxHealth       = objectEnd + 0x001a
+	unitFieldMaxPower1       = objectEnd + 0x001b
 	unitFieldLevel           = objectEnd + 0x0030
 	unitFieldFactionTemplate = objectEnd + 0x0031
 	unitFieldFlags           = objectEnd + 0x0035
@@ -91,6 +93,10 @@ type Entity struct {
 	// entity. The server does not broadcast NPC health, so the bot infers a
 	// creature's death when this reaches MaxHealth.
 	DamageDealtBySelf uint32
+
+	// rank is the creature template rank (0 normal, 1 elite, 2 rare-elite,
+	// 3 world-boss, 4 rare), learned from SMSG_CREATURE_QUERY_RESPONSE.
+	rank uint32
 }
 
 func (e *Entity) field(idx int) uint32 {
@@ -106,6 +112,30 @@ func (e *Entity) Health() uint32 { return e.field(unitFieldHealth) }
 
 // MaxHealth returns UNIT_FIELD_MAXHEALTH.
 func (e *Entity) MaxHealth() uint32 { return e.field(unitFieldMaxHealth) }
+
+// Power returns UNIT_FIELD_POWER1 (the primary power pool).
+func (e *Entity) Power() uint32 { return e.field(unitFieldPower1) }
+
+// MaxPower returns UNIT_FIELD_MAXPOWER1.
+func (e *Entity) MaxPower() uint32 { return e.field(unitFieldMaxPower1) }
+
+// Rank returns the creature rank (0 normal, 1 elite, 2 rare-elite, 3 boss, 4 rare).
+func (e *Entity) Rank() uint32 { return e.rank }
+
+// IsElite reports whether the creature is an elite, rare-elite or boss.
+func (e *Entity) IsElite() bool {
+	return e.rank == 1 || e.rank == 2 || e.rank == 3
+}
+
+// HealthPct returns the current health fraction in [0,1].
+func (e *Entity) HealthPct() float32 {
+	max := e.MaxHealth()
+	if max == 0 {
+		return 1
+	}
+
+	return float32(e.Health()) / float32(max)
+}
 
 // Level returns UNIT_FIELD_LEVEL.
 func (e *Entity) Level() uint32 { return e.field(unitFieldLevel) }
@@ -434,6 +464,11 @@ func (wc *WorldClient) readCreateUpdate(r *wow.PacketReader) {
 
 	if e.Type == wow.TypeIDUnit {
 		entry = e.Entry()
+
+		if rank, ok := wc.creatureRanks[entry]; ok {
+			e.rank = rank
+		}
+
 		if entry != 0 && e.Name == "" {
 			if name, ok := wc.creatureNames[entry]; ok {
 				e.Name = name
@@ -536,11 +571,25 @@ func (wc *WorldClient) handleCreatureQueryResponse(msg *ServerMessage) {
 	_ = r.ReadString(&subName)
 	_ = r.ReadString(&icon)
 
+	var (
+		typeFlags uint32
+		ctype     uint32
+		family    uint32
+		rank      uint32
+	)
+	_ = r.Read(&typeFlags)
+	_ = r.Read(&ctype)
+	_ = r.Read(&family)
+	_ = r.Read(&rank)
+
 	wc.objectsMu.Lock()
 	wc.creatureNames[entry] = name
+	wc.creatureRanks[entry] = rank
+
 	for _, e := range wc.objects {
 		if e.Type == wow.TypeIDUnit && e.Entry() == entry {
 			e.Name = name
+			e.rank = rank
 		}
 	}
 	wc.objectsMu.Unlock()

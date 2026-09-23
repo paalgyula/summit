@@ -40,6 +40,10 @@ type NPC struct {
 	Scale float32
 	// Rank is the creature template rank (0=Normal, 1=Elite, 2=Rare Elite, 3=WorldBoss, 4=Rare).
 	Rank uint32
+	// LootID is creature_template.lootid; MinGold/MaxGold are its money range.
+	LootID  uint32
+	MinGold uint32
+	MaxGold uint32
 
 	// Combat state
 	FactionID uint32          // faction template ID (from creature_template)
@@ -177,6 +181,9 @@ func NewNPCFromSpawn(spawn *store.CreatureSpawn, tmpl *store.CreatureTemplate) *
 		SpawnTimeSecs:   spawn.SpawnTimeSecs,
 		Scale:           tmpl.Scale,
 		Rank:            tmpl.Rank,
+		LootID:          tmpl.LootID,
+		MinGold:         tmpl.MinGold,
+		MaxGold:         tmpl.MaxGold,
 		AggroRadius:     20.0, // default 20 yard aggro range
 		ChaseRadius:     50.0, // default 50 yard leash range
 		ThreatList:      make(map[uint64]float32),
