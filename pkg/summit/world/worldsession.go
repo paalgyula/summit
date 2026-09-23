@@ -488,7 +488,7 @@ func (gc *WorldSession) updatePeriodic(now time.Time) {
 		return
 	}
 
-	// Don't regen while dead/ghost
+	// Don't update while dead/ghost
 	if gc.player.IsGhost {
 		return
 	}
@@ -501,4 +501,8 @@ func (gc *WorldSession) updatePeriodic(now time.Time) {
 
 	// Process health/mana regen
 	gc.processRegen(now)
+
+	// Process rest bonus accumulation (inn/city resting)
+	// Source: AzerothCore PlayerUpdates.cpp:243-261
+	UpdateRestBonus(gc.player, now.Unix())
 }
