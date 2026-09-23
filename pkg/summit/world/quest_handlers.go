@@ -93,6 +93,11 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 
 	// Check if NPC is a quest giver or quest completer
 	if !qm.IsQuestGiver(npc.EntryID) && !qm.IsQuestCompleter(npc.EntryID) {
+		gc.log.Debug().
+			Uint32("entry", npc.EntryID).
+			Str("name", npc.Name).
+			Msg("NPC is not a quest giver or completer")
+
 		greeting := fmt.Sprintf("Greetings, %s. How can I help you?", gc.player.Name)
 		pkt := quest.BuildQuestGiverQuestList(wow.GUID(guid), greeting, nil)
 		gc.socket.Send(pkt)
@@ -106,6 +111,12 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 
 	// Get quests completable at this NPC
 	involvedQuests := qm.GetInvolvedQuestsForCreature(npc.EntryID)
+
+	gc.log.Debug().
+		Uint32("entry", npc.EntryID).
+		Int("involved_count", len(involvedQuests)).
+		Interface("quest_ids", involvedQuests).
+		Msg("quest completer NPC found")
 
 	// Collect all relevant quests
 	var questList []quest.QuestListItem

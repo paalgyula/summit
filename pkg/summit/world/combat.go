@@ -654,6 +654,20 @@ func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *Cal
 			if gain > 0 {
 				gc.GiveXP(gain, npc.GetGUID(), 1.0)
 			}
+
+			// Grant quest kill credit
+			// Source: AzerothCore KillRewarder.cpp (quest credit path)
+			qm := gc.getQuestManager()
+			if qm != nil {
+				playerQuests := gc.getPlayerQuests()
+				completedQuests := qm.OnCreatureKilled(playerQuests, npc.EntryID)
+				for _, questID := range completedQuests {
+					gc.log.Debug().
+						Uint32("quest", questID).
+						Uint32("creature", npc.EntryID).
+						Msg("quest completed via kill credit")
+				}
+			}
 		}
 	}
 
