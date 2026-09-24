@@ -144,10 +144,17 @@ func ConvertToGLTF(model *Model, skin *Skin, options ...Option) (*gltf.Document,
 	if meshName == "" {
 		meshName = "WoW_Model"
 	}
-	doc.Meshes = append(doc.Meshes, gltf.Mesh{
-		Name:       meshName,
-		Primitives: primitives,
-	})
+	// Models without any geometry (pure particle emitters) must not emit a
+	// mesh at all: a glTF mesh with a null/empty primitive list makes strict
+	// loaders (three.js GLTFLoader) throw while parsing.
+	var meshNode *int
+	if len(primitives) > 0 {
+		doc.Meshes = append(doc.Meshes, gltf.Mesh{
+			Name:       meshName,
+			Primitives: primitives,
+		})
+		meshNode = &meshIdx
+	}
 
 	// Add joint nodes for bones. M2 vertices are already in model space and
 	// bone pivots are absolute, so each node's translation is relative to its
@@ -221,12 +228,14 @@ func ConvertToGLTF(model *Model, skin *Skin, options ...Option) (*gltf.Document,
 	rootNodeIdx := len(doc.Nodes)
 	doc.Nodes = append(doc.Nodes, gltf.Node{
 		Name:     meshName + "_Root",
-		Mesh:     &meshIdx,
+		Mesh:     meshNode,
 		Skin:     skinIdx,
 		Children: rootBones,
 	})
 
 	doc.Scenes[0].Nodes = append(doc.Scenes[0].Nodes, rootNodeIdx)
+
+	addParticles(doc, model, jointNodeIndices, rootNodeIdx, opts)
 
 	if len(model.Bones) > 0 {
 		addAnimations(doc, model, jointNodeIndices, restTranslation, opts)
@@ -236,6 +245,151 @@ func ConvertToGLTF(model *Model, skin *Skin, options ...Option) (*gltf.Document,
 	addLights(doc, model, opts)
 
 	return doc, nil
+}
+
+// ParticleNodePrefix names the particle emitter nodes: Particle_<index>.
+const ParticleNodePrefix = "Particle_"
+
+// ParticleExtras describes one M2 particle emitter, carried by a node parented
+// to the emitter's bone. The client runs the simulation from these parameters.
+type ParticleExtras struct {
+	Kind            string     `json:"kind"` // always "particle"
+	Texture         string     `json:"texture,omitempty"`
+	BlendMode       uint8      `json:"blendMode"`
+	EmitterType     uint8      `json:"emitterType"`
+	Bone            uint16     `json:"bone"`
+	Flags           uint32     `json:"flags,omitempty"`
+	Rate            float32    `json:"rate"`
+	Life            float32    `json:"life"`
+	LifeVary        float32    `json:"lifeVary,omitempty"`
+	Speed           float32    `json:"speed"`
+	SpeedVary       float32    `json:"speedVary,omitempty"`
+	Gravity         float32    `json:"gravity"`
+	VerticalRange   float32    `json:"verticalRange"`
+	HorizontalRange float32    `json:"horizontalRange"`
+	AreaLength      float32    `json:"areaLength,omitempty"`
+	AreaWidth       float32    `json:"areaWidth,omitempty"`
+	ZSource         float32    `json:"zSource,omitempty"`
+	Drag            float32    `json:"drag,omitempty"`
+	BaseSpin        float32    `json:"baseSpin,omitempty"`
+	Spin            float32    `json:"spin,omitempty"`
+	ScaleVary       [2]float32 `json:"scaleVary,omitempty"`
+	// Colors / Alphas / Scales are keyed on normalised lifetime [0..1]:
+	// [t, r, g, b], [t, alpha] and [t, sizeX, sizeY].
+	Colors      [][4]float32 `json:"colors,omitempty"`
+	Alphas      [][2]float32 `json:"alphas,omitempty"`
+	Scales      [][3]float32 `json:"scales,omitempty"`
+	TextureRows uint16       `json:"textureRows,omitempty"`
+	TextureCols uint16       `json:"textureCols,omitempty"`
+}
+
+// addParticles emits one node per particle emitter, parented to the emitter's
+// bone (or the model root when the bone is missing), carrying the emitter
+// parameters as extras for the client to simulate.
+func addParticles(doc *gltf.Document, model *Model, jointNodes []int, rootNode int, opts ConvertOptions) {
+	if len(model.Particles) == 0 {
+		return
+	}
+	ext := sequenceExt(model, opts)
+
+	for i := range model.Particles {
+		p := &model.Particles[i]
+		e := ParticleExtras{
+			Kind:            "particle",
+			BlendMode:       p.Blending,
+			EmitterType:     p.EmitterType,
+			Bone:            p.Bone,
+			Flags:           p.Flags,
+			Rate:            firstFloat(model, p.EmissionRate, ext, 0),
+			Life:            firstFloat(model, p.Lifespan, ext, 1),
+			LifeVary:        p.LifespanVary,
+			Speed:           firstFloat(model, p.EmissionSpeed, ext, 0),
+			SpeedVary:       firstFloat(model, p.SpeedVariation, ext, 0),
+			Gravity:         firstFloat(model, p.Gravity, ext, 0),
+			VerticalRange:   firstFloat(model, p.VerticalRange, ext, 0),
+			HorizontalRange: firstFloat(model, p.HorizontalRange, ext, 0),
+			AreaLength:      firstFloat(model, p.AreaLength, ext, 0),
+			AreaWidth:       firstFloat(model, p.AreaWidth, ext, 0),
+			ZSource:         firstFloat(model, p.ZSource, ext, 0),
+			Drag:            p.Drag,
+			BaseSpin:        p.BaseSpin,
+			Spin:            p.Spin,
+			ScaleVary:       p.ScaleVary,
+			Colors:          partTrackColors(p.ColorTrack),
+			Alphas:          partTrackFloats(p.AlphaTrack),
+			Scales:          partTrackScales(p.ScaleTrack),
+			TextureRows:     p.TextureRows,
+			TextureCols:     p.TextureCols,
+		}
+		if int(p.Texture) < len(model.Textures) {
+			if t := model.Textures[p.Texture]; t.Type == TextureTypeFilename {
+				e.Texture = TextureAssetPath(t.Name)
+			}
+		}
+
+		pos := gltf.ConvertM2ToGLTPosition(p.Position[0], p.Position[1], p.Position[2])
+		parent := rootNode
+		if int(p.Bone) < len(model.Bones) && int(p.Bone) < len(jointNodes) {
+			parent = jointNodes[p.Bone]
+			bp := model.Bones[p.Bone].Pivot
+			pivot := gltf.ConvertM2ToGLTPosition(bp[0], bp[1], bp[2])
+			for k := 0; k < 3; k++ {
+				pos[k] -= pivot[k]
+			}
+		}
+
+		nodeIdx := len(doc.Nodes)
+		doc.Nodes = append(doc.Nodes, gltf.Node{
+			Name:        fmt.Sprintf("%s%d", ParticleNodePrefix, i),
+			Translation: &pos,
+			Extras:      e,
+		})
+		doc.Nodes[parent].Children = append(doc.Nodes[parent].Children, nodeIdx)
+	}
+}
+
+// partTime normalises a fixed16 part-track timestamp (0x7FFF = 1.0).
+func partTime(t int16) float32 {
+	v := float32(t) / 32767
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// partTrackFloats decodes a fixed16 part track into [t01, value] keys.
+func partTrackFloats(pt M2PartTrack) [][2]float32 {
+	n := min(len(pt.Times), len(pt.Values)/2)
+	out := make([][2]float32, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, [2]float32{partTime(pt.Times[i]), fixed16(pt.Values[i*2 : i*2+2])})
+	}
+	return out
+}
+
+// partTrackColors decodes a C3Vector part track into [t01, r, g, b] keys.
+func partTrackColors(pt M2PartTrack) [][4]float32 {
+	n := min(len(pt.Times), len(pt.Values)/12)
+	out := make([][4]float32, 0, n)
+	for i := 0; i < n; i++ {
+		v := pt.Values[i*12:]
+		out = append(out, [4]float32{partTime(pt.Times[i]), mathFloat32(v[0:4]), mathFloat32(v[4:8]), mathFloat32(v[8:12])})
+	}
+	return out
+}
+
+// partTrackScales decodes a C2Vector part track into [t01, sizeX, sizeY] keys.
+func partTrackScales(pt M2PartTrack) [][3]float32 {
+	n := min(len(pt.Times), len(pt.Values)/8)
+	out := make([][3]float32, 0, n)
+	for i := 0; i < n; i++ {
+		v := pt.Values[i*8:]
+		out = append(out, [3]float32{partTime(pt.Times[i]), mathFloat32(v[0:4]), mathFloat32(v[4:8])})
+	}
+	return out
 }
 
 // AttachmentExtras is attached to every attachment node.

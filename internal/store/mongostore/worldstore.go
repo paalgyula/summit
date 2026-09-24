@@ -26,6 +26,10 @@ type WorldStore struct {
 	creatureQuestRel    *mongo.Collection
 	creatureQuestInvRel *mongo.Collection
 	itemTemplates       *mongo.Collection
+	creatureLoot        *mongo.Collection
+	gameObjectLoot      *mongo.Collection
+	itemLoot            *mongo.Collection
+	referenceLoot       *mongo.Collection
 }
 
 // NewWorldStore creates a new WorldStore using the given database.
@@ -40,7 +44,71 @@ func NewWorldStore(db *mongo.Database) *WorldStore {
 		creatureQuestRel:    db.Collection("creature_queststarter"),
 		creatureQuestInvRel: db.Collection("creature_questender"),
 		itemTemplates:       db.Collection("item_template"),
+		creatureLoot:        db.Collection("creatureLootTemplate"),
+		gameObjectLoot:      db.Collection("gameobjectLootTemplate"),
+		itemLoot:            db.Collection("itemLootTemplate"),
+		referenceLoot:       db.Collection("referenceLootTemplate"),
 	}
+}
+
+// GetAllLootTemplates loads the creature/gameobject/item/reference loot
+// template tables, each keyed by loot entry.
+func (w *WorldStore) GetAllLootTemplates() (*store.LootTables, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	tables := &store.LootTables{
+		Creature:   make(map[uint32][]store.LootTemplate),
+		GameObject: make(map[uint32][]store.LootTemplate),
+		Item:       make(map[uint32][]store.LootTemplate),
+		Reference:  make(map[uint32][]store.LootTemplate),
+	}
+
+	load := func(coll *mongo.Collection, dst map[uint32][]store.LootTemplate) error {
+		cursor, err := coll.Find(ctx, bson.M{})
+		if err != nil {
+			return err
+		}
+
+		defer cursor.Close(ctx) //nolint:errcheck
+
+		for cursor.Next(ctx) {
+			var e model.LootTemplateEntity
+			if err := cursor.Decode(&e); err != nil {
+				return err
+			}
+
+			dst[e.Entry] = append(dst[e.Entry], store.LootTemplate{
+				Entry:         e.Entry,
+				Item:          e.Item,
+				Reference:     e.Reference,
+				Chance:        e.Chance,
+				QuestRequired: e.QuestRequired,
+				LootMode:      e.LootMode,
+				GroupID:       e.GroupID,
+				MinCount:      e.MinCount,
+				MaxCount:      e.MaxCount,
+			})
+		}
+
+		return cursor.Err()
+	}
+
+	for _, job := range []struct {
+		coll *mongo.Collection
+		dst  map[uint32][]store.LootTemplate
+	}{
+		{w.creatureLoot, tables.Creature},
+		{w.gameObjectLoot, tables.GameObject},
+		{w.itemLoot, tables.Item},
+		{w.referenceLoot, tables.Reference},
+	} {
+		if err := load(job.coll, job.dst); err != nil {
+			return nil, fmt.Errorf("GetAllLootTemplates: %w", err)
+		}
+	}
+
+	return tables, nil
 }
 
 // GetItemTemplates retrieves every item template, keyed by entry.
@@ -439,6 +507,9 @@ func creatureEntityToTemplate(e model.CreatureTemplateEntity) *store.CreatureTem
 		BaseAttackTime:   e.BaseAttackTime,
 		UnitClass:        e.UnitClass,
 		FlagsExtra:       e.FlagsExtra,
+		LootID:           e.LootID,
+		MinGold:          e.MinGold,
+		MaxGold:          e.MaxGold,
 	}
 }
 

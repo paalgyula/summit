@@ -27,6 +27,12 @@ type CreatureTemplateEntity struct {
 	BaseAttackTime uint32   `bson:"baseAttackTime"`
 	UnitClass      uint32   `bson:"unitClass"`
 	FlagsExtra     uint32   `bson:"flagsExtra"`
+
+	// LootID points at creature_loot_template (creature_template.lootid);
+	// MinGold/MaxGold are the money dropped (creature_template.mingold/maxgold).
+	LootID  uint32 `bson:"lootId"`
+	MinGold uint32 `bson:"minGold"`
+	MaxGold uint32 `bson:"maxGold"`
 }
 
 func (CreatureTemplateEntity) CollectionName() string { return "creatureTemplate" }
@@ -163,20 +169,24 @@ type GameObjectSpawnEntity struct {
 
 func (GameObjectSpawnEntity) CollectionName() string { return "gameobject" }
 
-// GameObjectLootTemplateEntity is the MongoDB document for the gameobjectLootTemplate collection.
-type GameObjectLootTemplateEntity struct {
+// LootTemplateEntity is the MongoDB document for one row of a *_loot_template
+// table. The same shape backs the creatureLootTemplate, gameobjectLootTemplate,
+// itemLootTemplate and referenceLootTemplate collections.
+//
+// Reference rows carry the negative mincountOrRef as Reference and the
+// referenced loot id in Item; quest-only rows have QuestRequired set and the
+// absolute drop chance in Chance.
+type LootTemplateEntity struct {
 	Entry         uint32  `bson:"entry"`
 	Item          uint32  `bson:"item"`
 	Reference     int32   `bson:"reference"`
-	Chance        float32 `bson:"challenge"`
-	QuestRequired int8    `bson:"questRequired"`
+	Chance        float32 `bson:"chance"`
+	QuestRequired bool    `bson:"questRequired"`
 	LootMode      uint16  `bson:"lootMode"`
 	GroupID       uint8   `bson:"groupId"`
 	MinCount      uint8   `bson:"minCount"`
 	MaxCount      uint8   `bson:"maxCount"`
 }
-
-func (GameObjectLootTemplateEntity) CollectionName() string { return "gameobjectLootTemplate" }
 
 // WaypointDataEntity is the MongoDB document for the waypoint_data collection.
 // Each document represents all waypoints for a single path, grouped by path_id.

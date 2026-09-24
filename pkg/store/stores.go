@@ -72,6 +72,9 @@ type WorldRepo interface {
 	// Bulk quest relations (creature_entry → quest IDs)
 	GetAllCreatureQuestRelations() (map[uint32][]uint32, error)
 	GetAllCreatureQuestInvolvedRelations() (map[uint32][]uint32, error)
+
+	// Loot templates (creature/gameobject/item/reference _loot_template)
+	GetAllLootTemplates() (*LootTables, error)
 }
 
 // PlayerCreateAction is one starting action-bar button of a race / class.
@@ -109,6 +112,36 @@ type CreatureTemplate struct {
 	UnitClass      uint32
 	// FlagsExtra are creature_template.flags_extra (CREATURE_FLAG_EXTRA_*).
 	FlagsExtra uint32
+
+	// LootID is creature_template.lootid (0 when the creature drops nothing).
+	LootID uint32
+	// MinGold/MaxGold are the money range the corpse drops.
+	MinGold uint32
+	MaxGold uint32
+}
+
+// LootTemplate is one row of a *_loot_template table.
+type LootTemplate struct {
+	Entry    uint32
+	Item     uint32
+	// Reference is the negative mincountOrRef of a reference row (0 otherwise).
+	Reference int32
+	// Chance is the drop chance in percent; 0 means equal-chanced within a group.
+	Chance float32
+	// QuestRequired marks a row that only drops for a player on the quest.
+	QuestRequired bool
+	LootMode      uint16
+	GroupID       uint8
+	MinCount      uint8
+	MaxCount      uint8
+}
+
+// LootTables bundles the four loot template tables, each keyed by loot entry.
+type LootTables struct {
+	Creature   map[uint32][]LootTemplate
+	GameObject map[uint32][]LootTemplate
+	Item       map[uint32][]LootTemplate
+	Reference  map[uint32][]LootTemplate
 }
 
 // CreatureSpawn represents a single creature spawn point.

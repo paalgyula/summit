@@ -3,6 +3,7 @@ package world
 import (
 	"math"
 
+	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -145,4 +146,64 @@ func (gc *WorldSession) HandleSpiritHealerActivate(data wow.PacketData) {
 	// Resurrect with 25% HP and Mana
 	gc.player.Resurrect(0.25, 0.25)
 	gc.sendInventoryUpdate()
+}
+
+// --- Packet Builders (TDD: Match TC/AC exactly) ---
+
+// BuildPreResurrectPacket builds SMSG_PRE_RESURRECT (0x494).
+// Source: TC/AC MiscPackets.h:270 — PackedGuid playerGUID
+func BuildPreResurrectPacket(p *player.Player) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerPreResurrect)
+	_ = pkt.Write(p.GUID().Pack()) // PackedGuid
+	return pkt
+}
+
+// BuildDeathReleaseLocPacket builds SMSG_DEATH_RELEASE_LOC (0x378).
+// Source: TC/AC MiscPackets.h:258 — int32 mapId, float x, y, z
+// Shows spirit healer location on minimap.
+func BuildDeathReleaseLocPacket(mapID uint32, x, y, z float32) *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerDeathReleaseLoc)
+	_ = pkt.Write(mapID)
+	_ = pkt.Write(x)
+	_ = pkt.Write(y)
+	_ = pkt.Write(z)
+	return pkt
+}
+
+// BuildDeathReleaseLocClearPacket builds SMSG_DEATH_RELEASE_LOC with map=-1
+// to clear the minimap pin on resurrection.
+func BuildDeathReleaseLocClearPacket() *wow.Packet {
+	pkt := wow.NewPacket(wow.ServerDeathReleaseLoc)
+	_ = pkt.Write(uint32(0xFFFFFFFF)) // map = -1
+	_ = pkt.Write(float32(0))         // x = 0
+	_ = pkt.Write(float32(0))         // y = 0
+	_ = pkt.Write(float32(0))         // z = 0
+	return pkt
+}
+
+// BuildDurabilityDamageDeathPacket builds SMSG_DURABILITY_DAMAGE_DEATH (0x2BD).
+// Source: TC/AC MiscPackets.h:408 — empty body, just opcode.
+func BuildDurabilityDamageDeathPacket() *wow.Packet {
+	return wow.NewPacket(wow.ServerDurabilityDamageDeath)
+}
+
+// --- Death Timer Constants (TC/AC Player.cpp:120) ---
+
+const (
+	// DeathTimer is 6 minutes in milliseconds for auto-release in non-instanced maps
+	DeathTimer = 6 * 60 * 1000
+)
+
+// --- Corpse Reclaim Delay Helpers ---
+
+// CalculateCorpseReclaimDelay returns the current corpse reclaim delay in milliseconds.
+func CalculateCorpseReclaimDelay(p *player.Player) uint32 {
+	return p.GetCorpseReclaimDelay(false) * 1000 // convert to ms
+}
+
+// SendCorpseReclaimDelay sends SMSG_CORPSE_RECLAIM_DELAY to the player.
+func SendCorpseReclaimDelay(gc *WorldSession, delayMs uint32) {
+	pkt := wow.NewPacket(wow.ServerCorpseReclaimDelay)
+	_ = pkt.Write(delayMs)
+	gc.socket.Send(pkt)
 }

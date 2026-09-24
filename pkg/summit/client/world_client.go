@@ -58,6 +58,7 @@ type WorldClient struct {
 	objects       map[wow.GUID]*Entity
 	selfGUID      wow.GUID
 	creatureNames map[uint32]string
+	creatureRanks map[uint32]uint32
 
 	// spellFailures remembers the last SpellCastResult per spell so the bot
 	// stops retrying spells the server keeps rejecting.
@@ -68,6 +69,12 @@ type WorldClient struct {
 	deathLoc  player.WorldLocation
 	reclaimCh chan struct{}
 	deathCh   chan struct{}
+
+	// Loot and combat feedback.
+	lootMu       sync.Mutex
+	lastLoot     *LootInfo
+	lootCh       chan LootInfo
+	combatErrors chan string
 
 	// charEnumCh receives the latest character list (buffered, latest wins).
 	charEnumCh chan []*CharEnum
@@ -105,10 +112,13 @@ func NewWorldClient(accountName, sessionKey, worldAddress string) (*WorldClient,
 
 		objects:       make(map[wow.GUID]*Entity),
 		creatureNames: make(map[uint32]string),
+		creatureRanks: make(map[uint32]uint32),
 		spellFailures: make(map[uint32]SpellFailure),
 
-		reclaimCh: make(chan struct{}, 1),
-		deathCh:   make(chan struct{}, 1),
+		reclaimCh:    make(chan struct{}, 1),
+		deathCh:      make(chan struct{}, 1),
+		lootCh:       make(chan LootInfo, 8),
+		combatErrors: make(chan string, 16),
 
 		charEnumCh:    make(chan []*CharEnum, 1),
 		loginVerifyCh: make(chan struct{}, 1),

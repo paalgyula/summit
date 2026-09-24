@@ -65,6 +65,50 @@ golangci-lint. Config `.golangci.yaml`: skips `*_string.go` files and tests. Pre
 - No test infrastructure prerequisites found — tests are unit-level.
 - Run a single test: `go test -v ./pkg/summit/auth/... -run TestLoginChallenge`
 
+## Reference Implementations — ALWAYS CHECK FIRST
+
+**When debugging, implementing, or fixing ANY feature, you MUST first consult the reference implementations:**
+
+| Reference | Path | Purpose |
+|-----------|------|---------|
+| **TrinityCore (TC)** | `/Users/paalgyula/Workspace/wow/trinitycore` | Primary reference — most complete WotLK implementation |
+| **AzerothCore (AC)** | `/Users/paalgyula/Workspace/wow/azerothcore-wotlk` | Secondary reference — TC fork with same architecture |
+
+### Workflow for ANY feature:
+
+1. **Search TC/AC first** — find the exact packet handlers, opcodes, structures, and flow
+2. **Document the packet structure** — field names, types, order, opcodes (hex)
+3. **Document the handler logic** — pre-conditions, post-conditions, what gets broadcast
+4. **Document SMSG_UPDATE_OBJECT fields** — which fields change, when, and why
+5. **Implement in Summit** — match the packet structures EXACTLY (3.3.5a protocol)
+6. **Verify** — all types, opcodes, and field order must match 3.3.5a exactly
+
+### Key reference files to check:
+
+| Area | TC Path | AC Path |
+|------|---------|---------|
+| Packet handlers | `src/server/game/Handlers/` | `src/server/game/Handlers/` |
+| Player death/resurrect | `src/server/game/Entities/Player/Player.cpp` | `src/server/game/Entities/Player/Player.cpp` |
+| Unit death | `src/server/game/Entities/Unit/Unit.cpp` | `src/server/game/Entities/Unit/Unit.cpp` |
+| Spirit healer | `src/server/game/Handlers/NPCHandler.cpp` | `src/server/game/Handlers/NPCHandler.cpp` |
+| Misc handlers (death) | `src/server/game/Handlers/MiscHandler.cpp` | `src/server/game/Handlers/MiscHandler.cpp` |
+| Spells (resurrect) | `src/server/game/Spells/Spell.cpp`, `SpellEffects.cpp` | `src/server/game/Spells/Spell.cpp`, `SpellEffects.cpp` |
+| Opcodes | `src/server/game/Server/Protocol/Opcodes.h` | `src/server/game/Server/Protocol/Opcodes.h` |
+| Packet structures | `src/server/game/Server/Packets/MiscPackets.h` | `src/server/game/Server/Packets/MiscPackets.h` |
+
+### When to check:
+
+- **EVERY new feature implementation** — find TC/AC equivalent first
+- **EVERY bug fix** — understand what TC/AC does differently
+- **EVERY packet handler** — verify opcode, structure, and flow match
+- **EVERY update object** — verify field indices and types match 3.3.5a
+
+### Existing reference docs:
+
+| Document | Path | Purpose |
+|----------|------|---------|
+| Death/Resurrect System | `docs/death-resurrect-system.md` | Complete death flow, packets, spirit healer, corpse, durability |
+
 ## Gotchas
 
 - `go.mod` declares `go 1.25.0` but CI uses `1.21.0` — version mismatch is intentional per codebase state.

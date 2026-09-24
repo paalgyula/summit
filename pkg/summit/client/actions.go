@@ -13,6 +13,13 @@ const (
 	movementFlagForward = 0x00000001
 )
 
+// StandState sends CMSG_STANDSTATECHANGE (0 = stand, 1 = sit, 3 = sleep).
+func (wc *WorldClient) StandState(state uint32) {
+	pkt := wow.NewPacket(wow.ClientStandstatechange)
+	_ = pkt.Write(state)
+	wc.Send(pkt)
+}
+
 // SetSelection sends CMSG_SET_SELECTION (u64 guid) to target an object.
 func (wc *WorldClient) SetSelection(guid wow.GUID) {
 	pkt := wow.NewPacket(wow.ClientSetSelection)
@@ -219,29 +226,4 @@ func (wc *WorldClient) handleLevelUp(msg *ServerMessage) {
 	_ = r.Read(&level)
 
 	wc.log.Info().Uint32("level", level).Msg("level up")
-}
-
-// handleLootResponse decodes the head of SMSG_LOOT_RESPONSE and logs what is
-// available on the corpse.
-func (wc *WorldClient) handleLootResponse(msg *ServerMessage) {
-	r := msg.Reader()
-
-	var guid uint64
-	_ = r.Read(&guid)
-
-	var lootType uint8
-	_ = r.Read(&lootType)
-
-	var gold uint32
-	_ = r.Read(&gold)
-
-	var itemCount uint8
-	_ = r.Read(&itemCount)
-
-	wc.log.Info().
-		Uint64("loot", guid).
-		Uint8("type", lootType).
-		Uint32("gold", gold).
-		Uint8("items", itemCount).
-		Msg("loot opened")
 }

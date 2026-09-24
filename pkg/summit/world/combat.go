@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -628,10 +629,14 @@ func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *Cal
 
 	npc.OnDeath()
 
-	// Mark corpse as lootable — client shows open-hands icon and allows CMSG_LOOT
+	// Mark the corpse lootable only when it actually leaves something: the
+	// client then shows the loot cursor and CMSG_LOOT succeeds, instead of
+	// replying with an error for an empty corpse.
 	// Source: AzerothCore Unit.cpp:13744-13754 (DealDamage death flow)
-	npc.DynamicFlags |= UnitDynFlagLootable
-	npc.Object.SetUInt32Value(object.UnitDynamicFlags, npc.DynamicFlags)
+	if creatureHasLoot(npc, attacker) {
+		npc.DynamicFlags |= UnitDynFlagLootable
+		npc.Object.SetUInt32Value(object.UnitDynamicFlags, npc.DynamicFlags)
+	}
 
 	// Grant XP to the killing player
 	// Source: AzerothCore KillRewarder.cpp, Player.cpp:GiveXP
@@ -678,6 +683,29 @@ func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *Cal
 			}
 		}
 	}
+}
+
+// creatureHasLoot reports whether a dead creature leaves anything to loot: a
+// money range or a creature_loot_template for its lootid. Without a session
+// (a pet or script kill) a non-zero lootid is trusted.
+func creatureHasLoot(npc *NPC, attacker CombatUnit) bool {
+	if npc.MinGold > 0 || npc.MaxGold > 0 {
+		return true
+	}
+
+	if npc.LootID == 0 {
+		return false
+	}
+
+	if p, ok := attacker.(*player.Player); ok {
+		if gc := getGC(p); gc != nil {
+			if server, ok := gc.ws.(*Server); ok && server.lootMgr != nil {
+				return server.lootMgr.HasLoot(loot.StoreCreature, npc.LootID)
+			}
+		}
+	}
+
+	return true
 }
 
 // --- Duel Helpers ---

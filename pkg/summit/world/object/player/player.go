@@ -307,9 +307,18 @@ type Player struct {
 	IsPVP       bool            // PvP flag enabled
 	IsFFAPVP    bool            // FFA PvP zone
 	IsSanctuary bool            // sanctuary zone (can't PvP)
-	IsGhost        bool          // dead/ghost state
-	DeathTime      int64         // when player died (Unix ms)
-	CorpseLocation WorldLocation // position where player died
+	// IsGhost indicates if the player is currently dead/ghost
+	IsGhost bool
+
+	// DeathTime when player died (Unix ms)
+	DeathTime int64
+
+	// DeathExpireTime tracks corpse reclaim delay escalation
+	// (AzerothCore Player.cpp:151 — copseReclaimDelay array)
+	DeathExpireTime int64
+
+	// CorpseLocation position where player died
+	CorpseLocation WorldLocation
 
 	// Chat flood throttle
 	ChatFloodCount   int
@@ -321,6 +330,10 @@ type Player struct {
 	// Sender is set when the player is added to a session. The map uses
 	// it to send update packets back to the client.
 	Sender PacketSender
+
+	// BroadcastPacket is set by the server to broadcast packets to all
+	// nearby players. Used for health/power updates.
+	BroadcastPacket func(pkt *wow.Packet) `yaml:"-" json:"-"`
 
 	// Quest state — map[uint32]*quest.QuestStatusData stored as interface{}
 	// to avoid circular import with the quest package.
@@ -735,12 +748,41 @@ func (p *Player) GetLevel() uint32 {
 }
 
 // SetHealth sets the current health, clamping to [0, MaxHealth].
+// Updates the UnitFieldHealth and handles death state.
 func (p *Player) SetHealth(v uint32) {
 	if v > p.MaxHealth {
 		v = p.MaxHealth
 	}
 
+	// If already dead, keep at 0
+	if p.Health == 0 && v == 0 {
+		return
+	}
+
+	prevHealth := p.Health
 	p.Health = v
+
+	// Update the UnitFieldHealth in the update fields
+	if p.Object != nil {
+		p.Object.SetUInt32Value(object.UnitFieldHealth, v)
+	}
+
+	// Send SMSG_HEALTH_UPDATE to all nearby players
+	if p.BroadcastPacket != nil {
+		pkt := wow.NewPacket(wow.ServerHealthUpdate)
+		_ = pkt.Write(p.GUID().Pack()) // packed GUID
+		_ = pkt.Write(uint32(v))
+		p.BroadcastPacket(pkt)
+	}
+
+	// Handle death: health reached 0
+	if v == 0 && prevHealth > 0 {
+		p.IsGhost = true
+		p.CharFlags |= 0x10 // Dead flag
+		p.PlayerFlags |= 0x00000010
+		p.AttackState = 0
+		p.AttackTarget = 0
+	}
 }
 
 // GetMaxHealth returns the maximum health of the player.
@@ -767,6 +809,7 @@ func (p *Player) GetPower(pt wow.PowerType) uint32 {
 }
 
 // SetPower sets the current power for the given power type, clamping to max.
+// Updates the UnitFieldPower1 field and sends SMSG_POWER_UPDATE.
 func (p *Player) SetPower(pt wow.PowerType, v uint32) {
 	if int(pt) < 0 || int(pt) >= wow.MaxPowerTypes {
 		return
@@ -776,7 +819,26 @@ func (p *Player) SetPower(pt wow.PowerType, v uint32) {
 		v = p.MaxPower[pt]
 	}
 
+	// Skip if no change
+	if p.Power[pt] == v {
+		return
+	}
+
 	p.Power[pt] = v
+
+	// Update the UnitFieldPower1 + powerType in the update fields
+	if p.Object != nil {
+		p.Object.SetUInt32Value(object.UpdateField(int(object.UnitFieldPower1)+int(pt)), v)
+	}
+
+	// Send SMSG_POWER_UPDATE to all nearby players
+	if p.BroadcastPacket != nil {
+		pkt := wow.NewPacket(wow.ServerPowerUpdate)
+		_ = pkt.Write(p.GUID().Pack()) // packed GUID
+		_ = pkt.Write(uint8(pt))
+		_ = pkt.Write(uint32(v))
+		p.BroadcastPacket(pkt)
+	}
 }
 
 // GetMaxPower returns the maximum power for the given power type.
@@ -814,6 +876,61 @@ func (p *Player) IsAlive() bool {
 // IsDead returns true if the player has 0 health.
 func (p *Player) IsDead() bool {
 	return p.Health == 0
+}
+
+// --- Corpse Reclaim Delay (AzerothCore Player.cpp:151, 13216) ---
+
+const (
+	// DeathExpireStep is 5 minutes in seconds (AzerothCore Player.cpp:76)
+	DeathExpireStep int64 = 5 * 60
+
+	// MaxDeathCount is the maximum number of escalating death tiers
+	MaxDeathCount = 3
+)
+
+// corpseReclaimDelay maps death count to delay in seconds
+// Source: AzerothCore Player.cpp:151
+var corpseReclaimDelay = [MaxDeathCount]uint32{30, 60, 120}
+
+// GetCorpseReclaimDelay returns the delay in seconds before corpse can be reclaimed.
+// Source: AzerothCore Player.cpp:13216
+func (p *Player) GetCorpseReclaimDelay(pvp bool) uint32 {
+	// AC: if (!pvp && !CONFIG_DEATH_CORPSE_RECLAIM_DELAY_PVE) return 0;
+	// We simplify: PvE always has delay
+
+	now := time.Now().Unix()
+	var count int64
+
+	// Source: AzerothCore Player.cpp:13225
+	// uint64 count = (now < m_deathExpireTime - 1) ? (m_deathExpireTime - 1 - now) / DEATH_EXPIRE_STEP : 0;
+	if now < p.DeathExpireTime-1 {
+		count = (p.DeathExpireTime - 1 - now) / DeathExpireStep
+	}
+
+	if count >= MaxDeathCount {
+		count = MaxDeathCount - 1
+	}
+
+	return corpseReclaimDelay[count]
+}
+
+// UpdateCorpseReclaimDelay escalates the reclaim delay for rapid deaths.
+// Source: AzerothCore PlayerUpdates.cpp:1955
+func (p *Player) UpdateCorpseReclaimDelay() {
+	now := time.Now().Unix()
+
+	if now < p.DeathExpireTime {
+		// Deaths stacking: increment count up to MaxDeathCount
+		count := (p.DeathExpireTime - now) / DeathExpireStep + 1
+
+		if count < MaxDeathCount {
+			p.DeathExpireTime = now + (count+1)*DeathExpireStep
+		} else {
+			p.DeathExpireTime = now + MaxDeathCount*DeathExpireStep
+		}
+	} else {
+		p.DeathExpireTime = now + DeathExpireStep
+	}
 }
 
 // Resurrect restores a dead player to life with given health and power percentages.

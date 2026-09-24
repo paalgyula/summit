@@ -183,6 +183,31 @@ func (upd *Updater) BuildItemCreateObject(item *player.Item, target *player.Play
 	return ud.BuildPacket()
 }
 
+// BuildItemValuesUpdate builds an SMSG_UPDATE_OBJECT with a Values-only block
+// carrying the item's fields for its owner. Used when an existing stack grows
+// (e.g. a loot item merging into it) so the client learns the new stack count.
+func (upd *Updater) BuildItemValuesUpdate(item *player.Item, target *player.Player) *wow.Packet {
+	if item == nil || item.Object == nil || target == nil {
+		return nil
+	}
+
+	// The owner sees the ITEM_FIELD_* owner-only fields (stack count, durability,
+	// charges); BuildFilteredUpdateMask includes them when isOwner is true.
+	isOwner := item.Owner == target.GUID()
+	mask := item.Object.BuildFilteredUpdateMask(target.Object, isOwner)
+
+	ud := object.NewUpdateData()
+	buf := object.NewUpdateBlockBuffer()
+
+	_ = buf.WriteOne(wow.UpdateTypeValues)
+	_ = buf.Write(item.GUID())
+	buf.WriteBytes(item.Object.BuildValuesUpdateBlock(mask, target.Object))
+
+	ud.AddUpdateBlock(buf.Bytes())
+
+	return ud.BuildPacket()
+}
+
 // buildItemCreateBlock appends a CreateObject block for an item; the owner
 // also gets the OWNER-only fields (stack count, durability, charges).
 func (upd *Updater) buildItemCreateBlock(item *player.Item, target *player.Player, ud *object.UpdateData) {

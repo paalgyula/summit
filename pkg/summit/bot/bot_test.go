@@ -6,7 +6,43 @@ import (
 
 	"github.com/paalgyula/summit/pkg/summit/client"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+	"github.com/paalgyula/summit/pkg/wow"
 )
+
+// Update-field word indices (from pkg/summit/world/object/update_fields.gen.go).
+const (
+	testFieldHealth    = 0x0006 + 0x0012
+	testFieldMaxHealth = 0x0006 + 0x001a
+	testFieldLevel     = 0x0006 + 0x0030
+)
+
+func mkFields(vals map[int]uint32) []uint32 {
+	maxIdx := 0
+	for i := range vals {
+		if i > maxIdx {
+			maxIdx = i
+		}
+	}
+
+	fields := make([]uint32, maxIdx+1)
+	for i, v := range vals {
+		fields[i] = v
+	}
+
+	return fields
+}
+
+func unit(level, health, maxHealth uint32) *client.Entity {
+	return &client.Entity{ //nolint:exhaustruct
+		Type:   wow.TypeIDUnit,
+		HasPos: true,
+		Fields: mkFields(map[int]uint32{
+			testFieldLevel:     level,
+			testFieldHealth:    health,
+			testFieldMaxHealth: maxHealth,
+		}),
+	}
+}
 
 func TestNameOf(t *testing.T) {
 	b := &Bot{}
@@ -67,6 +103,31 @@ func TestDeathSequence(t *testing.T) {
 
 	if got := d.step(now.Add(21*time.Second), true); got != deathRepop {
 		t.Fatalf("a new death should restart the sequence, got %v", got)
+	}
+}
+
+func TestEligibleFilters(t *testing.T) {
+	b := &Bot{cfg: DefaultConfig(), blacklist: make(map[wow.GUID]time.Time)}
+
+	self := unit(1, 50, 50)
+
+	if !b.eligible(unit(2, 20, 20), self) {
+		t.Fatal("a level-2 mob near a level-1 bot should be eligible")
+	}
+
+	if b.eligible(unit(60, 20, 20), self) {
+		t.Fatal("a level-60 mob should be filtered out")
+	}
+
+	if b.eligible(unit(2, 5000, 5000), self) {
+		t.Fatal("a mob with far more health than the bot should be filtered out")
+	}
+
+	mob := unit(2, 20, 20)
+	b.blacklistEntity(mob.GUID)
+
+	if b.eligible(mob, self) {
+		t.Fatal("a blacklisted mob should be filtered out")
 	}
 }
 

@@ -27,6 +27,11 @@ type Loot struct {
 	Items      []LootItem
 	QuestItems []LootItem
 	Gold       uint32
+
+	// MaxStack resolves an item entry's maximum stack size. When set it takes
+	// precedence over LootItemData.MaxStackSize, letting callers that know the
+	// item templates split oversized drops into valid stacks.
+	MaxStack func(itemID uint32) uint8
 }
 
 // NewLoot creates an empty loot instance.
@@ -62,6 +67,12 @@ func (l *Loot) AddItem(data LootItemData) {
 	}
 
 	maxStack := data.MaxStackSize
+	if l.MaxStack != nil {
+		if s := l.MaxStack(data.ItemID); s > 0 {
+			maxStack = s
+		}
+	}
+
 	if maxStack == 0 {
 		maxStack = 1
 	}

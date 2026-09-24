@@ -65,6 +65,52 @@ type Chunk struct {
 	Normals   [145][3]float32 // normalized X, Y, Z
 	Layers    []Layer
 	AlphaMaps [][AlphaMapSize * AlphaMapSize]uint8 // one per layer after the first
+	// Liquids are the MH2O liquid layers covering this chunk.
+	Liquids []LiquidLayer
+}
+
+// LiquidKind classifies a LiquidType.dbc id into the family the client draws
+// it with (texture set and tint). Mirrors the LiquidType names in 3.3.5a.
+type LiquidKind string
+
+const (
+	LiquidWater LiquidKind = "water"
+	LiquidOcean LiquidKind = "ocean"
+	LiquidMagma LiquidKind = "magma"
+	LiquidSlime LiquidKind = "slime"
+)
+
+// LiquidLayer is one MH2O water/river/lava/slime layer of a chunk. The surface
+// covers the cell rectangle [X, X+W) x [Y, Y+H) in 1/8-chunk units, flat at
+// Level (the per-vertex height field is not used; the client draws it flat).
+type LiquidLayer struct {
+	Type  uint16
+	Kind  LiquidKind
+	Level float32
+	X, Y  int
+	W, H  int
+}
+
+// liquidKind maps a LiquidType.dbc id to the drawn family.
+func liquidKind(id uint16) LiquidKind {
+	switch id {
+	case 2, 6, 10, 14:
+		return LiquidOcean
+	case 3, 7, 11, 15, 19, 121, 141:
+		return LiquidMagma
+	case 4, 8, 12, 20, 21, 181:
+		return LiquidSlime
+	default:
+		return LiquidWater
+	}
+}
+
+// LiquidExtras is attached to every water material in the tile GLB so the
+// client can build the animated liquid surface.
+type LiquidExtras struct {
+	Kind  LiquidKind `json:"kind"`
+	Type  uint16     `json:"type"`
+	Level float32    `json:"level"`
 }
 
 type Layer struct {
@@ -104,6 +150,9 @@ type ADT struct {
 
 	mmdx, mwmo []byte // raw name blocks, resolved once the offset tables are read
 	mmid, mwid []uint32
+	// mh2o is the raw MH2O chunk: 256 chunk headers followed by layer
+	// information, vertex height fields and render bitmaps.
+	mh2o []byte
 }
 
 // OpenADT reads and parses an ADT terrain file from disk.
@@ -198,6 +247,9 @@ func ReadADT(r io.Reader) (*ADT, error) {
 			if chunk != nil && chunk.Header.IndexX < 16 && chunk.Header.IndexY < 16 {
 				adt.Chunks[chunk.Header.IndexX][chunk.Header.IndexY] = chunk
 			}
+
+		case "MH2O", "O2HM":
+			adt.mh2o = append([]byte(nil), chunkData...)
 		}
 
 		pos = chunkDataEnd
@@ -205,8 +257,60 @@ func ReadADT(r io.Reader) (*ADT, error) {
 
 	adt.ModelNames = resolveNames(adt.mmdx, adt.mmid)
 	adt.WMONames = resolveNames(adt.mwmo, adt.mwid)
+	adt.distributeLiquids()
 
 	return adt, nil
+}
+
+// distributeLiquids attaches the MH2O layers to their chunks. The header array
+// is indexed by the chunk's file order, which is x within y (i = y*16 + x).
+func (adt *ADT) distributeLiquids() {
+	const headerSize = 12
+	if len(adt.mh2o) < 256*headerSize {
+		return
+	}
+
+	d := adt.mh2o
+	for i := 0; i < 256; i++ {
+		offInfo := int(binary.LittleEndian.Uint32(d[i*headerSize : i*headerSize+4]))
+		layers := int(binary.LittleEndian.Uint32(d[i*headerSize+4 : i*headerSize+8]))
+		if offInfo == 0 || layers <= 0 {
+			continue
+		}
+
+		x, y := i%16, i/16
+		chunk := adt.Chunks[x][y]
+		if chunk == nil {
+			continue
+		}
+
+		for l := 0; l < layers; l++ {
+			o := offInfo + l*24
+			if o+24 > len(d) {
+				break
+			}
+			// min_x/min_y/max_x/max_y are zero in practice; the covered
+			// rectangle is x_offset/y_offset + width/height in 1/8 units.
+			xo := int(d[o+12])
+			yo := int(d[o+13])
+			w := int(d[o+14])
+			h := int(d[o+15])
+			if w <= 0 || h <= 0 || xo+1 > 8 || yo+1 > 8 {
+				continue
+			}
+			id := binary.LittleEndian.Uint16(d[o : o+2])
+			level := math.Float32frombits(binary.LittleEndian.Uint32(d[o+4 : o+8]))
+			chunk.Liquids = append(chunk.Liquids, LiquidLayer{
+				Type:  id,
+				Kind:  liquidKind(id),
+				Level: level,
+				X:     xo,
+				Y:     yo,
+				W:     w,
+				H:     h,
+			})
+		}
+	}
 }
 
 func parseUint32List(data []byte) []uint32 {
@@ -518,9 +622,119 @@ func (adt *ADT) ExportGLB(w io.Writer) error {
 	})
 	doc.Scenes[0].Nodes = append(doc.Scenes[0].Nodes, nodeIdx)
 
+	adt.addLiquidMesh(doc)
+
 	adt.addPlacementNodes(doc)
 
 	return doc.ToGLB(w)
+}
+
+// addLiquidMesh appends the MH2O liquid surfaces as a "WaterTile" mesh: one
+// primitive per liquid kind so the client can pick the animated material and
+// tint. Every covered 1/8-chunk cell becomes a quad flat at the layer's level
+// (the per-vertex height field is not used; sloped liquids are rare).
+func (adt *ADT) addLiquidMesh(doc *gltf.Document) {
+	type sink struct {
+		positions [][3]float32
+		normals   [][3]float32
+		uvs       [][2]float32
+		indices   []uint16
+	}
+
+	groups := map[LiquidKind][]*sink{}
+	up := gltf.ConvertWoWToGLTPosition(0, 0, 1)
+	// Indices are uint16, so a primitive holds at most 65535 vertices; a quad
+	// that would overflow starts a new group.
+	current := func(kind LiquidKind) *sink {
+		gs := groups[kind]
+		if len(gs) == 0 || len(gs[len(gs)-1].positions)+4 > 65535 {
+			gs = append(gs, &sink{})
+			groups[kind] = gs
+		}
+		return gs[len(gs)-1]
+	}
+
+	for cy := 0; cy < 16; cy++ {
+		for cx := 0; cx < 16; cx++ {
+			chunk := adt.Chunks[cx][cy]
+			if chunk == nil {
+				continue
+			}
+			for _, liq := range chunk.Liquids {
+				for j := liq.Y; j < liq.Y+liq.H; j++ {
+					for i := liq.X; i < liq.X+liq.W; i++ {
+						s := current(liq.Kind)
+						add := func(a, b float32) {
+							posX := chunk.Header.Pos[0] - b*UnitSize
+							posY := chunk.Header.Pos[1] - a*UnitSize
+							s.positions = append(s.positions, gltf.ConvertWoWToGLTPosition(posX, posY, liq.Level))
+							s.normals = append(s.normals, up)
+							s.uvs = append(s.uvs, [2]float32{posX / 64, posY / 64})
+						}
+						base := uint16(len(s.positions))
+						add(float32(i), float32(j))
+						add(float32(i+1), float32(j))
+						add(float32(i), float32(j+1))
+						add(float32(i+1), float32(j+1))
+						s.indices = append(s.indices, base, base+1, base+3, base, base+3, base+2)
+					}
+				}
+			}
+		}
+	}
+
+	total := 0
+	for _, gs := range groups {
+		for _, s := range gs {
+			total += len(s.indices)
+		}
+	}
+	if total == 0 {
+		return
+	}
+
+	meshIdx := len(doc.Meshes)
+	doc.Meshes = append(doc.Meshes, gltf.Mesh{Name: "WaterMesh"})
+	mesh := &doc.Meshes[meshIdx]
+
+	for kind, gs := range groups {
+		matIdx := -1
+		for _, s := range gs {
+			if len(s.indices) == 0 {
+				continue
+			}
+			if matIdx < 0 {
+				matIdx = len(doc.Materials)
+				doc.Materials = append(doc.Materials, gltf.Material{
+					Name: "liquid_" + string(kind),
+					PbrMetallicRoughness: &gltf.PbrMetallicRoughness{
+						BaseColorFactor: [4]float32{1, 1, 1, 1},
+						MetallicFactor:  0,
+						RoughnessFactor: 1,
+					},
+					DoubleSided: true,
+					AlphaMode:   gltf.AlphaModeBlend,
+					Extras:      LiquidExtras{Kind: kind},
+				})
+			}
+
+			idxAcc := doc.AddUint16IndicesAccessor(s.indices)
+			m := matIdx
+			mesh.Primitives = append(mesh.Primitives, gltf.Primitive{
+				Attributes: map[string]int{
+					"POSITION":   doc.AddFloat32Vec3Accessor(s.positions, gltf.TargetArrayBuffer),
+					"NORMAL":     doc.AddFloat32Vec3Accessor(s.normals, gltf.TargetArrayBuffer),
+					"TEXCOORD_0": doc.AddFloat32Vec2Accessor(s.uvs, gltf.TargetArrayBuffer),
+				},
+				Indices:  &idxAcc,
+				Material: &m,
+			})
+		}
+	}
+
+	nodeIdx := len(doc.Nodes)
+	doc.Nodes = append(doc.Nodes, gltf.Node{Name: "WaterTile", Mesh: &meshIdx})
+	doc.Scenes[0].Nodes = append(doc.Scenes[0].Nodes, nodeIdx)
 }
 
 // textureAssetPath turns an MTEX entry ("Tileset\\Durotar\\DurotarBase.blp")

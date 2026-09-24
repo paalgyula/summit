@@ -57,6 +57,15 @@ func (wc *WorldClient) handleMessage(msg *ServerMessage) {
 		wc.handleLevelUp(msg)
 	case wow.ServerLootResponse:
 		wc.handleLootResponse(msg)
+	case wow.ServerLootRemoved:
+		wc.handleLootRemoved(msg)
+	case wow.ServerLootClearMoney:
+		wc.handleLootClearMoney(msg)
+	case wow.ServerLootReleaseResponse:
+		wc.handleLootReleaseResponse(msg)
+	case wow.ServerAttackswingNotinrange, wow.ServerAttackswingBadfacing,
+		wow.ServerAttackswingDeadtarget, wow.ServerAttackswingCantAttack:
+		wc.handleAttackSwingError(msg.Opcode)
 	case wow.ServerCastFailed:
 		wc.handleCastFailed(msg)
 	case wow.ServerSpellStart:

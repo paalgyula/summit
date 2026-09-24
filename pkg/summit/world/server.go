@@ -19,6 +19,7 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/channel"
 	"github.com/paalgyula/summit/pkg/summit/world/lfg"
+	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/summit/world/quest"
@@ -64,6 +65,9 @@ type Server struct {
 
 	// Quest manager (quest templates, relations, completion)
 	questMgr *quest.Manager
+
+	// Loot manager (creature/gameobject/item/reference loot templates)
+	lootMgr *loot.Manager
 
 	// Respawn manager (handles NPC respawn timers)
 	respawnMgr *RespawnManager
@@ -181,6 +185,9 @@ func (ws *Server) StartServer(worldStore store.WorldRepo, charStore store.Charac
 			ws.log.Info().Int("items", len(items)).Msg("loaded item templates from store")
 		}
 	}
+
+	// Load loot templates (creature/gameobject/item/reference) from the store
+	ws.lootMgr = newLootManager(worldStore)
 
 	// Initialize quest manager with world data
 	ws.questMgr = quest.NewManager(worldStore)
@@ -436,6 +443,11 @@ func (ws *Server) updateNPCs(now time.Time) {
 	for _, npc := range npcs {
 		if !npc.IsAlive() {
 			continue
+		}
+
+		// Update the motion master (AI movement system)
+		if npc.MotionMaster != nil {
+			npc.MotionMaster.Update(50) // 50ms tick
 		}
 
 		// Interpolate active spline movement

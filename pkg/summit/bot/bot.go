@@ -1,10 +1,9 @@
 // Package bot implements a playable AI client for the Summit world server.
 //
 // The bot enters the world through pkg/summit/client, perceives nearby
-// creatures from SMSG_UPDATE_OBJECT, walks to a hostile target, auto-attacks
-// and casts spells, detects the kill (the server does not broadcast NPC health,
-// so it is inferred from the bot's own melee hits and reported health updates),
-// loots the corpse, resurrects after death and repeats.
+// creatures from SMSG_UPDATE_OBJECT, picks a level-appropriate hostile target,
+// walks to it, auto-attacks and casts spells, loots the corpse, rests and
+// resurrects, then repeats. It never gets stuck on mobs it cannot kill.
 package bot
 
 import (
@@ -27,6 +26,9 @@ const moveFlagForward = 0x00000001
 
 // spellFailureBackoff is how long a rejected spell is skipped for.
 const spellFailureBackoff = 10 * time.Second
+
+// statusInterval is how often a summary line is logged.
+const statusInterval = 30 * time.Second
 
 // Config tunes the bot's behaviour.
 type Config struct {
@@ -56,23 +58,53 @@ type Config struct {
 	SpellRange float32
 	// GCD is the minimum interval between two casts.
 	GCD time.Duration
+
+	// LevelMaxOffset ignores creatures more than this many levels above the bot.
+	LevelMaxOffset int
+	// SkipElite ignores elite/rare/boss creatures.
+	SkipElite bool
+	// MaxHealthFactor ignores creatures whose max health exceeds
+	// this multiple of the bot's own max health (0 disables the check).
+	MaxHealthFactor float32
+	// GiveUpAfter disengages a target that has taken no damage for this long.
+	GiveUpAfter time.Duration
+	// BlacklistFor is how long an ignored creature stays ignored.
+	BlacklistFor time.Duration
+
+	// RestHealthPct makes the bot rest below this health fraction.
+	RestHealthPct float32
+	// FleeHealthPct makes the bot disengage and retreat below this fraction.
+	FleeHealthPct float32
 }
 
 // DefaultConfig returns sensible defaults for a melee/caster grinding bot.
 func DefaultConfig() Config {
 	return Config{
-		Tick:         250 * time.Millisecond,
-		EngageRange:  60,
-		MeleeRange:   4,
-		MoveSpeed:    7,
-		WanderRadius: 12,
-		LeashRadius:  80,
-		Loot:         true,
-		GroundFollow: true,
-		AutoCast:     true,
-		SpellRange:   25,
-		GCD:          1500 * time.Millisecond,
+		Tick:            250 * time.Millisecond,
+		EngageRange:     60,
+		MeleeRange:      4,
+		MoveSpeed:       7,
+		WanderRadius:    12,
+		LeashRadius:     80,
+		Loot:            true,
+		GroundFollow:    true,
+		AutoCast:        true,
+		SpellRange:      25,
+		GCD:             1500 * time.Millisecond,
+		LevelMaxOffset:  2,
+		SkipElite:       true,
+		MaxHealthFactor: 5,
+		GiveUpAfter:     20 * time.Second,
+		BlacklistFor:    2 * time.Minute,
+		RestHealthPct:   0.6,
+		FleeHealthPct:   0.15,
 	}
+}
+
+// Stats summarises what the bot has done.
+type Stats struct {
+	Kills  int
+	Deaths int
 }
 
 // Bot drives a WorldClient through a simple grinding loop.
@@ -88,15 +120,25 @@ type Bot struct {
 	target   wow.GUID
 	swinging bool
 	moving   bool
-	kills    int
+
+	kills  int
+	deaths int
 
 	lastCast time.Time
+
+	blacklist map[wow.GUID]time.Time
+	engagedAt time.Time
 
 	pendingLoot wow.GUID
 	lootTimer   time.Time
 
+	resting    bool
+	restLogged bool
+
 	wanderTarget *player.WorldLocation
 	lastWander   time.Time
+
+	lastStatus time.Time
 
 	// Death / resurrection state machine.
 	death deathState
@@ -156,9 +198,10 @@ func (d *deathState) reset() { *d = deathState{} }
 // New creates a bot for an already-in-world client.
 func New(wc *client.WorldClient, cfg Config) *Bot {
 	b := &Bot{
-		client: wc,
-		cfg:    cfg,
-		log:    log.With().Str("service", "bot").Logger(),
+		client:    wc,
+		cfg:       cfg,
+		log:       log.With().Str("service", "bot").Logger(),
+		blacklist: make(map[wow.GUID]time.Time),
 	}
 
 	if p := wc.Player(); p != nil {
@@ -172,6 +215,9 @@ func New(wc *client.WorldClient, cfg Config) *Bot {
 
 // Kills returns how many creatures the bot has slain.
 func (b *Bot) Kills() int { return b.kills }
+
+// Stats returns the bot's counters.
+func (b *Bot) Stats() Stats { return Stats{Kills: b.kills, Deaths: b.deaths} }
 
 // Run drives the AI until ctx is cancelled or the connection drops.
 func (b *Bot) Run(ctx context.Context) error {
@@ -208,7 +254,19 @@ func (b *Bot) tick() {
 		b.onResurrect(self)
 	}
 
+	b.handleLoot()
 	b.updateLoot()
+	b.drainCombatErrors()
+	b.maybeStatus(self)
+
+	// Rest until recovered before pulling again.
+	if b.needsRest(self) {
+		b.rest()
+
+		return
+	}
+
+	b.wake()
 
 	target := b.validTarget()
 
@@ -225,8 +283,8 @@ func (b *Bot) tick() {
 			return
 		}
 
-		mob := b.client.NearestAttackable(&b.pos, b.cfg.EngageRange)
-		if mob == nil || distance(mob.Pos, b.home) > b.cfg.LeashRadius {
+		mob := b.findTarget(self)
+		if mob == nil {
 			b.wander()
 
 			return
@@ -238,6 +296,61 @@ func (b *Bot) tick() {
 	}
 
 	b.fight(target)
+}
+
+// eligible applies the target filters.
+func (b *Bot) eligible(mob, self *client.Entity) bool {
+	if !mob.Attackable() || b.isBlacklisted(mob.GUID) {
+		return false
+	}
+
+	if self != nil && self.Level() > 0 && mob.Level() > 0 {
+		if int(mob.Level()) > int(self.Level())+b.cfg.LevelMaxOffset {
+			return false
+		}
+	}
+
+	if b.cfg.SkipElite && mob.IsElite() {
+		return false
+	}
+
+	if b.cfg.MaxHealthFactor > 0 && self != nil && self.MaxHealth() > 0 {
+		limit := float32(self.MaxHealth()) * b.cfg.MaxHealthFactor
+		if float32(mob.MaxHealth()) > limit {
+			return false
+		}
+	}
+
+	return true
+}
+
+// findTarget picks the best eligible creature in range and inside the leash. It
+// scores by how long the mob is likely to take (max health) plus the walk, so
+// the bot farms quick kills instead of stalling on a tanky mob.
+func (b *Bot) findTarget(self *client.Entity) *client.Entity {
+	var (
+		best      *client.Entity
+		bestScore = float64(math.MaxFloat32)
+	)
+
+	for _, e := range b.client.Entities() {
+		if !b.eligible(e, self) || distance(e.Pos, b.home) > b.cfg.LeashRadius {
+			continue
+		}
+
+		d := distance(b.pos, e.Pos)
+		if d > b.cfg.EngageRange {
+			continue
+		}
+
+		score := float64(e.MaxHealth()) + float64(d)*0.5
+		if score < bestScore {
+			bestScore = score
+			best = e
+		}
+	}
+
+	return best
 }
 
 // validTarget returns the current target while it is still alive, otherwise
@@ -285,6 +398,7 @@ func (b *Bot) onKill(t *client.Entity) {
 
 func (b *Bot) engage(mob *client.Entity) {
 	b.target = mob.GUID
+	b.engagedAt = time.Now()
 
 	b.log.Info().
 		Str("name", b.nameOf(mob)).
@@ -303,17 +417,31 @@ func (b *Bot) engage(mob *client.Entity) {
 }
 
 func (b *Bot) fight(t *client.Entity) {
-	dist := distance(b.pos, t.Pos)
+	// Flee when badly hurt.
+	if self := b.client.SelfEntity(); self != nil && self.MaxHealth() > 0 && self.HealthPct() < b.cfg.FleeHealthPct {
+		b.flee(t)
+
+		return
+	}
+
+	// Give up on a target we cannot hurt.
+	if t.DamageDealtBySelf == 0 && time.Since(b.engagedAt) > b.cfg.GiveUpAfter {
+		b.log.Warn().Str("name", b.nameOf(t)).Msg("target is not taking damage, blacklisting")
+		b.blacklistEntity(t.GUID)
+		b.disengage()
+
+		return
+	}
 
 	// Keep the target inside the leash.
 	if distance(t.Pos, b.home) > b.cfg.LeashRadius {
 		b.log.Debug().Str("name", b.nameOf(t)).Msg("target beyond leash, disengaging")
-		b.stopAttack()
-		b.target = 0
-		b.swinging = false
+		b.disengage()
 
 		return
 	}
+
+	dist := distance(b.pos, t.Pos)
 
 	if dist > b.cfg.MeleeRange {
 		b.moveToward(t.Pos)
@@ -327,6 +455,20 @@ func (b *Bot) fight(t *client.Entity) {
 	}
 
 	b.maybeCast(t, dist)
+}
+
+// flee disengages from a target and retreats home.
+func (b *Bot) flee(t *client.Entity) {
+	b.log.Warn().Str("name", b.nameOf(t)).Msg("low health, retreating")
+	b.blacklistEntity(t.GUID)
+	b.disengage()
+	b.moveToward(b.home)
+}
+
+func (b *Bot) disengage() {
+	b.stopAttack()
+	b.target = 0
+	b.swinging = false
 }
 
 // maybeCast casts an offensive spell at the target when in range and off the
@@ -368,6 +510,39 @@ func (b *Bot) spellsToUse() []uint32 {
 	return b.client.KnownSpells()
 }
 
+// needsRest reports whether the bot should stop fighting and regenerate.
+func (b *Bot) needsRest(self *client.Entity) bool {
+	if self == nil || self.MaxHealth() == 0 {
+		return false
+	}
+
+	return self.HealthPct() < b.cfg.RestHealthPct
+}
+
+func (b *Bot) rest() {
+	b.stopAttack()
+	b.stopMoving()
+
+	if !b.resting {
+		b.resting = true
+		b.restLogged = false
+		b.client.StandState(1) // sit
+	}
+
+	if !b.restLogged {
+		b.restLogged = true
+		b.log.Info().Msg("resting until recovered")
+	}
+}
+
+func (b *Bot) wake() {
+	if b.resting {
+		b.resting = false
+		b.client.StandState(0) // stand
+		b.log.Info().Msg("recovered, resuming")
+	}
+}
+
 // handleDeath releases the spirit, reclaims the corpse and falls back to the
 // spirit healer if the reclaim never completes.
 func (b *Bot) handleDeath() {
@@ -378,6 +553,7 @@ func (b *Bot) handleDeath() {
 
 	switch b.death.step(time.Now(), true) {
 	case deathRepop:
+		b.deaths++
 		b.log.Warn().Msg("died, releasing spirit")
 		b.client.RepopRequest()
 	case deathReclaim:
@@ -435,8 +611,6 @@ func (b *Bot) moveToward(dest player.WorldLocation) {
 	b.pos.O = o
 
 	if b.cfg.GroundFollow {
-		// Blend the height toward the destination so the bot follows the ground
-		// instead of hovering at its spawn height.
 		frac := min(float32(1), step/max(dist, 1))
 		b.pos.Z += (dest.Z - b.pos.Z) * frac
 	}
@@ -498,10 +672,41 @@ func (b *Bot) startLoot(t *client.Entity) {
 	b.log.Info().Str("name", b.nameOf(t)).Msg("looting corpse")
 	b.client.Loot(t.GUID)
 	b.pendingLoot = t.GUID
-	b.lootTimer = time.Now().Add(time.Second)
+	b.lootTimer = time.Now().Add(2 * time.Second)
 }
 
-// updateLoot releases an open loot window after a short delay.
+// handleLoot drains opened loot windows, takes everything and releases.
+func (b *Bot) handleLoot() {
+	for {
+		select {
+		case loot := <-b.client.LootOpened():
+			b.takeLoot(loot)
+		default:
+			return
+		}
+	}
+}
+
+func (b *Bot) takeLoot(loot client.LootInfo) {
+	if loot.Gold > 0 {
+		b.client.LootMoney()
+	}
+
+	for _, item := range loot.Items {
+		b.client.AutostoreLootItem(item.Slot)
+	}
+
+	b.client.LootRelease()
+
+	b.log.Info().
+		Uint32("gold", loot.Gold).
+		Int("items", len(loot.Items)).
+		Msg("looted")
+
+	b.pendingLoot = 0
+}
+
+// updateLoot releases a loot window the server never answered.
 func (b *Bot) updateLoot() {
 	if b.pendingLoot == 0 {
 		return
@@ -511,6 +716,69 @@ func (b *Bot) updateLoot() {
 		b.client.LootRelease()
 		b.pendingLoot = 0
 	}
+}
+
+// drainCombatErrors reacts to the server's attack rejections.
+func (b *Bot) drainCombatErrors() {
+	for {
+		select {
+		case reason := <-b.client.CombatErrors():
+			b.log.Debug().Str("reason", reason).Msg("combat error")
+
+			// A dead or unattackable target ends the engagement; the rest
+			// (range/facing) are handled by continuing to approach.
+			if b.target != 0 && (reason == "target is dead" || reason == "cannot attack that target") {
+				b.stopAttack()
+				b.target = 0
+				b.swinging = false
+			}
+		default:
+			return
+		}
+	}
+}
+
+func (b *Bot) maybeStatus(self *client.Entity) {
+	if time.Since(b.lastStatus) < statusInterval {
+		return
+	}
+
+	b.lastStatus = time.Now()
+
+	health := "?"
+	if self != nil {
+		health = fmt.Sprintf("%d/%d", self.Health(), self.MaxHealth())
+	}
+
+	b.log.Info().
+		Int("kills", b.kills).
+		Int("deaths", b.deaths).
+		Str("health", health).
+		Bool("hasTarget", b.target != 0).
+		Msg("status")
+}
+
+func (b *Bot) isBlacklisted(guid wow.GUID) bool {
+	until, ok := b.blacklist[guid]
+	if !ok {
+		return false
+	}
+
+	if time.Now().After(until) {
+		delete(b.blacklist, guid)
+
+		return false
+	}
+
+	return true
+}
+
+func (b *Bot) blacklistEntity(guid wow.GUID) {
+	if b.cfg.BlacklistFor <= 0 {
+		return
+	}
+
+	b.blacklist[guid] = time.Now().Add(b.cfg.BlacklistFor)
 }
 
 func (b *Bot) nameOf(e *client.Entity) string {

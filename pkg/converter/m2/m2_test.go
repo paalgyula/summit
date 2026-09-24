@@ -2,13 +2,119 @@ package m2
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/paalgyula/summit/pkg/converter/gltf"
 )
+
+func TestReadParticleRecord(t *testing.T) {
+	buf := make([]byte, 476)
+	binary.LittleEndian.PutUint32(buf[0:4], 0xFFFFFFFF) // particleId -1
+	binary.LittleEndian.PutUint32(buf[4:8], 0x1234)     // flags
+	binary.LittleEndian.PutUint16(buf[20:22], 7)        // bone
+	binary.LittleEndian.PutUint16(buf[22:24], 3)        // texture
+	buf[40] = ParticleBlendAdd                          // blendingType
+	buf[41] = ParticleEmitterSphere                     // emitterType
+	binary.LittleEndian.PutUint16(buf[42:44], 9)        // particleColorIndex
+	buf[44] = 1                                         // particleType
+	buf[45] = 2                                         // headOrTail
+	binary.LittleEndian.PutUint16(buf[48:50], 2)        // textureDimensions rows
+	binary.LittleEndian.PutUint16(buf[50:52], 4)        // textureDimensions cols
+	binary.LittleEndian.PutUint32(buf[172:176], math.Float32bits(0.5))
+
+	p := readParticle(buf, 0)
+	if p.ID != 0xFFFFFFFF || p.Flags != 0x1234 || p.Bone != 7 || p.Texture != 3 {
+		t.Fatalf("basic fields: %+v", p)
+	}
+	if p.Blending != ParticleBlendAdd || p.EmitterType != ParticleEmitterSphere {
+		t.Fatalf("blend/emitter: %+v", p)
+	}
+	if p.ColorIndex != 9 || p.ParticleTyp != 1 || p.HeadOrTail != 2 {
+		t.Fatalf("color/type/head: %+v", p)
+	}
+	if p.TextureRows != 2 || p.TextureCols != 4 {
+		t.Fatalf("texture dims: %d x %d", p.TextureRows, p.TextureCols)
+	}
+	if p.LifespanVary != 0.5 {
+		t.Fatalf("lifespanVary: %v", p.LifespanVary)
+	}
+}
+
+func TestParticlesExported(t *testing.T) {
+	// One emission-rate keyframe: timestamp 0 -> value 25 particles/sec.
+	raw := make([]byte, 8)
+	binary.LittleEndian.PutUint32(raw[4:8], math.Float32bits(25))
+	rate := M2Track{
+		Timestamps: []ArrayRef{{Count: 1, Offset: 0}},
+		Values:     []ArrayRef{{Count: 1, Offset: 4}},
+	}
+
+	model := &Model{
+		Name: "Emitting",
+		raw:  raw,
+		Bones: []M2Bone{
+			{ParentBone: -1, Pivot: [3]float32{0, 0, 1}},
+			{ParentBone: 0, Pivot: [3]float32{0, 0.5, 1.5}},
+		},
+		Textures: []M2Texture{{Type: TextureTypeFilename, Name: "Particles\\Snow.blp"}},
+		Particles: []M2Particle{{
+			Bone:         1,
+			Texture:      0,
+			Blending:     ParticleBlendAlpha,
+			EmitterType:  ParticleEmitterSphere,
+			Position:     [3]float32{0.2, 0.5, 1.5},
+			EmissionRate: rate,
+			ScaleVary:    [2]float32{0.3, 0.1},
+		}},
+	}
+
+	doc, err := ConvertToGLTF(model, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var node *gltf.Node
+	for i := range doc.Nodes {
+		if doc.Nodes[i].Name == ParticleNodePrefix+"0" {
+			node = &doc.Nodes[i]
+		}
+	}
+	if node == nil {
+		t.Fatal("Particle_0 node missing")
+	}
+	extras, ok := node.Extras.(ParticleExtras)
+	if !ok {
+		t.Fatalf("particle extras type: %T", node.Extras)
+	}
+	if extras.Kind != "particle" || extras.Rate != 25 || extras.Life != 1 {
+		t.Fatalf("extras: %+v", extras)
+	}
+	if extras.Texture != "Particles/Snow.webp" {
+		t.Errorf("texture path: %q", extras.Texture)
+	}
+	if extras.BlendMode != ParticleBlendAlpha || extras.EmitterType != ParticleEmitterSphere {
+		t.Errorf("blend/emitter: %+v", extras)
+	}
+	// Position - bone pivot = (0.2, 0, 0) M2 -> (0, 0, -0.2) glTF
+	if *node.Translation != [3]float32{0, 0, -0.2} {
+		t.Errorf("particle node translation: %v", *node.Translation)
+	}
+	// Parented to bone 1's node (index 1)
+	parented := false
+	for _, c := range doc.Nodes[1].Children {
+		if doc.Nodes[c].Name == ParticleNodePrefix+"0" {
+			parented = true
+		}
+	}
+	if !parented {
+		t.Error("particle node must be a child of its bone node")
+	}
+}
 
 func TestM2ConversionSynthetic(t *testing.T) {
 	model := &Model{
@@ -38,6 +144,42 @@ func TestM2ConversionSynthetic(t *testing.T) {
 
 	if buf.Len() < 50 {
 		t.Fatalf("GLB buffer too small: %d", buf.Len())
+	}
+}
+
+// A particle-only M2 has no vertices: the converter must not emit a glTF mesh
+// for it. A mesh with a null primitive list makes three.js' GLTFLoader throw,
+// which is how game objects like Blacksmith_smoke failed to render.
+func TestM2NoGeometryEmitsNoMesh(t *testing.T) {
+	model := &Model{
+		Name: "Blacksmith_smoke",
+		Bones: []M2Bone{
+			{KeyBoneID: 0, ParentBone: -1, Pivot: [3]float32{0, 0, 0}},
+			{KeyBoneID: -1, ParentBone: 0, Pivot: [3]float32{0, 1, 0}},
+		},
+	}
+
+	doc, err := ConvertToGLTF(model, nil)
+	if err != nil {
+		t.Fatalf("ConvertToGLTF failed: %v", err)
+	}
+
+	if len(doc.Meshes) != 0 {
+		t.Fatalf("expected no glTF meshes for a geometry-less M2, got %d", len(doc.Meshes))
+	}
+
+	var root *gltf.Node
+	for i := range doc.Nodes {
+		if doc.Nodes[i].Name == "Blacksmith_smoke_Root" {
+			root = &doc.Nodes[i]
+			break
+		}
+	}
+	if root == nil {
+		t.Fatal("expected the root node to exist")
+	}
+	if root.Mesh != nil {
+		t.Fatal("expected the root node to reference no mesh")
 	}
 }
 
@@ -244,12 +386,24 @@ func TestInspectItemModels(t *testing.T) {
 			minY, maxY = m.Vertices[0].Pos[1], m.Vertices[0].Pos[1]
 			minZ, maxZ = m.Vertices[0].Pos[2], m.Vertices[0].Pos[2]
 			for _, v := range m.Vertices {
-				if v.Pos[0] < minX { minX = v.Pos[0] }
-				if v.Pos[0] > maxX { maxX = v.Pos[0] }
-				if v.Pos[1] < minY { minY = v.Pos[1] }
-				if v.Pos[1] > maxY { maxY = v.Pos[1] }
-				if v.Pos[2] < minZ { minZ = v.Pos[2] }
-				if v.Pos[2] > maxZ { maxZ = v.Pos[2] }
+				if v.Pos[0] < minX {
+					minX = v.Pos[0]
+				}
+				if v.Pos[0] > maxX {
+					maxX = v.Pos[0]
+				}
+				if v.Pos[1] < minY {
+					minY = v.Pos[1]
+				}
+				if v.Pos[1] > maxY {
+					maxY = v.Pos[1]
+				}
+				if v.Pos[2] < minZ {
+					minZ = v.Pos[2]
+				}
+				if v.Pos[2] > maxZ {
+					maxZ = v.Pos[2]
+				}
 			}
 		}
 		t.Logf("ITEM %s: Verts=%d, Bones=%d, Attachments=%d", p, len(m.Vertices), len(m.Bones), len(m.Attachments))

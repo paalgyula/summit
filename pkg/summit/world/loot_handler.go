@@ -15,6 +15,31 @@ type lootSource struct {
 	LootType loot.LootType
 }
 
+// newLoot creates an empty loot with the item-template max-stack resolver wired
+// in, so oversized drops are split into valid stacks instead of using the loot
+// entry's drop count as if it were the item's stack size.
+func newLoot() *loot.Loot {
+	l := loot.NewLoot()
+	l.MaxStack = func(itemID uint32) uint8 {
+		tpl := basedata.GetInstance().LookupItem(itemID)
+		if tpl == nil {
+			return 0
+		}
+
+		if s := tpl.GetMaxStackSize(); s > 1 {
+			if s > 255 {
+				s = 255
+			}
+
+			return uint8(s)
+		}
+
+		return 0
+	}
+
+	return l
+}
+
 // HandleLoot handles CMSG_LOOT — player requests to loot a target.
 func (gc *WorldSession) HandleLoot(data wow.PacketData) {
 	if gc.player == nil {
@@ -34,59 +59,53 @@ func (gc *WorldSession) HandleLoot(data wow.PacketData) {
 		Uint64("target", targetGUID).
 		Msg("CMSG_LOOT")
 
+	server, ok := gc.ws.(*Server)
+	if !ok || server.lootMgr == nil {
+		gc.sendLootError(guid, loot.ErrorDidntKill)
+		return
+	}
+
 	// Determine what we're looting
 	var lt loot.LootType
-	var lootID uint32
+
+	l := newLoot()
 
 	switch guid.High() {
 	case wow.UnitGUID:
-		// Creature corpse loot — check lootable flag and look up loot ID
+		// Creature corpse loot — check the lootable flag and roll the creature's
+		// lootid from the loot manager.
 		// Source: AzerothCore Player.cpp:8248-8255 (SendLoot checks DYNFLAG_LOOTABLE)
 		npc := gc.getNPCByGUID(guid)
-		if npc == nil {
-			gc.sendLootError(guid, loot.ErrorDidntKill)
-			return
-		}
-
-		// Must have the lootable flag set (creature was killed and not yet looted)
-		if npc.DynamicFlags&UnitDynFlagLootable == 0 {
+		if npc == nil || npc.DynamicFlags&UnitDynFlagLootable == 0 {
 			gc.sendLootError(guid, loot.ErrorDidntKill)
 			return
 		}
 
 		lt = loot.LootCorpse
-		lootID = 0 // TODO: look up creature's lootId from creature_template
+
+		if !server.lootMgr.FillLoot(l, loot.StoreCreature, npc.LootID, loot.LootModeDefault) {
+			gc.log.Warn().Uint32("entry", npc.EntryID).Uint32("lootId", npc.LootID).
+				Msg("creature has no loot template")
+			gc.sendLootError(guid, loot.ErrorDidntKill)
+
+			return
+		}
+
+		l.GenerateMoneyLoot(npc.MinGold, npc.MaxGold)
 	case wow.GameObjectGUID:
 		lt = loot.LootCorpse
-		lootID = gc.getGameObjectLootID(guid)
+
+		lootID := gc.getGameObjectLootID(guid)
+		if lootID == 0 || !server.lootMgr.FillLoot(l, loot.StoreGameObject, lootID, loot.LootModeDefault) {
+			gc.sendLootError(guid, loot.ErrorDidntKill)
+
+			return
+		}
 	default:
 		gc.sendLootError(guid, loot.ErrorPlayerNotFound)
+
 		return
 	}
-
-	if lootID == 0 {
-		gc.sendLootError(guid, loot.ErrorDidntKill)
-		return
-	}
-
-	// Build loot from template
-	l := loot.NewLoot()
-
-	bd := basedata.GetInstance()
-	if bd == nil {
-		gc.sendLootError(guid, loot.ErrorDidntKill)
-		return
-	}
-
-	var refStore *loot.LootStore
-	if len(bd.ReferenceLootEntries) > 0 {
-		refStore = loot.NewLootStore("reference")
-		for _, e := range bd.ReferenceLootEntries {
-			refStore.AddEntry(*e)
-		}
-	}
-
-	_ = l.FillLoot(lootID, gc.getLootStore(lt), loot.LootModeDefault, refStore)
 
 	// Store loot on the player
 	gc.player.LootGUID = targetGUID
@@ -154,9 +173,10 @@ func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 	newItem.StackCount = uint32(item.Count)
 	newItem.EnsureGUID()
 
-	// Try to add to inventory
-	slotIdx := gc.player.Inventory.AddItem(newItem)
-	if slotIdx < 0 {
+	// Try to add to inventory (may merge into existing stacks and/or place a
+	// new stack for the remainder)
+	res := gc.player.Inventory.AddItem(newItem)
+	if !res.Placed && len(res.StackedInto) == 0 {
 		// Inventory full
 		gc.log.Warn().Msg("inventory full, cannot loot item")
 
@@ -169,11 +189,23 @@ func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 	// Send SMSG_LOOT_REMOVED to notify other looters
 	gc.sendLootRemoved(slot)
 
-	// Send SMSG_UPDATE_OBJECT with CreateObject block for the new item
 	upd := &Updater{}
-	pkt := upd.BuildItemCreateObject(newItem, gc.player)
-	if pkt != nil {
-		gc.Send(pkt)
+
+	// Existing stacks that grew need a values update so the client sees the new
+	// stack count (a create block would be wrong - the object already exists).
+	for _, stacked := range res.StackedInto {
+		if pkt := upd.BuildItemValuesUpdate(stacked, gc.player); pkt != nil {
+			gc.Send(pkt)
+		}
+	}
+
+	// Only a newly placed stack gets a CreateObject block. A fully merged loot
+	// item has no object of its own (StackCount 0, no slot), so creating one
+	// would leave a phantom item on the client.
+	if res.Placed {
+		if pkt := upd.BuildItemCreateObject(newItem, gc.player); pkt != nil {
+			gc.Send(pkt)
+		}
 	}
 
 	// Update player's inventory fields
@@ -332,34 +364,6 @@ func (gc *WorldSession) getGameObjectLootID(guid wow.GUID) uint32 {
 	}
 
 	return tpl.GetLootID()
-}
-
-// getLootStore returns the appropriate LootStore for the given loot type.
-func (gc *WorldSession) getLootStore(lt loot.LootType) *loot.LootStore {
-	bd := basedata.GetInstance()
-	if bd == nil {
-		return loot.NewLootStore("empty")
-	}
-
-	store := loot.NewLootStore("runtime")
-
-	switch lt {
-	case loot.LootCorpse:
-		// Load creature loot entries into the store
-		for _, entries := range bd.CreatureLoots {
-			for _, e := range entries {
-				store.AddEntry(e)
-			}
-		}
-		// Also load gameobject loot (for GO loot)
-		for _, entries := range bd.GameObjectLoots {
-			for _, e := range entries {
-				store.AddEntry(e)
-			}
-		}
-	}
-
-	return store
 }
 
 // clearLootableFlag clears UNIT_DYNFLAG_LOOTABLE on a creature corpse.

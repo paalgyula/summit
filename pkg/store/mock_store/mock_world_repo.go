@@ -41,6 +41,21 @@ func (m *MockWorldRepo) EXPECT() *MockWorldRepoMockRecorder {
 	return m.recorder
 }
 
+// GetAllCreatureAddons mocks base method.
+func (m *MockWorldRepo) GetAllCreatureAddons() (map[uint32]*store.CreatureAddon, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAllCreatureAddons")
+	ret0, _ := ret[0].(map[uint32]*store.CreatureAddon)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAllCreatureAddons indicates an expected call of GetAllCreatureAddons.
+func (mr *MockWorldRepoMockRecorder) GetAllCreatureAddons() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllCreatureAddons", reflect.TypeOf((*MockWorldRepo)(nil).GetAllCreatureAddons))
+}
+
 // GetAllCreatureQuestInvolvedRelations mocks base method.
 func (m *MockWorldRepo) GetAllCreatureQuestInvolvedRelations() (map[uint32][]uint32, error) {
 	m.ctrl.T.Helper()
@@ -69,6 +84,51 @@ func (m *MockWorldRepo) GetAllCreatureQuestRelations() (map[uint32][]uint32, err
 func (mr *MockWorldRepoMockRecorder) GetAllCreatureQuestRelations() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllCreatureQuestRelations", reflect.TypeOf((*MockWorldRepo)(nil).GetAllCreatureQuestRelations))
+}
+
+// GetAllLootTemplates mocks base method.
+func (m *MockWorldRepo) GetAllLootTemplates() (*store.LootTables, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAllLootTemplates")
+	ret0, _ := ret[0].(*store.LootTables)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAllLootTemplates indicates an expected call of GetAllLootTemplates.
+func (mr *MockWorldRepoMockRecorder) GetAllLootTemplates() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllLootTemplates", reflect.TypeOf((*MockWorldRepo)(nil).GetAllLootTemplates))
+}
+
+// GetAllWaypointPaths mocks base method.
+func (m *MockWorldRepo) GetAllWaypointPaths() (map[uint32]*store.WaypointPath, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAllWaypointPaths")
+	ret0, _ := ret[0].(map[uint32]*store.WaypointPath)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAllWaypointPaths indicates an expected call of GetAllWaypointPaths.
+func (mr *MockWorldRepoMockRecorder) GetAllWaypointPaths() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllWaypointPaths", reflect.TypeOf((*MockWorldRepo)(nil).GetAllWaypointPaths))
+}
+
+// GetCreatureAddon mocks base method.
+func (m *MockWorldRepo) GetCreatureAddon(creatureGUID uint32) (*store.CreatureAddon, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCreatureAddon", creatureGUID)
+	ret0, _ := ret[0].(*store.CreatureAddon)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCreatureAddon indicates an expected call of GetCreatureAddon.
+func (mr *MockWorldRepoMockRecorder) GetCreatureAddon(creatureGUID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCreatureAddon", reflect.TypeOf((*MockWorldRepo)(nil).GetCreatureAddon), creatureGUID)
 }
 
 // GetCreatureQuestInvolvedRelations mocks base method.
@@ -234,4 +294,19 @@ func (m *MockWorldRepo) GetQuestTemplates() (map[uint32]*store.QuestTemplate, er
 func (mr *MockWorldRepoMockRecorder) GetQuestTemplates() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetQuestTemplates", reflect.TypeOf((*MockWorldRepo)(nil).GetQuestTemplates))
+}
+
+// GetWaypointPath mocks base method.
+func (m *MockWorldRepo) GetWaypointPath(pathID uint32) (*store.WaypointPath, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWaypointPath", pathID)
+	ret0, _ := ret[0].(*store.WaypointPath)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWaypointPath indicates an expected call of GetWaypointPath.
+func (mr *MockWorldRepoMockRecorder) GetWaypointPath(pathID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWaypointPath", reflect.TypeOf((*MockWorldRepo)(nil).GetWaypointPath), pathID)
 }
