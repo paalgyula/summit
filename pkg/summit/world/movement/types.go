@@ -1,5 +1,11 @@
 package movement
 
+import (
+	"time"
+
+	"github.com/paalgyula/summit/pkg/wow"
+)
+
 // MovementGeneratorType identifies the kind of movement generator.
 // Values match AzerothCore's MovementGeneratorType enum.
 type MovementGeneratorType uint8
@@ -28,10 +34,10 @@ const (
 type MovementSlot uint8
 
 const (
-	MotionSlotIDLE      MovementSlot = 0 // Default movement (random, idle, waypoint)
-	MotionSlotACTIVE    MovementSlot = 1 // Combat movement (chase, flee)
+	MotionSlotIDLE       MovementSlot = 0 // Default movement (random, idle, waypoint)
+	MotionSlotACTIVE     MovementSlot = 1 // Combat movement (chase, flee)
 	MotionSlotCONTROLLED MovementSlot = 2 // Script-controlled movement
-	MotionSlotMAX       MovementSlot = 3
+	MotionSlotMAX        MovementSlot = 3
 )
 
 // MovementGenerator is the interface that all movement generators implement.
@@ -55,6 +61,50 @@ type MovementGenerator interface {
 
 	// GetSplineId returns the current spline ID (used by escort system).
 	GetSplineId() uint32
+}
+
+// MovementOwner is the interface that NPCs must implement to use the MotionMaster.
+// This avoids circular imports between the world and movement packages.
+type MovementOwner interface {
+	// GetSpawnPosition returns the creature's spawn position.
+	GetSpawnPosition() (x, y, z float32)
+
+	// GetCurrentPosition returns the creature's current position.
+	GetCurrentPosition() (x, y, z float32)
+
+	// IsAlive returns whether the creature is alive.
+	IsAlive() bool
+
+	// IsInCombat returns whether the creature is in combat.
+	IsInCombat() bool
+
+	// GetDefaultMovementType returns the creature's default movement type from DB.
+	GetDefaultMovementType() uint8
+
+	// GetWanderDistance returns the creature's wander distance.
+	GetWanderDistance() float32
+
+	// GetEntry returns the creature's entry ID (for logging).
+	GetEntry() uint32
+
+	// GetGUID returns the creature's GUID.
+	GetGUID() wow.GUID
+
+	// GetCurrentSpeed returns the current movement speed for the given move type.
+	GetCurrentSpeed(moveType wow.MoveType) float32
+
+	// SendPacket sends a packet to all players who can see this creature.
+	SendPacket(pkt *wow.Packet)
+
+	// MoveTo starts movement toward the given destination.
+	// The sendPacket callback is called with each movement packet.
+	MoveTo(destX, destY, destZ float32, now time.Time, flags uint32, sendPacket func(pkt *wow.Packet))
+
+	// StopMoving stops active movement.
+	StopMoving(sendPacket func(pkt *wow.Packet))
+
+	// SetOrientation sets the creature's facing direction.
+	SetOrientation(o float32)
 }
 
 // String returns the human-readable name of the generator type.

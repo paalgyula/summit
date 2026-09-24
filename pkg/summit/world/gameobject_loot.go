@@ -19,7 +19,7 @@ func (g *GameObject) FillLoot(mgr *loot.Manager) {
 		return
 	}
 
-	l := loot.NewLoot()
+	l := newLoot()
 	if !mgr.FillLoot(l, loot.StoreGameObject, lootID, loot.LootModeDefault) {
 		return
 	}

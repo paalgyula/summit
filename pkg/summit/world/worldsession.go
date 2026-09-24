@@ -106,6 +106,19 @@ func (gc *WorldSession) LoginCharacter(p *player.Player) {
 	p.Sender = gc
 	p.Init()
 
+	// Set up broadcast function for health/power updates
+	p.BroadcastPacket = func(pkt *wow.Packet) {
+		server, ok := gc.ws.(*Server)
+		if !ok {
+			return
+		}
+		for _, other := range server.GetOnlineSessions() {
+			if other.player != nil && other.player.IsInWorld {
+				other.socket.Send(pkt)
+			}
+		}
+	}
+
 	// Sync XP bar and talent points derived from current level.
 	p.Object.SetUInt32Value(object.PlayerXp, p.XP)
 	p.Object.SetUInt32Value(object.PlayerNextLevelXp, NextLevelXP(p.Level))

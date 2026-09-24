@@ -553,7 +553,8 @@ func importCreatureTemplate(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Co
 		        modelid1, modelid2, modelid3, modelid4, scale,
 		        rank, type, family, unit_class, unit_flags, dynamicflags,
 		        speed_walk, speed_run, baseattacktime, MovementType,
-		        Health_mod, dmg_multiplier, Armor_mod, flags_extra
+		        Health_mod, dmg_multiplier, Armor_mod, flags_extra,
+		        lootid, mingold, maxgold
 		 FROM creature_template`)
 	if err != nil {
 		return err
@@ -579,13 +580,15 @@ func importCreatureTemplate(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Co
 			baseAttackTime, movementType   uint32
 			healthMod, damageMod, armorMod float32
 			flagsExtra                     uint32
+			lootID, minGold, maxGold       uint32
 		)
 
 		if err := rows.Scan(&entry, &name, &subName, &minLevel, &maxLevel, &faction, &npcFlag,
 			&model1, &model2, &model3, &model4, &scale,
 			&rank, &ctype, &family, &unitClass, &unitFlags, &dynamicFlags,
 			&speedWalk, &speedRun, &baseAttackTime, &movementType,
-			&healthMod, &damageMod, &armorMod, &flagsExtra); err != nil {
+			&healthMod, &damageMod, &armorMod, &flagsExtra,
+			&lootID, &minGold, &maxGold); err != nil {
 			return err
 		}
 
@@ -622,6 +625,9 @@ func importCreatureTemplate(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Co
 			"damageMultiplier": damageMod,
 			"armorMultiplier":  armorMod,
 			"flagsExtra":       flagsExtra,
+			"lootId":           lootID,
+			"minGold":          minGold,
+			"maxGold":          maxGold,
 		})
 	}
 

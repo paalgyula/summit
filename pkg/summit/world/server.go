@@ -445,6 +445,11 @@ func (ws *Server) updateNPCs(now time.Time) {
 			continue
 		}
 
+		// Update the motion master (AI movement system)
+		if npc.MotionMaster != nil {
+			npc.MotionMaster.Update(50) // 50ms tick
+		}
+
 		// Interpolate active spline movement
 		npc.UpdatePositionFromSpline(now)
 

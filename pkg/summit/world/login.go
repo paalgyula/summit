@@ -55,6 +55,19 @@ func (gc *WorldSession) HandlePlayerLogin(data wow.PacketData) {
 	gc.player = p
 	p.Sender = gc
 
+	// Set up broadcast function for health/power updates
+	p.BroadcastPacket = func(pkt *wow.Packet) {
+		server, ok := gc.ws.(*Server)
+		if !ok {
+			return
+		}
+		for _, other := range server.GetOnlineSessions() {
+			if other.player != nil && other.player.IsInWorld {
+				other.socket.Send(pkt)
+			}
+		}
+	}
+
 	// Initialize player values (health, power, display, update fields)
 	p.Init()
 

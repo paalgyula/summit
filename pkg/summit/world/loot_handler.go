@@ -15,6 +15,31 @@ type lootSource struct {
 	LootType loot.LootType
 }
 
+// newLoot creates an empty loot with the item-template max-stack resolver wired
+// in, so oversized drops are split into valid stacks instead of using the loot
+// entry's drop count as if it were the item's stack size.
+func newLoot() *loot.Loot {
+	l := loot.NewLoot()
+	l.MaxStack = func(itemID uint32) uint8 {
+		tpl := basedata.GetInstance().LookupItem(itemID)
+		if tpl == nil {
+			return 0
+		}
+
+		if s := tpl.GetMaxStackSize(); s > 1 {
+			if s > 255 {
+				s = 255
+			}
+
+			return uint8(s)
+		}
+
+		return 0
+	}
+
+	return l
+}
+
 // HandleLoot handles CMSG_LOOT — player requests to loot a target.
 func (gc *WorldSession) HandleLoot(data wow.PacketData) {
 	if gc.player == nil {
@@ -43,7 +68,7 @@ func (gc *WorldSession) HandleLoot(data wow.PacketData) {
 	// Determine what we're looting
 	var lt loot.LootType
 
-	l := loot.NewLoot()
+	l := newLoot()
 
 	switch guid.High() {
 	case wow.UnitGUID:
@@ -148,9 +173,10 @@ func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 	newItem.StackCount = uint32(item.Count)
 	newItem.EnsureGUID()
 
-	// Try to add to inventory
-	slotIdx := gc.player.Inventory.AddItem(newItem)
-	if slotIdx < 0 {
+	// Try to add to inventory (may merge into existing stacks and/or place a
+	// new stack for the remainder)
+	res := gc.player.Inventory.AddItem(newItem)
+	if !res.Placed && len(res.StackedInto) == 0 {
 		// Inventory full
 		gc.log.Warn().Msg("inventory full, cannot loot item")
 
@@ -163,11 +189,23 @@ func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 	// Send SMSG_LOOT_REMOVED to notify other looters
 	gc.sendLootRemoved(slot)
 
-	// Send SMSG_UPDATE_OBJECT with CreateObject block for the new item
 	upd := &Updater{}
-	pkt := upd.BuildItemCreateObject(newItem, gc.player)
-	if pkt != nil {
-		gc.Send(pkt)
+
+	// Existing stacks that grew need a values update so the client sees the new
+	// stack count (a create block would be wrong - the object already exists).
+	for _, stacked := range res.StackedInto {
+		if pkt := upd.BuildItemValuesUpdate(stacked, gc.player); pkt != nil {
+			gc.Send(pkt)
+		}
+	}
+
+	// Only a newly placed stack gets a CreateObject block. A fully merged loot
+	// item has no object of its own (StackCount 0, no slot), so creating one
+	// would leave a phantom item on the client.
+	if res.Placed {
+		if pkt := upd.BuildItemCreateObject(newItem, gc.player); pkt != nil {
+			gc.Send(pkt)
+		}
 	}
 
 	// Update player's inventory fields

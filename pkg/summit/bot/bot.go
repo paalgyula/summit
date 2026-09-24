@@ -324,11 +324,13 @@ func (b *Bot) eligible(mob, self *client.Entity) bool {
 	return true
 }
 
-// findTarget returns the nearest eligible creature in range and inside the leash.
+// findTarget picks the best eligible creature in range and inside the leash. It
+// scores by how long the mob is likely to take (max health) plus the walk, so
+// the bot farms quick kills instead of stalling on a tanky mob.
 func (b *Bot) findTarget(self *client.Entity) *client.Entity {
 	var (
-		best     *client.Entity
-		bestDist = b.cfg.EngageRange
+		best      *client.Entity
+		bestScore = float64(math.MaxFloat32)
 	)
 
 	for _, e := range b.client.Entities() {
@@ -336,8 +338,14 @@ func (b *Bot) findTarget(self *client.Entity) *client.Entity {
 			continue
 		}
 
-		if d := distance(b.pos, e.Pos); d < bestDist {
-			bestDist = d
+		d := distance(b.pos, e.Pos)
+		if d > b.cfg.EngageRange {
+			continue
+		}
+
+		score := float64(e.MaxHealth()) + float64(d)*0.5
+		if score < bestScore {
+			bestScore = score
 			best = e
 		}
 	}

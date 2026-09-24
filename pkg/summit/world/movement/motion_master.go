@@ -1,34 +1,5 @@
 package movement
 
-import (
-	"github.com/rs/zerolog/log"
-)
-
-// MovementOwner is the interface that NPCs must implement to use the MotionMaster.
-// This avoids circular imports between the world and movement packages.
-type MovementOwner interface {
-	// GetSpawnPosition returns the creature's spawn position.
-	GetSpawnPosition() (x, y, z float32)
-
-	// GetCurrentPosition returns the creature's current position.
-	GetCurrentPosition() (x, y, z float32)
-
-	// IsAlive returns whether the creature is alive.
-	IsAlive() bool
-
-	// IsInCombat returns whether the creature is in combat.
-	IsInCombat() bool
-
-	// GetDefaultMovementType returns the creature's default movement type from DB.
-	GetDefaultMovementType() uint8
-
-	// GetWanderDistance returns the creature's wander distance.
-	GetWanderDistance() float32
-
-	// GetEntry returns the creature's entry ID (for logging).
-	GetEntry() uint32
-}
-
 // CleanFlag controls deferred cleanup behavior during updates.
 type CleanFlag uint8
 
@@ -406,9 +377,4 @@ func (mm *MotionMaster) GetDestination() (x, y, z float32, ok bool) {
 		return dp.GetDestination()
 	}
 	return 0, 0, 0, false
-}
-
-func init() {
-	// Suppress unused import
-	_ = log.Logger
 }

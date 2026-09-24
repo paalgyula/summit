@@ -8,6 +8,7 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The human warrior's CharStartOutfit row, with Item.dbc templates for it.
@@ -86,6 +87,41 @@ func TestCharacterEnumWritesDisplayIDs(t *testing.T) {
 	display, invType, _ = slot(player.EquipmentSlotHead)
 	assert.EqualValues(t, 0, display)
 	assert.EqualValues(t, 0, invType)
+}
+
+func TestAddItemStacksIntoExisting(t *testing.T) {
+	basedata.SetInstance(&basedata.Store{
+		Items: []*basedata.ItemTemplate{
+			{Entry: 2589, Stackable: 20},
+		},
+	})
+	defer basedata.SetInstance(nil)
+
+	p := &player.Player{ID: 7}
+	p.Inventory = player.NewInventory()
+
+	first := player.NewItem(2589, p.GUID())
+	first.StackCount = 5
+	res := p.Inventory.AddItem(first)
+	require.True(t, res.Placed)
+	require.Empty(t, res.StackedInto)
+
+	// A second drop merges into the first stack without opening a new slot.
+	second := player.NewItem(2589, p.GUID())
+	second.StackCount = 10
+	res = p.Inventory.AddItem(second)
+	assert.False(t, res.Placed)
+	require.Len(t, res.StackedInto, 1)
+	assert.EqualValues(t, 15, res.StackedInto[0].StackCount)
+
+	// 15 more: 5 fill the first stack to its max, the remaining 10 open a slot.
+	third := player.NewItem(2589, p.GUID())
+	third.StackCount = 15
+	res = p.Inventory.AddItem(third)
+	require.Len(t, res.StackedInto, 1)
+	assert.EqualValues(t, 20, res.StackedInto[0].StackCount)
+	assert.True(t, res.Placed)
+	assert.EqualValues(t, 10, p.Inventory.GetItem(res.Slot).StackCount)
 }
 
 func TestInspectSummitDat(t *testing.T) {

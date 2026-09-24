@@ -166,52 +166,77 @@ func (inv *Inventory) FindEmptyBackpackSlot() int {
 	return -1
 }
 
-// AddItem places an item in the first available backpack slot.
-// For stackable items, it first tries to stack with existing items of the same entry.
-// Returns the slot where the item was placed, or -1 if inventory is full.
-func (inv *Inventory) AddItem(item *Item) int {
+// AddItemResult reports where an item landed after AddItem.
+type AddItemResult struct {
+	// Slot is the slot a new stack was stored in, or -1 when no new stack was
+	// placed (the item fully merged into existing stacks, or there was no room).
+	Slot int
+	// Placed reports whether a new stack was stored in Slot.
+	Placed bool
+	// StackedInto lists the existing stacks that received part of the item and
+	// whose StackCount grew. The owner must be sent a values update for each so
+	// the client sees the new count.
+	StackedInto []*Item
+}
+
+// AddItem places an item in the backpack. Stackable items are first merged into
+// existing stacks of the same entry (up to the template's max stack size); any
+// remainder goes into the first empty backpack slot.
+//
+// The caller is responsible for sending the resulting object updates to the
+// client: a values update for every item in StackedInto and a create block for
+// the new stack when Placed is true.
+func (inv *Inventory) AddItem(item *Item) AddItemResult {
+	res := AddItemResult{Slot: -1}
 	if item == nil {
-		return -1
+		return res
 	}
 
 	tpl := basedata.GetInstance().LookupItem(item.ItemEntry)
 	maxStack := uint32(1)
 	if tpl != nil {
-		maxStack = uint32(tpl.GetMaxStackSize())
+		if s := tpl.GetMaxStackSize(); s > 1 {
+			maxStack = uint32(s)
+		}
 	}
 
 	// Try to stack with existing items first
 	if maxStack > 1 {
 		for i := InventorySlotItemStart; i < InventorySlotItemEnd; i++ {
 			existing := inv.Slots[i]
-			if existing != nil && existing.ItemEntry == item.ItemEntry && existing.StackCount < maxStack {
-				space := maxStack - existing.StackCount
-				toAdd := item.StackCount
-				if toAdd > space {
-					toAdd = space
-				}
+			if existing == nil || existing.ItemEntry != item.ItemEntry || existing.StackCount >= maxStack {
+				continue
+			}
 
-				existing.StackCount += toAdd
-				existing.UpdateFields()
-				item.StackCount -= toAdd
+			space := maxStack - existing.StackCount
+			toAdd := item.StackCount
+			if toAdd > space {
+				toAdd = space
+			}
 
-				if item.StackCount == 0 {
-					return i
-				}
+			existing.StackCount += toAdd
+			existing.UpdateFields()
+			item.StackCount -= toAdd
+			res.StackedInto = append(res.StackedInto, existing)
+
+			if item.StackCount == 0 {
+				return res
 			}
 		}
 	}
 
-	// Find empty slot
+	// Find empty slot for the remainder
 	slot := inv.FindEmptyBackpackSlot()
 	if slot < 0 {
-		return -1 // inventory full
+		return res // inventory full
 	}
 
 	item.SlotIndex = slot
 	inv.Slots[slot] = item
+	res.Slot = slot
+	res.Placed = true
 
-	return slot
+	return res
 }
 
 // CharEnumSlots is the number of item slots SMSG_CHAR_ENUM describes for a

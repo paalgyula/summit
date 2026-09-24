@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/paalgyula/summit/pkg/store"
+	"github.com/paalgyula/summit/pkg/summit/world/movement"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -89,6 +90,11 @@ type NPC struct {
 	MoveDurationMs uint32 // duration in ms
 	NextWanderTime int64  // Unix ms
 	WanderRadius   float32
+
+	// AI movement system
+	MotionMaster   *movement.MotionMaster
+	ThreatManager  *movement.ThreatManager
+	AI             movement.CreatureAI
 }
 
 // NewNPC creates a new NPC with the given parameters.
@@ -123,6 +129,11 @@ func NewNPC(entryID uint32, name string, displayID, faction uint32, level uint8,
 	}
 
 	n.init()
+
+	n.MotionMaster = movement.NewMotionMaster(n)
+	n.MotionMaster.InitDefault()
+	n.ThreatManager = movement.NewThreatManager(n)
+	n.AI = movement.NewDefaultCreatureAI(n, n.MotionMaster)
 
 	return n
 }
@@ -234,6 +245,11 @@ func NewNPCFromSpawn(spawn *store.CreatureSpawn, tmpl *store.CreatureTemplate) *
 
 	n.init()
 
+	n.MotionMaster = movement.NewMotionMaster(n)
+	n.MotionMaster.InitDefault()
+	n.ThreatManager = movement.NewThreatManager(n)
+	n.AI = movement.NewDefaultCreatureAI(n, n.MotionMaster)
+
 	return n
 }
 
@@ -299,6 +315,37 @@ func (n *NPC) GetGUID() wow.GUID {
 	return n.GUID()
 }
 
+// GetCurrentSpeed returns the current movement speed for the given move type (implements MovementOwner).
+func (n *NPC) GetCurrentSpeed(moveType wow.MoveType) float32 {
+	if n.Unit != nil && int(moveType) < len(n.Unit.Speed) {
+		return n.Unit.Speed[moveType]
+	}
+	// Default speeds
+	switch moveType {
+	case wow.MoveTypeWalk:
+		return 2.5
+	case wow.MoveTypeRun:
+		return 7.0
+	default:
+		return 7.0
+	}
+}
+
+// SendPacket sends a packet to all players who can see this creature (implements MovementOwner).
+// The actual sending is done through the map manager; this is a placeholder that
+// will be wired up properly when the map manager integration is complete.
+func (n *NPC) SendPacket(pkt *wow.Packet) {
+	// This will be called by generators; the actual packet sending
+	// is handled by the server's update loop which wraps this in a
+	// sendToVisible closure. For now, this is a no-op.
+	// TODO: Wire this up properly with the map manager
+}
+
+// SetOrientation sets the creature's facing direction (implements MovementOwner).
+func (n *NPC) SetOrientation(o float32) {
+	n.O = o
+}
+
 // GetPosition returns the NPC's world location (satisfies Map.AddNPC positionProvider).
 func (n *NPC) GetPosition() *player.WorldLocation {
 	return &player.WorldLocation{
@@ -321,9 +368,15 @@ func (n *NPC) GetHealth() uint32 {
 }
 
 // SetHealth sets the NPC's health, clamped to [0, MaxHealth].
+// Updates the UnitFieldHealth in the update fields.
 func (n *NPC) SetHealth(v uint32) {
 	if v > n.MaxHealth {
 		v = n.MaxHealth
+	}
+
+	// If already dead, keep at 0
+	if n.Health == 0 && v == 0 {
+		return
 	}
 
 	n.Health = v
@@ -366,6 +419,33 @@ func (n *NPC) GetPositionZ() float32 { return n.Z }
 
 // GetMapID returns the NPC's map ID.
 func (n *NPC) GetMapID() uint32 { return n.Map }
+
+// --- MovementOwner interface implementation ---
+
+// GetSpawnPosition returns the creature's spawn position.
+func (n *NPC) GetSpawnPosition() (x, y, z float32) {
+	return n.SpawnX, n.SpawnY, n.SpawnZ
+}
+
+// GetCurrentPosition returns the creature's current position.
+func (n *NPC) GetCurrentPosition() (x, y, z float32) {
+	return n.X, n.Y, n.Z
+}
+
+// GetDefaultMovementType returns the creature's default movement type from DB.
+func (n *NPC) GetDefaultMovementType() uint8 {
+	return n.MovementType
+}
+
+// GetWanderDistance returns the creature's wander distance.
+func (n *NPC) GetWanderDistance() float32 {
+	return n.WanderRadius
+}
+
+// GetEntry returns the creature's entry ID.
+func (n *NPC) GetEntry() uint32 {
+	return n.EntryID
+}
 
 // GetLevel returns the NPC's level as uint32.
 func (n *NPC) GetLevel() uint32 { return uint32(n.Level) }
@@ -662,6 +742,11 @@ func (n *NPC) Reset() {
 
 // IsInCombatState returns true if the NPC is in combat.
 func (n *NPC) IsInCombatState() bool {
+	return n.InCombat
+}
+
+// IsInCombat returns true if the NPC is in combat (implements MovementOwner).
+func (n *NPC) IsInCombat() bool {
 	return n.InCombat
 }
 

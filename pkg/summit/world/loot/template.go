@@ -103,11 +103,10 @@ func (t *LootTemplate) ProcessWithRefs(loot *Loot, mode LootMode, refStore *Loot
 
 		count := rollCount(entry.MinCount, entry.MaxCount)
 		loot.AddItem(LootItemData{
-			ItemID:       entry.Item,
-			Count:        count,
-			MaxStackSize: entry.MaxCount,
-			NeedsQuest:   entry.NeedQuest,
-			GroupID:      entry.GroupID,
+			ItemID:     entry.Item,
+			Count:      count,
+			NeedsQuest: entry.NeedQuest,
+			GroupID:    entry.GroupID,
 		})
 	}
 

@@ -3,6 +3,7 @@ package adt
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"testing"
 )
 
@@ -122,5 +123,74 @@ func TestADTRoundtrip(t *testing.T) {
 
 	if glbBuf.Len() < 100 {
 		t.Fatalf("GLB buffer too small: %d", glbBuf.Len())
+	}
+}
+
+// TestADTLiquidParsing builds an ADT with one MCNK and an MH2O chunk holding a
+// single ocean layer over the whole chunk, and checks it lands on the chunk and
+// that the export emits the water node.
+func TestADTLiquidParsing(t *testing.T) {
+	var buf bytes.Buffer
+
+	// MCNK at (0, 0), 128-byte header only.
+	var mcnkBuf bytes.Buffer
+	mcnkHeader := make([]byte, 128)
+	binary.LittleEndian.PutUint32(mcnkHeader[4:8], 0)
+	binary.LittleEndian.PutUint32(mcnkHeader[8:12], 0)
+	binary.Write(&mcnkBuf, binary.LittleEndian, mcnkHeader)
+	binary.Write(&buf, binary.LittleEndian, uint32(MagicMCNK))
+	binary.Write(&buf, binary.LittleEndian, uint32(mcnkBuf.Len()))
+	buf.Write(mcnkBuf.Bytes())
+
+	// MH2O: 256 headers (3072 bytes) then one 24-byte layer for chunk 0.
+	mh2o := make([]byte, 256*12+24)
+	binary.LittleEndian.PutUint32(mh2o[0:4], 3072) // offset_information
+	binary.LittleEndian.PutUint32(mh2o[4:8], 1)    // layer_count
+	info := 3072
+	binary.LittleEndian.PutUint16(mh2o[info:], 2)   // LiquidType id 2 = Ocean
+	binary.LittleEndian.PutUint16(mh2o[info+2:], 2) // liquid_object
+	binary.LittleEndian.PutUint32(mh2o[info+4:], math.Float32bits(0))
+	mh2o[info+8] = 0  // min_x
+	mh2o[info+9] = 0  // min_y
+	mh2o[info+10] = 0 // max_x
+	mh2o[info+11] = 0 // max_y
+	mh2o[info+12] = 0 // x_offset
+	mh2o[info+13] = 0 // y_offset
+	mh2o[info+14] = 8 // width
+	mh2o[info+15] = 8 // height
+
+	binary.Write(&buf, binary.LittleEndian, uint32(MagicMH2O))
+	binary.Write(&buf, binary.LittleEndian, uint32(len(mh2o)))
+	buf.Write(mh2o)
+
+	adt, err := ReadADT(&buf)
+	if err != nil {
+		t.Fatalf("ReadADT failed: %v", err)
+	}
+
+	chunk := adt.Chunks[0][0]
+	if chunk == nil {
+		t.Fatal("expected chunk (0, 0)")
+	}
+	if len(chunk.Liquids) != 1 {
+		t.Fatalf("expected 1 liquid layer, got %d", len(chunk.Liquids))
+	}
+	liq := chunk.Liquids[0]
+	if liq.Kind != LiquidOcean || liq.Type != 2 {
+		t.Fatalf("unexpected liquid kind/type: %+v", liq)
+	}
+	if liq.X != 0 || liq.Y != 0 || liq.W != 8 || liq.H != 8 {
+		t.Fatalf("unexpected liquid rect: %+v", liq)
+	}
+
+	var glbBuf bytes.Buffer
+	if err := adt.ExportGLB(&glbBuf); err != nil {
+		t.Fatalf("ExportGLB failed: %v", err)
+	}
+	if !bytes.Contains(glbBuf.Bytes(), []byte("WaterTile")) {
+		t.Fatal("expected the exported GLB to contain a WaterTile node")
+	}
+	if !bytes.Contains(glbBuf.Bytes(), []byte("liquid_ocean")) {
+		t.Fatal("expected the exported GLB to contain the ocean liquid material")
 	}
 }
