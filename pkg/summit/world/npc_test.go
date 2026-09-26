@@ -359,3 +359,111 @@ func TestNPCWaypointMovementFromAddon(t *testing.T) {
 		t.Fatal("expected NPC to start waypoint movement")
 	}
 }
+
+func TestNPCGetAttackDistance(t *testing.T) {
+	// Base aggro radius 20
+	npc := NewNPC(1001, "Defias Thug", 49, 14, 10, 200, 0, 0, 0, 0, 0, 0)
+	npc.AggroRadius = 20.0
+
+	// Target same level (10)
+	targetSame := NewNPC(2001, "Target Same", 49, 1, 10, 200, 0, 0, 0, 0, 0, 0)
+	if d := npc.GetAttackDistance(targetSame); d != 20.0 {
+		t.Fatalf("expected 20.0, got %f", d)
+	}
+
+	// Target higher level (15 -> levelDiff = +5, dist = 20 - 5 = 15)
+	targetHigh := NewNPC(2002, "Target High", 49, 1, 15, 200, 0, 0, 0, 0, 0, 0)
+	if d := npc.GetAttackDistance(targetHigh); d != 15.0 {
+		t.Fatalf("expected 15.0, got %f", d)
+	}
+
+	// Target very high level (50 -> levelDiff = +40, dist = 20 - 40 = -20 -> clamped to 5.0 min)
+	targetVeryHigh := NewNPC(2003, "Target Very High", 49, 1, 50, 200, 0, 0, 0, 0, 0, 0)
+	if d := npc.GetAttackDistance(targetVeryHigh); d != 5.0 {
+		t.Fatalf("expected min 5.0, got %f", d)
+	}
+
+	// Target lower level (5 -> levelDiff = -5, dist = 20 - (-5) = 25)
+	targetLow := NewNPC(2004, "Target Low", 49, 1, 5, 200, 0, 0, 0, 0, 0, 0)
+	if d := npc.GetAttackDistance(targetLow); d != 25.0 {
+		t.Fatalf("expected 25.0, got %f", d)
+	}
+
+	// Target very low level (levelDiff clamped at -25 -> dist = 20 - (-25) = 45 -> clamped to 45.0 max)
+	targetVeryLow := NewNPC(2005, "Target Very Low", 49, 1, 1, 200, 0, 0, 0, 0, 0, 0)
+	npcBoss := NewNPC(1002, "Boss", 49, 14, 80, 200, 0, 0, 0, 0, 0, 0)
+	npcBoss.AggroRadius = 20.0
+	if d := npcBoss.GetAttackDistance(targetVeryLow); d != 45.0 {
+		t.Fatalf("expected max 45.0, got %f", d)
+	}
+}
+
+func TestNPCCanStartAttack(t *testing.T) {
+	// Hostile NPC at (0, 0, 0), level 10, faction 14
+	npc := NewNPC(1001, "Defias Thug", 49, 14, 10, 200, 0, 0, 0, 0, 0, 0)
+	npc.AggroRadius = 20.0
+
+	// Friendly NPC (faction 14) -> should not attack
+	friendly := NewNPC(1002, "Defias Ally", 49, 14, 10, 200, 5, 0, 0, 0, 0, 0)
+	if npc.CanStartAttack(friendly, false) {
+		t.Fatal("expected CanStartAttack to return false for friendly target")
+	}
+
+	// Hostile target (faction 1 - player faction) within aggro distance (10y away)
+	hostile := NewNPC(2001, "Hostile Player Mock", 49, 1, 10, 200, 10, 0, 0, 0, 0, 0)
+	if !npc.CanStartAttack(hostile, false) {
+		t.Fatal("expected CanStartAttack to return true for in-range hostile target")
+	}
+
+	// Hostile target too far away (30y away, aggro distance is 20y)
+	farHostile := NewNPC(2002, "Far Hostile", 49, 1, 10, 200, 30, 0, 0, 0, 0, 0)
+	if npc.CanStartAttack(farHostile, false) {
+		t.Fatal("expected CanStartAttack to return false for out-of-range hostile target")
+	}
+	// Force attack should bypass distance check
+	if !npc.CanStartAttack(farHostile, true) {
+		t.Fatal("expected CanStartAttack with force=true to return true for out-of-range target")
+	}
+
+	// Hostile target with excessive Z difference (> 11.0 yards)
+	highHostile := NewNPC(2003, "High Hostile", 49, 1, 10, 200, 5, 0, 15, 0, 0, 0)
+	if npc.CanStartAttack(highHostile, false) {
+		t.Fatal("expected CanStartAttack to return false when Z diff > 11.0 yards")
+	}
+
+	// Dead target
+	deadHostile := NewNPC(2004, "Dead Hostile", 49, 1, 10, 200, 5, 0, 0, 0, 0, 0)
+	deadHostile.Health = 0
+	if npc.CanStartAttack(deadHostile, false) {
+		t.Fatal("expected CanStartAttack to return false for dead target")
+	}
+}
+
+func TestNPCMovementPacketSender(t *testing.T) {
+	npc := NewNPC(1001, "Defias Thug", 49, 14, 10, 200, 0, 0, 0, 0, 0, 0)
+
+	var sentPackets []*wow.Packet
+	npc.PacketSender = func(pkt *wow.Packet) {
+		sentPackets = append(sentPackets, pkt)
+	}
+
+	// MoveTo with nil sendPacket should use PacketSender
+	now := time.Now()
+	npc.MoveTo(10, 20, 0, now, 0, nil)
+	if len(sentPackets) != 1 {
+		t.Fatalf("expected 1 packet sent, got %d", len(sentPackets))
+	}
+	if sentPackets[0].Opcode() != wow.ServerMonsterMove {
+		t.Fatalf("expected ServerMonsterMove opcode, got %v", sentPackets[0].Opcode())
+	}
+
+	// StopMoving with nil sendPacket should also use PacketSender
+	npc.StopMoving(nil)
+	if len(sentPackets) != 2 {
+		t.Fatalf("expected 2 packets sent, got %d", len(sentPackets))
+	}
+	if sentPackets[1].Opcode() != wow.ServerMonsterMove {
+		t.Fatalf("expected ServerMonsterMove stop opcode, got %v", sentPackets[1].Opcode())
+	}
+}
+

@@ -105,6 +105,12 @@ type MovementOwner interface {
 
 	// SetOrientation sets the creature's facing direction.
 	SetOrientation(o float32)
+
+	// GetOrientation returns the creature's facing direction.
+	GetOrientation() float32
+
+	// HasActiveMovement returns true if the creature is currently moving along a spline.
+	HasActiveMovement() bool
 }
 
 // String returns the human-readable name of the generator type.

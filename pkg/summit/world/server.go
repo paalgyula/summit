@@ -21,6 +21,7 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/world/lfg"
 	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
+	"github.com/paalgyula/summit/pkg/summit/world/movement"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/summit/world/worldstate"
@@ -445,7 +446,55 @@ func (ws *Server) updateNPCs(now time.Time) {
 			continue
 		}
 
-		// Update the motion master (AI movement system)
+		sendToVisible := func(pkt *wow.Packet) {
+			if ws.mapManager != nil {
+				m := ws.mapManager.FindBaseMap(npc.Map)
+				if m != nil {
+					m.SendToNPCVisiblePlayers(npc.GUID(), pkt)
+					return
+				}
+			}
+			ws.BroadcastPacket(pkt)
+		}
+		npc.PacketSender = sendToVisible
+
+		// Ensure MotionMaster and AI are initialized
+		if npc.MotionMaster == nil {
+			npc.MotionMaster = movement.NewMotionMaster(npc)
+			npc.MotionMaster.InitDefault()
+		}
+		if npc.AI == nil {
+			ai := movement.NewDefaultCreatureAI(npc, npc.MotionMaster)
+			if npc.ThreatManager != nil {
+				ai.SetThreatManager(npc.ThreatManager)
+			}
+			npc.AI = ai
+		}
+
+		// Initialize waypoint generator if waypoint path exists
+		if npc.MovementType == store.MotionTypeWaypoint && npc.WaypointPath != nil {
+			if !npc.MotionMaster.HasMovementGeneratorType(movement.MotionTypeWAYPOINT) && !npc.InCombat {
+				npc.MotionMaster.Mutate(movement.NewWaypointGenerator(0, npc.WaypointPath, true), movement.MotionSlotIDLE)
+			}
+		}
+
+		if !npc.InCombat {
+			// Proximity aggro scan using AzerothCore rules
+			for _, p := range players {
+				if npc.CanStartAttack(p, false) {
+					npc.Attack(p, true)
+					npc.AddThreat(p, 100.0)
+					break
+				}
+			}
+		}
+
+		// Update AI
+		if npc.AI != nil {
+			npc.AI.UpdateAI(50)
+		}
+
+		// Update the motion master (AI movement system: chase, follow, home, random, waypoint)
 		if npc.MotionMaster != nil {
 			npc.MotionMaster.Update(50) // 50ms tick
 		}
@@ -453,65 +502,8 @@ func (ws *Server) updateNPCs(now time.Time) {
 		// Interpolate active spline movement
 		npc.UpdatePositionFromSpline(now)
 
-		if !npc.InCombat {
-			// Proximity aggro scan
-			for _, p := range players {
-				if p.Location.Map != npc.Map {
-					continue
-				}
-				dx := p.Location.X - npc.X
-				dy := p.Location.Y - npc.Y
-				dz := p.Location.Z - npc.Z
-				distSq := dx*dx + dy*dy + dz*dz
-
-				aggroRadius := npc.AggroRadius
-				if aggroRadius <= 0 {
-					aggroRadius = 20.0
-				}
-				if distSq <= aggroRadius*aggroRadius {
-					if IsHostileToCheck(npc, p) {
-						npc.Attack(p, true)
-						npc.AddThreat(p, 100.0)
-						break
-					}
-				}
-			}
-
-			// Idle wander if not in combat
-			if !npc.InCombat {
-				// Create a send function that only sends to players who can see this NPC
-				sendToVisible := func(pkt *wow.Packet) {
-					if ws.mapManager != nil {
-						m := ws.mapManager.FindBaseMap(npc.Map)
-						if m != nil {
-							m.SendToNPCVisiblePlayers(npc.GUID(), pkt)
-							return
-						}
-					}
-					// Fallback to broadcast if map not found
-					ws.BroadcastPacket(pkt)
-				}
-
-				// Waypoint movement takes priority over random wander
-				if npc.MovementType == store.MotionTypeWaypoint && npc.WaypointPath != nil {
-					ProcessNPCWaypoint(npc, now, sendToVisible)
-				} else if npc.MovementType == store.MotionTypeRandom {
-					ProcessNPCWander(npc, now, sendToVisible)
-				}
-			}
-		} else {
-			// In combat: process chase, attack swings, and combat exit timer
-			sendToVisible := func(pkt *wow.Packet) {
-				if ws.mapManager != nil {
-					m := ws.mapManager.FindBaseMap(npc.Map)
-					if m != nil {
-						m.SendToNPCVisiblePlayers(npc.GUID(), pkt)
-						return
-					}
-				}
-				ws.BroadcastPacket(pkt)
-			}
-			ProcessNPCChase(npc, now, sendToVisible)
+		if npc.InCombat {
+			// In combat: process attack swings and combat timers
 			ProcessNPCCombatTick(npc, now, sendToVisible)
 			ProcessCombatTimer(npc, now)
 		}

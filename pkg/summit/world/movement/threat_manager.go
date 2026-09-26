@@ -89,8 +89,8 @@ func (tm *ThreatManager) ClearThreat() {
 // SelectVictim returns the GUID with the highest threat that is alive.
 // It accepts a predicate function to check if a target is valid.
 func (tm *ThreatManager) SelectVictim(isValid func(guid interface{}) bool) interface{} {
-	tm.mu.RLock()
-	defer tm.mu.RUnlock()
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 
 	var bestGuid interface{}
 	var bestThreat float64
@@ -102,7 +102,60 @@ func (tm *ThreatManager) SelectVictim(isValid func(guid interface{}) bool) inter
 		}
 	}
 
+	tm.victim = bestGuid
 	return bestGuid
+}
+
+// ReselectVictimWithThreshold selects a victim applying AzerothCore's threat threshold rules:
+// - Switching from current victim to a melee target requires > 110% of current victim's threat.
+// - Switching from current victim to a ranged target requires > 130% of current victim's threat.
+func (tm *ThreatManager) ReselectVictimWithThreshold(isMelee func(guid interface{}) bool, isValid func(guid interface{}) bool) interface{} {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	if len(tm.threats) == 0 {
+		tm.victim = nil
+		return nil
+	}
+
+	var highestGuid interface{}
+	var highestThreat float64
+
+	for guid, threat := range tm.threats {
+		if threat > highestThreat && isValid(guid) {
+			highestGuid = guid
+			highestThreat = threat
+		}
+	}
+
+	if highestGuid == nil {
+		tm.victim = nil
+		return nil
+	}
+
+	// If no current victim or current victim is no longer valid, adopt highest
+	if tm.victim == nil || !isValid(tm.victim) {
+		tm.victim = highestGuid
+		return highestGuid
+	}
+
+	currentThreat := tm.threats[tm.victim]
+	if highestGuid == tm.victim {
+		return tm.victim
+	}
+
+	// Threat switch threshold
+	threshold := 1.3
+	if isMelee != nil && isMelee(highestGuid) {
+		threshold = 1.1
+	}
+
+	if highestThreat > currentThreat*threshold {
+		tm.victim = highestGuid
+		return highestGuid
+	}
+
+	return tm.victim
 }
 
 // GetVictim returns the current victim.

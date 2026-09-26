@@ -95,6 +95,7 @@ type NPC struct {
 	MotionMaster   *movement.MotionMaster
 	ThreatManager  *movement.ThreatManager
 	AI             movement.CreatureAI
+	PacketSender   func(pkt *wow.Packet)
 }
 
 // NewNPC creates a new NPC with the given parameters.
@@ -107,6 +108,7 @@ func NewNPC(entryID uint32, name string, displayID, faction uint32, level uint8,
 		Name:            name,
 		DisplayID:       displayID,
 		Faction:         faction,
+		FactionID:       faction,
 		Level:           level,
 		Health:          health,
 		MaxHealth:       health,
@@ -133,7 +135,9 @@ func NewNPC(entryID uint32, name string, displayID, faction uint32, level uint8,
 	n.MotionMaster = movement.NewMotionMaster(n)
 	n.MotionMaster.InitDefault()
 	n.ThreatManager = movement.NewThreatManager(n)
-	n.AI = movement.NewDefaultCreatureAI(n, n.MotionMaster)
+	ai := movement.NewDefaultCreatureAI(n, n.MotionMaster)
+	ai.SetThreatManager(n.ThreatManager)
+	n.AI = ai
 
 	return n
 }
@@ -248,7 +252,9 @@ func NewNPCFromSpawn(spawn *store.CreatureSpawn, tmpl *store.CreatureTemplate) *
 	n.MotionMaster = movement.NewMotionMaster(n)
 	n.MotionMaster.InitDefault()
 	n.ThreatManager = movement.NewThreatManager(n)
-	n.AI = movement.NewDefaultCreatureAI(n, n.MotionMaster)
+	ai := movement.NewDefaultCreatureAI(n, n.MotionMaster)
+	ai.SetThreatManager(n.ThreatManager)
+	n.AI = ai
 
 	return n
 }
@@ -332,18 +338,25 @@ func (n *NPC) GetCurrentSpeed(moveType wow.MoveType) float32 {
 }
 
 // SendPacket sends a packet to all players who can see this creature (implements MovementOwner).
-// The actual sending is done through the map manager; this is a placeholder that
-// will be wired up properly when the map manager integration is complete.
 func (n *NPC) SendPacket(pkt *wow.Packet) {
-	// This will be called by generators; the actual packet sending
-	// is handled by the server's update loop which wraps this in a
-	// sendToVisible closure. For now, this is a no-op.
-	// TODO: Wire this up properly with the map manager
+	if n.PacketSender != nil && pkt != nil {
+		n.PacketSender(pkt)
+	}
 }
 
 // SetOrientation sets the creature's facing direction (implements MovementOwner).
 func (n *NPC) SetOrientation(o float32) {
 	n.O = o
+}
+
+// GetOrientation returns the creature's facing direction (implements MovementOwner).
+func (n *NPC) GetOrientation() float32 {
+	return n.O
+}
+
+// HasActiveMovement returns true if the creature is currently moving along a spline (implements MovementOwner).
+func (n *NPC) HasActiveMovement() bool {
+	return n.IsMoving
 }
 
 // GetPosition returns the NPC's world location (satisfies Map.AddNPC positionProvider).
@@ -541,6 +554,10 @@ func (n *NPC) AddThreat(attacker interface{}, threat float32) {
 	currentThreat := n.ThreatList[uint64(attackerGUID)]
 	n.threatMu.Unlock()
 
+	if n.ThreatManager != nil {
+		n.ThreatManager.AddThreat(attacker, float64(threat))
+	}
+
 	n.AddAttacker(attackerGUID)
 	n.SetInCombat()
 
@@ -548,6 +565,11 @@ func (n *NPC) AddThreat(attacker interface{}, threat float32) {
 	if n.victim == nil {
 		n.victim = attacker
 		n.ChaseTarget = attacker
+		if n.AI != nil {
+			n.AI.EnterCombat(attacker)
+		} else if n.MotionMaster != nil {
+			n.MotionMaster.MoveChase(attacker, n.ChaseRadius)
+		}
 	} else if currentVictim, ok := n.victim.(guidGetter); ok {
 		n.threatMu.RLock()
 		victimThreat := n.ThreatList[uint64(currentVictim.GetGUID())]
@@ -556,6 +578,9 @@ func (n *NPC) AddThreat(attacker interface{}, threat float32) {
 		if currentThreat > victimThreat*1.1 || !n.victimIsAlive() {
 			n.victim = attacker
 			n.ChaseTarget = attacker
+			if n.MotionMaster != nil {
+				n.MotionMaster.MoveChase(attacker, n.ChaseRadius)
+			}
 		}
 	}
 }
@@ -767,14 +792,73 @@ func (n *NPC) Attack(victim interface{}, meleeAttack bool) {
 	}
 
 	n.victim = victim
+	n.ChaseTarget = victim
 	n.AddAttacker(gg.GetGUID())
 	n.SetInCombat()
+
+	if n.AI != nil {
+		n.AI.EnterCombat(victim)
+	} else if n.MotionMaster != nil {
+		n.MotionMaster.MoveChase(victim, n.ChaseRadius)
+	}
 }
 
 // AttackStop stops the current attack.
 func (n *NPC) AttackStop() {
 	n.victim = nil
 	n.InCombat = false
+}
+
+// GetAttackDistance computes the aggro distance towards target based on level difference.
+// Mirrors AzerothCore's Creature::GetAttackDistance.
+func (n *NPC) GetAttackDistance(target CombatUnit) float32 {
+	if target == nil {
+		return 0
+	}
+	levelDiff := int32(target.GetLevel()) - int32(n.Level)
+	if levelDiff < -25 {
+		levelDiff = -25
+	}
+	baseDist := n.AggroRadius
+	if baseDist <= 0 {
+		baseDist = 20.0
+	}
+	retDist := baseDist - float32(levelDiff)
+	if retDist < 5.0 {
+		retDist = 5.0
+	}
+	if retDist > 45.0 {
+		retDist = 45.0
+	}
+	return retDist
+}
+
+// CanStartAttack checks if this NPC can aggro / attack the target.
+// Mirrors AzerothCore's Creature::CanStartAttack.
+func (n *NPC) CanStartAttack(target CombatUnit, force bool) bool {
+	if !n.IsAlive() || target == nil || !target.IsAlive() {
+		return false
+	}
+	if target.GetMapID() != n.Map {
+		return false
+	}
+	// Vertical Z check: in AzerothCore CREATURE_Z_ATTACK_RANGE is 11 yards
+	dz := float64(target.GetPositionZ() - n.Z)
+	if math.Abs(dz) > 11.0 {
+		return false
+	}
+	if !IsHostileToCheck(n, target) {
+		return false
+	}
+	if !force {
+		dx := float64(target.GetPositionX() - n.X)
+		dy := float64(target.GetPositionY() - n.Y)
+		dist2D := float32(math.Sqrt(dx*dx + dy*dy))
+		if dist2D > n.GetAttackDistance(target) {
+			return false
+		}
+	}
+	return true
 }
 
 // MoveTo sets a destination and begins movement towards it.
@@ -831,6 +915,9 @@ func (n *NPC) MoveToWithVelocity(destX, destY, destZ, velocity float32, now time
 	if sendPacket != nil {
 		pkt := BuildMonsterMovePacket(n.GUID(), n.X, n.Y, n.Z, destX, destY, destZ, n.SplineID, durationMs, flags)
 		sendPacket(pkt)
+	} else if n.PacketSender != nil {
+		pkt := BuildMonsterMovePacket(n.GUID(), n.X, n.Y, n.Z, destX, destY, destZ, n.SplineID, durationMs, flags)
+		n.PacketSender(pkt)
 	}
 }
 
@@ -844,6 +931,9 @@ func (n *NPC) StopMoving(sendPacket func(pkt *wow.Packet)) {
 	if sendPacket != nil {
 		pkt := BuildMonsterMoveStopPacket(n.GUID(), n.X, n.Y, n.Z, n.SplineID)
 		sendPacket(pkt)
+	} else if n.PacketSender != nil {
+		pkt := BuildMonsterMoveStopPacket(n.GUID(), n.X, n.Y, n.Z, n.SplineID)
+		n.PacketSender(pkt)
 	}
 }
 

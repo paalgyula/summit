@@ -57,12 +57,10 @@ func (g *RandomGenerator) Update(owner interface{}, _ uint32) bool {
 		return true
 	}
 
-	// Don't move if already moving
-	_, _, _ = o.GetCurrentPosition()
-	x, y, z := o.GetCurrentPosition()
-	_ = x
-	_ = y
-	_ = z
+	// Don't start a new wander if already moving
+	if o.HasActiveMovement() {
+		return true
+	}
 
 	// Pick random point within wander distance of spawn
 	spawnX, spawnY, spawnZ := o.GetSpawnPosition()
@@ -76,8 +74,8 @@ func (g *RandomGenerator) Update(owner interface{}, _ uint32) bool {
 	destY := spawnY + float32(dist*math.Sin(angle))
 	destZ := spawnZ // keep same Z as spawn
 
-	// Calculate speed and flags
-	flags := uint32(SplineFlagRunMode)
+	// Creatures walk while wandering (AzerothCore behavior)
+	flags := uint32(SplineFlagWalkMode)
 
 	// Start movement
 	o.MoveTo(destX, destY, destZ, time.Now(), flags, nil)

@@ -246,6 +246,62 @@ func (mm *MotionMaster) MoveRandom(wanderDistance float32) {
 	mm.Mutate(NewRandomGenerator(wanderDistance), MotionSlotIDLE)
 }
 
+// MoveChase sets a chase movement generator in the ACTIVE slot.
+// Mirrors AzerothCore's MotionMaster::MoveChase.
+func (mm *MotionMaster) MoveChase(target interface{}, maxDist float32) {
+	if mm.owner == nil || target == nil {
+		return
+	}
+
+	if mm.GetCurrentMovementGeneratorType() == MotionTypeCHASE {
+		if gen, ok := mm.Top().(*ChaseGenerator); ok {
+			gen.SetTarget(target)
+			if maxDist > 0 {
+				gen.maxChaseDist = maxDist
+			}
+			return
+		}
+	}
+
+	mm.Mutate(NewChaseGenerator(target, maxDist), MotionSlotACTIVE)
+}
+
+// MoveFollow sets a follow movement generator in the ACTIVE slot.
+// Mirrors AzerothCore's MotionMaster::MoveFollow.
+func (mm *MotionMaster) MoveFollow(target interface{}, dist float32, angle float32) {
+	if mm.owner == nil || target == nil {
+		return
+	}
+
+	if mm.GetCurrentMovementGeneratorType() == MotionTypeFOLLOW {
+		if gen, ok := mm.Top().(*FollowGenerator); ok {
+			gen.SetTarget(target)
+			gen.SetOffsetAndAngle(dist, angle)
+			return
+		}
+	}
+
+	mm.Mutate(NewFollowGenerator(target, dist, angle), MotionSlotACTIVE)
+}
+
+// MoveTargetedHome sets a home movement generator in the ACTIVE slot.
+// Mirrors AzerothCore's MotionMaster::MoveTargetedHome.
+func (mm *MotionMaster) MoveTargetedHome() {
+	if mm.owner == nil {
+		return
+	}
+	mm.Mutate(NewHomeGenerator(false), MotionSlotACTIVE)
+}
+
+// MovePoint sets a point movement generator in the ACTIVE slot.
+// Mirrors AzerothCore's MotionMaster::MovePoint.
+func (mm *MotionMaster) MovePoint(id uint32, x, y, z float32) {
+	if mm.owner == nil {
+		return
+	}
+	mm.Mutate(NewPointGenerator(x, y, z, id, false), MotionSlotACTIVE)
+}
+
 // --- Deferred cleanup methods ---
 
 func (mm *MotionMaster) directClean(reset bool) {

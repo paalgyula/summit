@@ -1400,6 +1400,11 @@ func (p *Player) TeleportTo(mapID uint32, x, y, z, o float32) {
 	p.Location.O = o
 }
 
+// GetOrientation returns the player's facing orientation.
+func (p *Player) GetOrientation() float32 {
+	return p.Location.O
+}
+
 // UpdateInventoryFields updates the player's inventory update fields.
 // This sets PlayerFieldInvSlotHead and PlayerFieldPackSlot_1 with item GUIDs.
 func (p *Player) UpdateInventoryFields() {

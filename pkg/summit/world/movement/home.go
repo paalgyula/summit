@@ -48,19 +48,23 @@ func (g *HomeGenerator) Update(owner interface{}, _ uint32) bool {
 	// If close enough to spawn, we've arrived
 	if distance < 0.5 {
 		g.arrived = true
+		if o.HasActiveMovement() {
+			o.StopMoving(nil)
+		}
 		return false
 	}
 
-	// Determine movement flags
-	var flags uint32
-	if g.walk {
-		flags = SplineFlagWalkMode
-	} else {
-		flags = SplineFlagRunMode
-	}
+	// If not currently moving, start moving towards spawn
+	if !o.HasActiveMovement() {
+		var flags uint32
+		if g.walk {
+			flags = SplineFlagWalkMode
+		} else {
+			flags = SplineFlagRunMode
+		}
 
-	// Move to spawn position
-	o.MoveTo(sx, sy, sz, time.Now(), flags, nil)
+		o.MoveTo(sx, sy, sz, time.Now(), flags, nil)
+	}
 
 	return true
 }

@@ -588,6 +588,45 @@ func DealDamage(attacker, victim CombatUnit, damageInfo *CalcDamageInfo) uint32 
 	return totalDamage
 }
 
+// DealSpellDamage applies spell damage to victim and handles all side effects.
+// Mirrors AzerothCore Unit::DealSpellDamage / Unit::DealDamage.
+func DealSpellDamage(attacker, victim CombatUnit, damage uint32) uint32 {
+	if victim == nil || !victim.IsAlive() || damage == 0 {
+		return 0
+	}
+
+	// AI hooks
+	if victim.IsCreature() {
+		victim.OnDamageTaken(attacker, damage)
+		victim.AddThreat(attacker, float32(damage))
+	}
+	if attacker != nil && attacker.IsCreature() {
+		attacker.OnDamageDealt(victim, damage)
+	}
+
+	// Check if victim is in duel
+	duelInfo := getDuelInfo(victim)
+	if duelInfo != nil && duelInfo.State == DuelStateInProgress {
+		health := victim.GetHealth()
+		if damage >= health {
+			damage = health - 1
+			completeDuel(duelInfo, DuelWon)
+		}
+	}
+
+	// Apply damage to health
+	currentHealth := victim.GetHealth()
+	if damage >= currentHealth {
+		Kill(attacker, victim, nil)
+	} else {
+		newHealth := currentHealth - damage
+		victim.SetHealth(newHealth)
+		grantRageOnDamageTaken(victim, damage)
+	}
+
+	return damage
+}
+
 // Kill handles the death of a unit.
 func Kill(attacker, victim CombatUnit, damageInfo *CalcDamageInfo) {
 	// Called from DealDamage before the health is written, so the victim is
@@ -1013,13 +1052,14 @@ func IsFriendlyToCheck(self, target CombatUnit) bool {
 		return true
 	}
 
-	fm := GetFactionManager()
-	if !fm.IsLoaded() {
-		return false
-	}
-
 	selfFaction := getFactionID(self)
 	targetFaction := getFactionID(target)
+
+	fm := GetFactionManager()
+	if !fm.IsLoaded() {
+		// Fallback: simple same-faction check
+		return selfFaction != 0 && selfFaction == targetFaction
+	}
 
 	return fm.IsFriendlyTo(selfFaction, targetFaction)
 }
@@ -1030,7 +1070,10 @@ func getFactionID(unit CombatUnit) uint32 {
 		return p.FactionID
 	}
 	if n, ok := unit.(*NPC); ok {
-		return n.FactionID
+		if n.FactionID != 0 {
+			return n.FactionID
+		}
+		return n.Faction
 	}
 	return 0
 }
@@ -1040,7 +1083,13 @@ func getFactionID(unit CombatUnit) uint32 {
 // ProcessNPCChase handles NPC movement toward a chase target.
 // Called from the world update loop.
 func ProcessNPCChase(npc *NPC, now time.Time, sendPacket func(pkt *wow.Packet)) {
-	if npc == nil || !npc.InCombat || npc.ChaseTarget == nil {
+	if npc == nil || !npc.InCombat {
+		return
+	}
+	if npc.ChaseTarget == nil && npc.victim != nil {
+		npc.ChaseTarget = npc.victim
+	}
+	if npc.ChaseTarget == nil {
 		return
 	}
 
@@ -1329,7 +1378,7 @@ func UpdateCombatEnd(unit CombatUnit) {
 	}
 }
 
-// ExitCombat forces an NPC out of combat.
+// ExitCombat forces an NPC out of combat and initiates evade mode.
 func (n *NPC) ExitCombat() {
 	n.InCombat = false
 	n.victim = nil
@@ -1337,5 +1386,15 @@ func (n *NPC) ExitCombat() {
 	n.Attackers = nil
 	n.ClearThreat()
 	n.Object.RemoveFlag(object.UnitFieldFlags, UnitFlagInCombat)
-	// TODO: send movement stop, return to spawn
+
+	// In WoW / AC, evading creatures regenerate to full health
+	if n.IsAlive() && n.Health < n.MaxHealth {
+		n.SetHealth(n.MaxHealth)
+	}
+
+	if n.AI != nil {
+		n.AI.ExitCombat()
+	} else if n.MotionMaster != nil {
+		n.MotionMaster.MoveTargetedHome()
+	}
 }

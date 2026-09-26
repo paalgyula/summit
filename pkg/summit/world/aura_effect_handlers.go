@@ -17,17 +17,25 @@ func handlePeriodicDamage(target, caster Unit, eff *AuraEffect) {
 
 	damage := uint32(eff.Amount)
 
-	// Cap damage to target health
-	health := target.GetHealth()
-	if damage > health {
-		damage = health
-	}
+	if combatTarget, ok := target.(CombatUnit); ok {
+		var attacker CombatUnit
+		if casterCombat, ok := caster.(CombatUnit); ok {
+			attacker = casterCombat
+		}
+		DealSpellDamage(attacker, combatTarget, damage)
+	} else {
+		// Cap damage to target health
+		health := target.GetHealth()
+		if damage > health {
+			damage = health
+		}
 
-	if damage == 0 {
-		return
-	}
+		if damage == 0 {
+			return
+		}
 
-	target.SetHealth(health - damage)
+		target.SetHealth(health - damage)
+	}
 }
 
 // handlePeriodicHeal heals the target each tick.

@@ -49,6 +49,8 @@ func (m *mockOwner) SendPacket(_ *wow.Packet) {}
 func (m *mockOwner) MoveTo(_ float32, _ float32, _ float32, _ time.Time, _ uint32, _ func(*wow.Packet)) {}
 func (m *mockOwner) StopMoving(_ func(*wow.Packet)) {}
 func (m *mockOwner) SetOrientation(_ float32) {}
+func (m *mockOwner) GetOrientation() float32 { return 0 }
+func (m *mockOwner) HasActiveMovement() bool { return false }
 
 func TestMotionMaster_InitialState(t *testing.T) {
 	owner := newMockOwner()

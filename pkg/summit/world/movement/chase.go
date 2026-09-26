@@ -52,45 +52,51 @@ func (g *ChaseGenerator) Update(owner interface{}, diff uint32) bool {
 
 	// Get owner position
 	ox, oy, oz := o.GetCurrentPosition()
+	tx, ty, tz := target.GetPositionX(), target.GetPositionY(), target.GetPositionZ()
+
+	// Check leash range from spawn position
+	sx, sy, sz := o.GetSpawnPosition()
+	sdx := ox - sx
+	sdy := oy - sy
+	sdz := oz - sz
+	distFromSpawn := float32(math.Sqrt(float64(sdx*sdx + sdy*sdy + sdz*sdz)))
+	if distFromSpawn > g.maxChaseDist {
+		return false // leash exceeded from spawn
+	}
 
 	// Calculate distance to target
-	dx := target.GetPositionX() - ox
-	dy := target.GetPositionY() - oy
-	dz := target.GetPositionZ() - oz
+	dx := tx - ox
+	dy := ty - oy
+	dz := tz - oz
 	distance := float32(math.Sqrt(float64(dx*dx + dy*dy + dz*dz)))
 
-	// Check leash range — if too far, exit chase
+	// Check leash range to target
 	if distance > g.maxChaseDist {
 		return false
 	}
 
-	// If in melee range (3.5 yards), stop moving
-	if distance < 3.5 {
-		// Stop movement if currently moving
+	// If in melee range (3.5 yards), stop moving and face target
+	if distance <= 3.5 {
+		if o.HasActiveMovement() {
+			o.StopMoving(nil)
+		}
+		o.SetOrientation(float32(math.Atan2(float64(dy), float64(dx))))
 		return true
 	}
 
-	// Periodically check if we need to recalculate path
+	// Periodically check if we need to recalculate path or start moving
 	g.recalculateTimer += diff
-	if g.recalculateTimer < g.recalcInterval {
-		return true // still active, don't recalculate yet
+	targetDestDiffX := tx - g.lastTargetPos[0]
+	targetDestDiffY := ty - g.lastTargetPos[1]
+	targetMovedDist := float32(math.Sqrt(float64(targetDestDiffX*targetDestDiffX + targetDestDiffY*targetDestDiffY)))
+
+	if !o.HasActiveMovement() || (g.recalculateTimer >= g.recalcInterval && targetMovedDist > 1.5) {
+		g.recalculateTimer = 0
+		o.MoveTo(tx, ty, tz, time.Now(), SplineFlagRunMode, nil)
+		g.lastTargetPos[0] = tx
+		g.lastTargetPos[1] = ty
+		g.lastTargetPos[2] = tz
 	}
-	g.recalculateTimer = 0
-
-	// Check if target moved significantly (> 2 yards from last destination)
-	targetDestDiffX := target.GetPositionX() - g.lastTargetPos[0]
-	targetDestDiffY := target.GetPositionY() - g.lastTargetPos[1]
-	_ = targetDestDiffX
-	_ = targetDestDiffY
-
-	// Move to target position
-	o.MoveTo(target.GetPositionX(), target.GetPositionY(), target.GetPositionZ(),
-		time.Now(), SplineFlagRunMode, nil)
-
-	// Update last target position
-	g.lastTargetPos[0] = target.GetPositionX()
-	g.lastTargetPos[1] = target.GetPositionY()
-	g.lastTargetPos[2] = target.GetPositionZ()
 
 	return true
 }

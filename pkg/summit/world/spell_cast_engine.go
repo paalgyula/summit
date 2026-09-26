@@ -252,6 +252,8 @@ func (s *Spell) handleEffects() {
 		target := s.Targets.UnitTarget
 
 		switch SpellEffect(effect.Effect) {
+		case SpellEffectInstantKill:
+			s.effectInstantKill(i, target)
 		case SpellEffectSchoolDamage:
 			s.effectSchoolDamage(i, target)
 		case SpellEffectHeal:
@@ -269,6 +271,27 @@ func (s *Spell) handleEffects() {
 		case SpellEffectTeleportUnit:
 			s.effectTeleportUnit(i, target)
 		}
+	}
+}
+
+// effectInstantKill kills the target unit immediately.
+func (s *Spell) effectInstantKill(idx int, target Unit) {
+	if target == nil || !target.IsAlive() {
+		return
+	}
+
+	if s.Info.GetEffect(idx) == nil {
+		return
+	}
+
+	if combatTarget, ok := target.(CombatUnit); ok {
+		var attacker CombatUnit
+		if s.Caster != nil {
+			attacker = s.Caster
+		}
+		Kill(attacker, combatTarget, nil)
+	} else {
+		target.SetHealth(0)
 	}
 }
 
@@ -302,14 +325,22 @@ func (s *Spell) effectSchoolDamage(idx int, target Unit) {
 
 	s.EffectDamage[idx] = damage
 
-	// Apply damage directly for now (full damage, no absorption/resistance)
-	currentHealth := target.GetHealth()
-	absorb := uint32(damage)
-	if absorb > currentHealth {
-		absorb = currentHealth
-	}
+	if combatTarget, ok := target.(CombatUnit); ok {
+		var attacker CombatUnit
+		if s.Caster != nil {
+			attacker = s.Caster
+		}
+		DealSpellDamage(attacker, combatTarget, uint32(damage))
+	} else {
+		// Apply damage directly for now (full damage, no absorption/resistance)
+		currentHealth := target.GetHealth()
+		absorb := uint32(damage)
+		if absorb > currentHealth {
+			absorb = currentHealth
+		}
 
-	target.SetHealth(currentHealth - absorb)
+		target.SetHealth(currentHealth - absorb)
+	}
 }
 
 // effectHeal applies direct healing to the target.
