@@ -24,6 +24,7 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/world/movement"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/summit/world/quest"
+	"github.com/paalgyula/summit/pkg/summit/world/vendor"
 	"github.com/paalgyula/summit/pkg/summit/world/worldstate"
 	"github.com/paalgyula/summit/pkg/summit/world/wsconn"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -94,6 +95,9 @@ type Server struct {
 	// LFG manager
 	lfgMgr *lfg.Manager
 
+	// Vendor manager (npc_vendor items, buy/sell/stock)
+	vendorMgr *vendor.Manager
+
 	// Chat configuration
 	chatConfig ChatConfig
 }
@@ -109,6 +113,7 @@ func NewServer(opts ...ServerOption) (*Server, error) {
 	worldServer.spawns = NewSpawnManager()
 	worldServer.gameObjects = NewGameObjectManager()
 	worldServer.spellMgr = NewSpellMgr()
+	worldServer.vendorMgr = vendor.NewManager(nil)
 
 	// Initialize map management system
 	worldServer.mapManager = mapmanager.GetMapManager()
@@ -192,6 +197,9 @@ func (ws *Server) StartServer(worldStore store.WorldRepo, charStore store.Charac
 
 	// Initialize quest manager with world data
 	ws.questMgr = quest.NewManager(worldStore)
+
+	// Initialize vendor manager with world data
+	ws.vendorMgr = vendor.NewManager(worldStore)
 
 	// Load creature spawns from database (falls back to hardcoded if no world store)
 	ws.spawns = NewSpawnManagerFromDB(worldStore)
@@ -454,7 +462,6 @@ func (ws *Server) updateNPCs(now time.Time) {
 					return
 				}
 			}
-			ws.BroadcastPacket(pkt)
 		}
 		npc.PacketSender = sendToVisible
 

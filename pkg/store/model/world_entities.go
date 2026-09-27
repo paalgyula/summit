@@ -330,3 +330,15 @@ type ItemSocketEntity struct {
 
 // CollectionName returns the MongoDB collection name.
 func (ItemTemplateEntity) CollectionName() string { return "item_template" }
+
+// VendorItemEntity is the MongoDB document for the npc_vendor collection.
+type VendorItemEntity struct {
+	Entry        uint32 `bson:"entry"`
+	Slot         int16  `bson:"slot"`
+	Item         uint32 `bson:"item"`
+	MaxCount     uint32 `bson:"maxcount"`
+	IncrTime     uint32 `bson:"incrtime"`
+	ExtendedCost uint32 `bson:"ExtendedCost"`
+}
+
+func (VendorItemEntity) CollectionName() string { return "npc_vendor" }

@@ -30,6 +30,7 @@ type WorldStore struct {
 	gameObjectLoot      *mongo.Collection
 	itemLoot            *mongo.Collection
 	referenceLoot       *mongo.Collection
+	npcVendors          *mongo.Collection
 }
 
 // NewWorldStore creates a new WorldStore using the given database.
@@ -48,6 +49,7 @@ func NewWorldStore(db *mongo.Database) *WorldStore {
 		gameObjectLoot:      db.Collection("gameobjectLootTemplate"),
 		itemLoot:            db.Collection("itemLootTemplate"),
 		referenceLoot:       db.Collection("referenceLootTemplate"),
+		npcVendors:          db.Collection("npc_vendor"),
 	}
 }
 
@@ -782,4 +784,72 @@ func (w *WorldStore) GetPlayerCreateActions(race, class uint8) ([]store.PlayerCr
 	}
 
 	return actions, nil
+}
+
+// GetVendorItems returns the vendor items for a given creature entry.
+func (w *WorldStore) GetVendorItems(entry uint32) ([]store.VendorItem, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	opts := options.Find().SetSort(bson.D{{Key: "slot", Value: 1}})
+	cursor, err := w.npcVendors.Find(ctx, bson.M{"entry": entry}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("GetVendorItems: %w", err)
+	}
+
+	defer cursor.Close(ctx) //nolint:errcheck
+
+	var items []store.VendorItem
+
+	for cursor.Next(ctx) {
+		var e model.VendorItemEntity
+		if err := cursor.Decode(&e); err != nil {
+			return nil, fmt.Errorf("GetVendorItems decode: %w", err)
+		}
+
+		items = append(items, store.VendorItem{
+			Entry:        e.Entry,
+			Slot:         e.Slot,
+			Item:         e.Item,
+			MaxCount:     e.MaxCount,
+			IncrTime:     e.IncrTime,
+			ExtendedCost: e.ExtendedCost,
+		})
+	}
+
+	return items, cursor.Err()
+}
+
+// GetAllVendorItems loads all vendor items, grouped by creature entry.
+func (w *WorldStore) GetAllVendorItems() (map[uint32][]store.VendorItem, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	opts := options.Find().SetSort(bson.D{{Key: "slot", Value: 1}})
+	cursor, err := w.npcVendors.Find(ctx, bson.M{}, opts)
+	if err != nil {
+		return nil, fmt.Errorf("GetAllVendorItems: %w", err)
+	}
+
+	defer cursor.Close(ctx) //nolint:errcheck
+
+	result := make(map[uint32][]store.VendorItem)
+
+	for cursor.Next(ctx) {
+		var e model.VendorItemEntity
+		if err := cursor.Decode(&e); err != nil {
+			return nil, fmt.Errorf("GetAllVendorItems decode: %w", err)
+		}
+
+		result[e.Entry] = append(result[e.Entry], store.VendorItem{
+			Entry:        e.Entry,
+			Slot:         e.Slot,
+			Item:         e.Item,
+			MaxCount:     e.MaxCount,
+			IncrTime:     e.IncrTime,
+			ExtendedCost: e.ExtendedCost,
+		})
+	}
+
+	return result, cursor.Err()
 }

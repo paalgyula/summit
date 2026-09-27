@@ -43,6 +43,12 @@ const (
 
 	// InventorySlotTotal is the total number of player inventory slots.
 	InventorySlotTotal = 39
+
+	// BuybackSlotStart and BuybackSlotEnd are the 12 buyback slots.
+	// Matches AzerothCore BUYBACK_SLOT_START (74) and BUYBACK_SLOT_END (86).
+	BuybackSlotStart = 74
+	BuybackSlotEnd   = 86
+	BuybackSlotCount = 12
 )
 
 // Inventory holds all items for a player, indexed by slot.

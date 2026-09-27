@@ -303,6 +303,35 @@ func (upd *Updater) BuildInventoryUpdate(p *player.Player) *wow.Packet {
 		}
 	}
 
+	// Player coinage (money / copper)
+	if int(object.PlayerFieldCoinage) < p.Object.ValuesCount() {
+		mask.SetBit(uint32(object.PlayerFieldCoinage))
+	}
+
+	// Vendor buyback slots (12 slots * 2 GUID fields)
+	for i := 0; i < 24; i++ {
+		field := int(object.PlayerFieldVendorbuybackSlot_1) + i
+		if field < p.Object.ValuesCount() {
+			mask.SetBit(uint32(field))
+		}
+	}
+
+	// Vendor buyback prices (12 slots)
+	for i := 0; i < 12; i++ {
+		field := int(object.PlayerFieldBuybackPrice_1) + i
+		if field < p.Object.ValuesCount() {
+			mask.SetBit(uint32(field))
+		}
+	}
+
+	// Vendor buyback timestamps (12 slots)
+	for i := 0; i < 12; i++ {
+		field := int(object.PlayerFieldBuybackTimestamp_1) + i
+		if field < p.Object.ValuesCount() {
+			mask.SetBit(uint32(field))
+		}
+	}
+
 	block := p.Object.BuildValuesUpdateBlock(mask, p.Object)
 	buf.WriteBytes(block)
 

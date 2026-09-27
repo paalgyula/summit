@@ -310,3 +310,33 @@ func (mr *MockWorldRepoMockRecorder) GetWaypointPath(pathID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWaypointPath", reflect.TypeOf((*MockWorldRepo)(nil).GetWaypointPath), pathID)
 }
+
+// GetAllVendorItems mocks base method.
+func (m *MockWorldRepo) GetAllVendorItems() (map[uint32][]store.VendorItem, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetAllVendorItems")
+	ret0, _ := ret[0].(map[uint32][]store.VendorItem)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetAllVendorItems indicates an expected call of GetAllVendorItems.
+func (mr *MockWorldRepoMockRecorder) GetAllVendorItems() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllVendorItems", reflect.TypeOf((*MockWorldRepo)(nil).GetAllVendorItems))
+}
+
+// GetVendorItems mocks base method.
+func (m *MockWorldRepo) GetVendorItems(entry uint32) ([]store.VendorItem, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetVendorItems", entry)
+	ret0, _ := ret[0].([]store.VendorItem)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetVendorItems indicates an expected call of GetVendorItems.
+func (mr *MockWorldRepoMockRecorder) GetVendorItems(entry any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetVendorItems", reflect.TypeOf((*MockWorldRepo)(nil).GetVendorItems), entry)
+}

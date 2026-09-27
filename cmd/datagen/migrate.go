@@ -121,7 +121,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 			"creature_queststarter", "creature_questender",
 			"gameobjectTemplate", "gameobject",
 			"creatureLootTemplate", "gameobjectLootTemplate", "itemLootTemplate", "referenceLootTemplate",
-			"creature_addon", "waypoint_data",
+			"creature_addon", "waypoint_data", "npc_vendor",
 		}
 
 		for _, name := range collections {
@@ -163,6 +163,7 @@ func runMigrate(cmd *cobra.Command, args []string) error {
 		{name: "gameobject_loot_template", collection: "gameobjectLootTemplate", importF: importLootTemplateTable("gameobject_loot_template")},
 		{name: "item_loot_template", collection: "itemLootTemplate", importF: importLootTemplateTable("item_loot_template")},
 		{name: "reference_loot_template", collection: "referenceLootTemplate", importF: importLootTemplateTable("reference_loot_template")},
+		{name: "npc_vendor", importF: importNpcVendor},
 	}
 
 	total := len(jobs)
@@ -1175,6 +1176,45 @@ func importCreatureQuestStarter(ctx context.Context, mysqlDB *sql.DB, coll *mong
 	}
 
 	return insertDocs(ctx, coll, docs)
+}
+
+func importNpcVendor(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Collection) error {
+	rows, err := mysqlDB.QueryContext(ctx,
+		"SELECT entry, slot, item, maxcount, incrtime, ExtendedCost FROM npc_vendor")
+	if err != nil {
+		return err
+	}
+
+	defer rows.Close() //nolint:errcheck
+
+	var docs []interface{}
+
+	for rows.Next() {
+		var (
+			entry        uint32
+			slot         int16
+			item         uint32
+			maxCount     uint32
+			incrTime     uint32
+			extendedCost uint32
+		)
+
+		if err := rows.Scan(&entry, &slot, &item, &maxCount, &incrTime, &extendedCost); err != nil {
+			return err
+		}
+
+		docs = append(docs, bson.M{
+			"_id":          fmt.Sprintf("%d_%d_%d", entry, item, extendedCost),
+			"entry":        entry,
+			"slot":         slot,
+			"item":         item,
+			"maxcount":     maxCount,
+			"incrtime":     incrTime,
+			"ExtendedCost": extendedCost,
+		})
+	}
+
+	return upsertDocs(ctx, coll, docs)
 }
 
 func importCreatureQuestEnder(ctx context.Context, mysqlDB *sql.DB, coll *mongo.Collection) error {

@@ -204,6 +204,13 @@ func (gc *WorldSession) RegisterHandlers(handlers ...PacketHandler) {
 
 	// XP toggle handler
 	gc.opcodes.Handle(wow.ClientToggleXpGain, gc.HandleToggleXpGain)
+
+	// Vendor handlers
+	gc.opcodes.Handle(wow.ClientListInventory, gc.HandleListInventory)
+	gc.opcodes.Handle(wow.ClientBuyItem, gc.HandleBuyItem)
+	gc.opcodes.Handle(wow.ClientBuyItemInSlot, gc.HandleBuyItemInSlot)
+	gc.opcodes.Handle(wow.ClientSellItem, gc.HandleSellItem)
+	gc.opcodes.Handle(wow.ClientBuybackItem, gc.HandleBuybackItem)
 }
 
 func (gc *WorldSession) Handle(pkt *wow.Packet) {

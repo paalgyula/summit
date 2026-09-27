@@ -75,6 +75,20 @@ type WorldRepo interface {
 
 	// Loot templates (creature/gameobject/item/reference _loot_template)
 	GetAllLootTemplates() (*LootTables, error)
+
+	// Vendor items (npc_vendor)
+	GetVendorItems(entry uint32) ([]VendorItem, error)
+	GetAllVendorItems() (map[uint32][]VendorItem, error)
+}
+
+// VendorItem represents an item sold by an NPC vendor (npc_vendor).
+type VendorItem struct {
+	Entry        uint32
+	Slot         int16
+	Item         uint32
+	MaxCount     uint32
+	IncrTime     uint32
+	ExtendedCost uint32
 }
 
 // PlayerCreateAction is one starting action-bar button of a race / class.

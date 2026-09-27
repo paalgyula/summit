@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/paalgyula/summit/pkg/summit/world/map"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
 )
@@ -207,20 +208,38 @@ func (gc *WorldSession) updatePlayerPosition(info *MovementInfo) {
 
 // broadcastMovement broadcasts the movement to other players in range.
 func (gc *WorldSession) broadcastMovement(opcode wow.OpCode, info *MovementInfo) {
+	if gc.player == nil {
+		return
+	}
+
 	// Create the movement packet
 	pkt := wow.NewPacket(opcode)
 	_ = pkt.Write(info.GUID)
 	WriteMovementInfo(pkt, info)
 
-	// Send to all other sessions
 	server, ok := gc.ws.(*Server)
 	if !ok {
 		return
 	}
 
+	// Only send to players on the same map who have this player in visibility range.
+	if server.mapManager != nil {
+		m := server.mapManager.FindMap(gc.player.Location.Map, gc.player.CurrentInstanceID)
+		if m != nil {
+			m.SendToPlayerVisibleObjects(info.GUID, pkt)
+			return
+		}
+	}
+
 	for _, other := range server.GetOtherSessions(gc) {
-		if other.player != nil && other.player.IsInWorld {
-			other.socket.Send(pkt)
+		if other.player != nil && other.player.IsInWorld && other.player.Location.Map == gc.player.Location.Map {
+			dist := mapmanager.Distance2DPositions(
+				gc.player.Location.X, gc.player.Location.Y,
+				other.player.Location.X, other.player.Location.Y,
+			)
+			if dist <= mapmanager.DefaultVisibilityDistance {
+				other.socket.Send(pkt)
+			}
 		}
 	}
 }
@@ -263,9 +282,22 @@ func (gc *WorldSession) HandleMovementSpeed(opcode wow.OpCode, data wow.PacketDa
 
 	server, ok := gc.ws.(*Server)
 	if ok {
+		if server.mapManager != nil {
+			m := server.mapManager.FindMap(gc.player.Location.Map, gc.player.CurrentInstanceID)
+			if m != nil {
+				m.SendToPlayerVisibleObjects(guid, pkt)
+				return
+			}
+		}
 		for _, other := range server.GetOtherSessions(gc) {
-			if other.player != nil && other.player.IsInWorld {
-				other.socket.Send(pkt)
+			if other.player != nil && other.player.IsInWorld && other.player.Location.Map == gc.player.Location.Map {
+				dist := mapmanager.Distance2DPositions(
+					gc.player.Location.X, gc.player.Location.Y,
+					other.player.Location.X, other.player.Location.Y,
+				)
+				if dist <= mapmanager.DefaultVisibilityDistance {
+					other.socket.Send(pkt)
+				}
 			}
 		}
 	}

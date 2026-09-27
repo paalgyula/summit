@@ -61,9 +61,22 @@ func (gc *WorldSession) HandlePlayerLogin(data wow.PacketData) {
 		if !ok {
 			return
 		}
+		if server.mapManager != nil {
+			m := server.mapManager.FindMap(p.Location.Map, p.CurrentInstanceID)
+			if m != nil {
+				m.SendToPlayerVisibleObjects(p.GUID(), pkt)
+				return
+			}
+		}
 		for _, other := range server.GetOnlineSessions() {
-			if other.player != nil && other.player.IsInWorld {
-				other.socket.Send(pkt)
+			if other.player != nil && other.player.IsInWorld && other.player.Location.Map == p.Location.Map {
+				dist := mapmanager.Distance2DPositions(
+					p.Location.X, p.Location.Y,
+					other.player.Location.X, other.player.Location.Y,
+				)
+				if dist <= mapmanager.DefaultVisibilityDistance {
+					other.socket.Send(pkt)
+				}
 			}
 		}
 	}
@@ -241,7 +254,7 @@ func (gc *WorldSession) sendNearbyPlayers(p *player.Player) {
 	sightRange := mapmanager.DefaultVisibilityDistance
 
 	for _, other := range server.GetOtherSessions(gc) {
-		if other.player == nil || !other.player.IsInWorld {
+		if other.player == nil || !other.player.IsInWorld || other.player.Location.Map != p.Location.Map {
 			continue
 		}
 

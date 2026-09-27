@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/paalgyula/summit/pkg/summit/world/quest"
+	"github.com/paalgyula/summit/pkg/summit/world/vendor"
 	"github.com/paalgyula/summit/pkg/wow"
 	"github.com/rs/zerolog/log"
 )
@@ -87,16 +88,17 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 	}
 
 	qm := gc.getQuestManager()
-	if qm == nil {
-		return
-	}
+	vm := gc.getVendorManager()
 
-	// Check if NPC is a quest giver or quest completer
-	if !qm.IsQuestGiver(npc.EntryID) && !qm.IsQuestCompleter(npc.EntryID) {
+	isVendor := vendor.IsVendor(npc.NpcFlags) || (vm != nil && vm.HasVendorItems(npc.EntryID))
+	isQuestNPC := qm != nil && (qm.IsQuestGiver(npc.EntryID) || qm.IsQuestCompleter(npc.EntryID))
+
+	// If NPC has neither quests nor vendor services:
+	if !isQuestNPC && !isVendor {
 		gc.log.Debug().
 			Uint32("entry", npc.EntryID).
 			Str("name", npc.Name).
-			Msg("NPC is not a quest giver or completer")
+			Msg("NPC is neither quest giver nor vendor")
 
 		greeting := fmt.Sprintf("Greetings, %s. How can I help you?", gc.player.Name)
 		pkt := quest.BuildQuestGiverQuestList(wow.GUID(guid), greeting, nil)
@@ -105,12 +107,21 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 		return
 	}
 
+	// If NPC is purely a vendor (no quests):
+	if isVendor && !isQuestNPC {
+		gc.SendListInventory(wow.GUID(guid))
+		return
+	}
+
 	// Build quest list
 	playerQuests := gc.getPlayerQuests()
 	info := gc.playerInfo()
 
 	// Get quests completable at this NPC
-	involvedQuests := qm.GetInvolvedQuestsForCreature(npc.EntryID)
+	var involvedQuests []uint32
+	if qm != nil {
+		involvedQuests = qm.GetInvolvedQuestsForCreature(npc.EntryID)
+	}
 
 	gc.log.Debug().
 		Uint32("entry", npc.EntryID).
@@ -122,21 +133,36 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 	var questList []quest.QuestListItem
 
 	// First: quests that can be turned in (involved/completable)
-	for _, questID := range involvedQuests {
-		status, exists := playerQuests[questID]
-		if !exists {
-			continue
-		}
-
-		if status.Status == quest.QuestStatusComplete || status.Status == quest.QuestStatusIncomplete {
-			qDef := qm.GetQuest(questID)
-			if qDef == nil {
+	if qm != nil {
+		for _, questID := range involvedQuests {
+			status, exists := playerQuests[questID]
+			if !exists {
 				continue
 			}
 
+			if status.Status == quest.QuestStatusComplete || status.Status == quest.QuestStatusIncomplete {
+				qDef := qm.GetQuest(questID)
+				if qDef == nil {
+					continue
+				}
+
+				questList = append(questList, quest.QuestListItem{
+					QuestID:      questID,
+					QuestIcon:    questIconForStatus(status.Status),
+					QuestLevel:   qDef.Level,
+					QuestFlags:   uint32(qDef.Flags),
+					IsRepeatable: qDef.IsRepeatable(),
+					Title:        qDef.Title,
+				})
+			}
+		}
+
+		// Then: quests available to accept, filtered by level, race, class, chain
+		// and rewarded state.
+		for _, qDef := range qm.AvailableQuestsForCreature(info, playerQuests, npc.EntryID) {
 			questList = append(questList, quest.QuestListItem{
-				QuestID:      questID,
-				QuestIcon:    questIconForStatus(status.Status),
+				QuestID:      qDef.ID,
+				QuestIcon:    0, // exclamation mark (!)
 				QuestLevel:   qDef.Level,
 				QuestFlags:   uint32(qDef.Flags),
 				IsRepeatable: qDef.IsRepeatable(),
@@ -145,22 +171,32 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 		}
 	}
 
-	// Then: quests available to accept, filtered by level, race, class, chain
-	// and rewarded state.
-	for _, qDef := range qm.AvailableQuestsForCreature(info, playerQuests, npc.EntryID) {
-		questList = append(questList, quest.QuestListItem{
-			QuestID:      qDef.ID,
-			QuestIcon:    0, // exclamation mark (!)
-			QuestLevel:   qDef.Level,
-			QuestFlags:   uint32(qDef.Flags),
-			IsRepeatable: qDef.IsRepeatable(),
-			Title:        qDef.Title,
-		})
-	}
-
 	if len(questList) == 0 {
+		if isVendor {
+			gc.SendListInventory(wow.GUID(guid))
+			return
+		}
+
 		greeting := fmt.Sprintf("Greetings, %s. I have no tasks for you right now.", gc.player.Name)
 		pkt := quest.BuildQuestGiverQuestList(wow.GUID(guid), greeting, nil)
+		gc.socket.Send(pkt)
+
+		return
+	}
+
+	// If NPC has quests AND is a vendor, provide a gossip menu with vendor option
+	if isVendor {
+		options := []quest.GossipOption{
+			{
+				Index:    vendor.GossipOptionVendor,
+				Icon:     vendor.GossipIconVendor,
+				BoxCoded: 0,
+				BoxMoney: 0,
+				Text:     "I would like to browse your goods.",
+				BoxText:  "",
+			},
+		}
+		pkt := quest.BuildGossipMessage(wow.GUID(guid), 0, 0, options, questList)
 		gc.socket.Send(pkt)
 
 		return
@@ -187,6 +223,15 @@ func (gc *WorldSession) HandleGossipSelectOption(data wow.PacketData) {
 	_ = reader.Read(&guid)
 	_ = reader.Read(&menuID)
 	_ = reader.Read(&optionID)
+
+	npc := gc.getNPCByGUID(wow.GUID(guid))
+	vm := gc.getVendorManager()
+	isVendor := npc != nil && (vendor.IsVendor(npc.NpcFlags) || (vm != nil && vm.HasVendorItems(npc.EntryID)))
+
+	if isVendor && (optionID == vendor.GossipOptionVendor || optionID == 0) {
+		gc.SendListInventory(wow.GUID(guid))
+		return
+	}
 
 	gc.sendGossipComplete(wow.GUID(guid))
 }

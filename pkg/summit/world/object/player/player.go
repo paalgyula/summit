@@ -241,6 +241,12 @@ type Player struct {
 	Inventory *Inventory
 	GuildID   uint32
 
+	// Buyback slots (12 slots, AzerothCore-compatible)
+	BuybackSlots       [BuybackSlotCount]*Item
+	BuybackPrices      [BuybackSlotCount]uint32
+	BuybackTimestamps  [BuybackSlotCount]uint32
+	CurrentBuybackSlot int
+
 	// CharFlags for example dead, and display ghost
 	CharFlags uint32
 
@@ -1453,8 +1459,9 @@ func (p *Player) UpdateInventoryFields() {
 		}
 	}
 
-	// Set backpack slot GUIDs (PlayerFieldPackSlot_1 covers slots 27-38, 12 slots)
-	for i := 0; i < 12; i++ {
+	// Set backpack slot GUIDs (PlayerFieldPackSlot_1 covers 16 slots)
+	packSlotCount := InventorySlotItemEnd - InventorySlotItemStart
+	for i := 0; i < packSlotCount; i++ {
 		absSlot := InventorySlotItemStart + i
 		item := p.Inventory.GetItem(absSlot)
 		slotField := object.UpdateField(int(object.PlayerFieldPackSlot_1) + i*2)
@@ -1468,6 +1475,148 @@ func (p *Player) UpdateInventoryFields() {
 			p.Object.SetUInt32Value(slotField+1, 0)
 		}
 	}
+
+	// Update coinage
+	p.Object.SetUInt32Value(object.PlayerFieldCoinage, p.Money)
+
+	// Set buyback slot GUIDs, prices, and timestamps (12 slots)
+	for i := 0; i < BuybackSlotCount; i++ {
+		item := p.BuybackSlots[i]
+		slotField := object.UpdateField(int(object.PlayerFieldVendorbuybackSlot_1) + i*2)
+		priceField := object.UpdateField(int(object.PlayerFieldBuybackPrice_1) + i)
+		timeField := object.UpdateField(int(object.PlayerFieldBuybackTimestamp_1) + i)
+
+		if item != nil {
+			guid := item.GUID()
+			p.Object.SetUInt32Value(slotField, uint32(guid))
+			p.Object.SetUInt32Value(slotField+1, uint32(uint64(guid)>>32))
+			p.Object.SetUInt32Value(priceField, p.BuybackPrices[i])
+			p.Object.SetUInt32Value(timeField, p.BuybackTimestamps[i])
+		} else {
+			p.Object.SetUInt32Value(slotField, 0)
+			p.Object.SetUInt32Value(slotField+1, 0)
+			p.Object.SetUInt32Value(priceField, 0)
+			p.Object.SetUInt32Value(timeField, 0)
+		}
+	}
+}
+
+// AddItemToBuyBackSlot places an item into the player's buyback slots.
+// Follows AzerothCore's Player::AddItemToBuyBackSlot.
+func (p *Player) AddItemToBuyBackSlot(item *Item, price uint32) {
+	if item == nil {
+		return
+	}
+
+	slot := p.CurrentBuybackSlot
+	if slot < 0 || slot >= BuybackSlotCount {
+		slot = 0
+	}
+
+	// If current slot is non-empty, find free or oldest slot
+	if p.BuybackSlots[slot] != nil {
+		oldestTime := p.BuybackTimestamps[0]
+		oldestSlot := 0
+
+		foundEmpty := false
+		for i := 0; i < BuybackSlotCount; i++ {
+			if p.BuybackSlots[i] == nil {
+				slot = i
+				foundEmpty = true
+				break
+			}
+
+			if p.BuybackTimestamps[i] < oldestTime {
+				oldestTime = p.BuybackTimestamps[i]
+				oldestSlot = i
+			}
+		}
+
+		if !foundEmpty {
+			slot = oldestSlot
+		}
+	}
+
+	p.RemoveItemFromBuyBackSlot(uint32(slot), true)
+
+	p.BuybackSlots[slot] = item
+	p.BuybackPrices[slot] = price
+	// Expiration: 30 hours from now
+	p.BuybackTimestamps[slot] = uint32(time.Now().Unix() + 30*3600)
+
+	// Set update fields immediately
+	slotField := object.UpdateField(int(object.PlayerFieldVendorbuybackSlot_1) + slot*2)
+	priceField := object.UpdateField(int(object.PlayerFieldBuybackPrice_1) + slot)
+	timeField := object.UpdateField(int(object.PlayerFieldBuybackTimestamp_1) + slot)
+
+	guid := item.GUID()
+	p.Object.SetUInt32Value(slotField, uint32(guid))
+	p.Object.SetUInt32Value(slotField+1, uint32(uint64(guid)>>32))
+	p.Object.SetUInt32Value(priceField, price)
+	p.Object.SetUInt32Value(timeField, p.BuybackTimestamps[slot])
+
+	// Advance current buyback slot
+	if p.CurrentBuybackSlot < BuybackSlotCount-1 {
+		p.CurrentBuybackSlot++
+	}
+}
+
+// GetItemFromBuyBackSlot returns the item in the given buyback slot, or nil.
+// Accepts either relative slot (0..11) or absolute slot (74..85).
+func (p *Player) GetItemFromBuyBackSlot(slot uint32) *Item {
+	idx := slot
+	if slot >= BuybackSlotStart && slot < BuybackSlotEnd {
+		idx = slot - BuybackSlotStart
+	}
+	if idx >= BuybackSlotCount {
+		return nil
+	}
+
+	return p.BuybackSlots[idx]
+}
+
+// GetBuybackPrice returns the buyback price for a slot.
+func (p *Player) GetBuybackPrice(slot uint32) uint32 {
+	idx := slot
+	if slot >= BuybackSlotStart && slot < BuybackSlotEnd {
+		idx = slot - BuybackSlotStart
+	}
+	if idx >= BuybackSlotCount {
+		return 0
+	}
+
+	return p.BuybackPrices[idx]
+}
+
+// RemoveItemFromBuyBackSlot removes an item from the given buyback slot.
+func (p *Player) RemoveItemFromBuyBackSlot(slot uint32, del bool) *Item {
+	idx := slot
+	if slot >= BuybackSlotStart && slot < BuybackSlotEnd {
+		idx = slot - BuybackSlotStart
+	}
+	if idx >= BuybackSlotCount {
+		return nil
+	}
+
+	item := p.BuybackSlots[idx]
+	p.BuybackSlots[idx] = nil
+	p.BuybackPrices[idx] = 0
+	p.BuybackTimestamps[idx] = 0
+
+	slotField := object.UpdateField(int(object.PlayerFieldVendorbuybackSlot_1) + int(idx)*2)
+	priceField := object.UpdateField(int(object.PlayerFieldBuybackPrice_1) + int(idx))
+	timeField := object.UpdateField(int(object.PlayerFieldBuybackTimestamp_1) + int(idx))
+
+	p.Object.SetUInt32Value(slotField, 0)
+	p.Object.SetUInt32Value(slotField+1, 0)
+	p.Object.SetUInt32Value(priceField, 0)
+	p.Object.SetUInt32Value(timeField, 0)
+
+	if p.BuybackSlots[p.CurrentBuybackSlot] != nil {
+		p.CurrentBuybackSlot = int(idx)
+	}
+
+	return item
 }
 
 // EquipItem equips an item to the appropriate slot.

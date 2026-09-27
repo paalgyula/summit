@@ -2,6 +2,7 @@ package world
 
 import (
 	"github.com/paalgyula/summit/pkg/summit/world/areatrigger"
+	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -247,10 +248,24 @@ func (gc *WorldSession) broadcastTeleport(oldX, oldY, oldZ, oldO, newX, newY, ne
 	_ = pkt.Write(newZ)
 	_ = pkt.Write(newO)
 
-	// Send to all other sessions
+	// Send only to visible players on the same map
+	if server.mapManager != nil {
+		m := server.mapManager.FindMap(gc.player.Location.Map, gc.player.CurrentInstanceID)
+		if m != nil {
+			m.SendToPlayerVisibleObjects(gc.player.GUID(), pkt)
+			return
+		}
+	}
+
 	for _, other := range server.GetOtherSessions(gc) {
-		if other.player != nil && other.player.IsInWorld {
-			other.socket.Send(pkt)
+		if other.player != nil && other.player.IsInWorld && other.player.Location.Map == gc.player.Location.Map {
+			dist := mapmanager.Distance2DPositions(
+				newX, newY,
+				other.player.Location.X, other.player.Location.Y,
+			)
+			if dist <= mapmanager.DefaultVisibilityDistance {
+				other.socket.Send(pkt)
+			}
 		}
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	mapmanager "github.com/paalgyula/summit/pkg/summit/world/map"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
 	"github.com/paalgyula/summit/pkg/wow"
@@ -112,9 +113,22 @@ func (gc *WorldSession) LoginCharacter(p *player.Player) {
 		if !ok {
 			return
 		}
+		if server.mapManager != nil {
+			m := server.mapManager.FindMap(p.Location.Map, p.CurrentInstanceID)
+			if m != nil {
+				m.SendToPlayerVisibleObjects(p.GUID(), pkt)
+				return
+			}
+		}
 		for _, other := range server.GetOnlineSessions() {
-			if other.player != nil && other.player.IsInWorld {
-				other.socket.Send(pkt)
+			if other.player != nil && other.player.IsInWorld && other.player.Location.Map == p.Location.Map {
+				dist := mapmanager.Distance2DPositions(
+					p.Location.X, p.Location.Y,
+					other.player.Location.X, other.player.Location.Y,
+				)
+				if dist <= mapmanager.DefaultVisibilityDistance {
+					other.socket.Send(pkt)
+				}
 			}
 		}
 	}

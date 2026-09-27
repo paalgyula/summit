@@ -62,6 +62,22 @@ func (m *Manager) loadFromStore(worldRepo store.WorldRepo) {
 		Msg("loaded creature quest relations")
 }
 
+// AddQuestTemplate adds or replaces a quest template in the manager.
+func (m *Manager) AddQuestTemplate(q *Quest) {
+	if m.templates == nil {
+		m.templates = make(map[uint32]*Quest)
+	}
+	m.templates[q.ID] = q
+}
+
+// AddQuestStarter maps a creature entry as a quest starter.
+func (m *Manager) AddQuestStarter(creatureEntry, questID uint32) {
+	if m.creatureQuests == nil {
+		m.creatureQuests = make(map[uint32][]uint32)
+	}
+	m.creatureQuests[creatureEntry] = append(m.creatureQuests[creatureEntry], questID)
+}
+
 // PlayerInfo carries the player attributes needed to decide whether a quest is
 // available to them.
 type PlayerInfo struct {

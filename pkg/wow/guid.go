@@ -3,6 +3,7 @@ package wow
 
 import (
 	"encoding/binary"
+	"fmt"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -96,6 +97,10 @@ func (g GUID) Entry() uint32 {
 
 func (g GUID) Counter() uint32 {
 	return uint32(g)
+}
+
+func (g GUID) String() string {
+	return fmt.Sprintf("0x%016x", uint64(g))
 }
 
 func (g GUID) PrintRAW() {
