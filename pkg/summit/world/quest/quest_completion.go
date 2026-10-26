@@ -11,8 +11,20 @@ func (m *Manager) CanCompleteQuest(playerQuests map[uint32]*QuestStatusData, que
 		return false
 	}
 
+	if quest.IsAutoComplete() {
+		return true
+	}
+
 	status, exists := playerQuests[questID]
-	if !exists || status.Status != QuestStatusIncomplete {
+	if !exists {
+		return false
+	}
+
+	if status.Status == QuestStatusComplete {
+		return true
+	}
+
+	if status.Status != QuestStatusIncomplete {
 		return false
 	}
 

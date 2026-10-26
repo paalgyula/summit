@@ -249,3 +249,32 @@ func TestUpdateData_BuildPacket_OpCode(t *testing.T) {
 	require.NotNil(t, pkt)
 	assert.Equal(t, int(wow.ServerUpdateObject), pkt.OpCode())
 }
+
+func TestBuildValuesUpdate_QuestLogVisibleToSelf(t *testing.T) {
+	playerObj := object.NewObject()
+	playerObj.InitValues(int(object.PlayerEnd))
+	playerObj.SetObjectType(wow.TypeMaskPlayer)
+	playerObj.SetObjectTypeID(wow.TypeIDPlayer)
+
+	// Set Quest 1 ID
+	questField := uint32(object.PlayerQuestLog1_1)
+	playerObj.SetUInt32Value(object.PlayerQuestLog1_1, 783)
+
+	// 1. CREATE_OBJECT (filtered mask for self)
+	filteredMask := playerObj.BuildFilteredUpdateMask(playerObj, true)
+	assert.True(t, filteredMask.GetBit(questField), "PLAYER_QUEST_LOG_1_1 must be included in CREATE_OBJECT for self")
+
+	// 2. VALUES update (incremental mask for self)
+	incMask := playerObj.BuildIncrementalUpdateMask(playerObj)
+	assert.True(t, incMask.GetBit(questField), "PLAYER_QUEST_LOG_1_1 must be included in incremental values update for self")
+
+	// 3. For another player (not in party), private quest log details are not visible
+	other := object.NewObject()
+	other.InitValues(int(object.PlayerEnd))
+	other.SetObjectType(wow.TypeMaskPlayer)
+	other.SetObjectTypeID(wow.TypeIDPlayer)
+
+	otherMask := playerObj.BuildIncrementalUpdateMask(other)
+	assert.False(t, otherMask.GetBit(questField), "PLAYER_QUEST_LOG_1_1 should not be visible to strangers")
+}
+

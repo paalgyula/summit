@@ -140,6 +140,13 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 				continue
 			}
 
+			// If quest is incomplete, check if objectives are met now (e.g. talk-to quest or items acquired)
+			if status.Status == quest.QuestStatusIncomplete && qm.CanCompleteQuest(playerQuests, questID) {
+				status.Status = quest.QuestStatusComplete
+				gc.setQuestLogState(questID, QuestSlotStateComplete)
+				gc.socket.Send(quest.BuildQuestUpdateComplete(questID))
+			}
+
 			if status.Status == quest.QuestStatusComplete || status.Status == quest.QuestStatusIncomplete {
 				qDef := qm.GetQuest(questID)
 				if qDef == nil {
@@ -162,7 +169,7 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 		for _, qDef := range qm.AvailableQuestsForCreature(info, playerQuests, npc.EntryID) {
 			questList = append(questList, quest.QuestListItem{
 				QuestID:      qDef.ID,
-				QuestIcon:    0, // exclamation mark (!)
+				QuestIcon:    2, // exclamation mark (!)
 				QuestLevel:   qDef.Level,
 				QuestFlags:   uint32(qDef.Flags),
 				IsRepeatable: qDef.IsRepeatable(),
@@ -200,6 +207,36 @@ func (gc *WorldSession) HandleQuestgiverHello(data wow.PacketData) {
 		gc.socket.Send(pkt)
 
 		return
+	}
+
+	// If NPC has exactly 1 quest and no other gossip options, auto-open it directly
+	// matching AzerothCore Player::SendPreparedQuest.
+	if len(questList) == 1 {
+		qItem := questList[0]
+		qDef := qm.GetQuest(qItem.QuestID)
+		if qDef != nil {
+			if qItem.QuestIcon == 5 { // completed quest turn-in
+				hasRequiredItems := false
+				for i := 0; i < 6; i++ {
+					if qDef.RequiredItemId[i] > 0 {
+						hasRequiredItems = true
+						break
+					}
+				}
+				if hasRequiredItems {
+					gc.socket.Send(quest.BuildQuestGiverRequestItems(wow.GUID(guid), qDef, true))
+				} else {
+					gc.socket.Send(quest.BuildQuestGiverOfferReward(wow.GUID(guid), qDef, qDef.IsAutoComplete()))
+				}
+				return
+			} else if qItem.QuestIcon == 4 { // incomplete active quest
+				gc.socket.Send(quest.BuildQuestGiverRequestItems(wow.GUID(guid), qDef, false))
+				return
+			} else { // available quest to accept
+				gc.socket.Send(quest.BuildQuestGiverQuestDetails(wow.GUID(guid), qDef, true))
+				return
+			}
+		}
 	}
 
 	// Send quest list
@@ -328,6 +365,15 @@ func (gc *WorldSession) handleAcceptQuest(npcGUID wow.GUID, questID uint32) {
 	// Add the quest to the client's quest log (PLAYER_QUEST_LOG_n_* fields).
 	gc.addQuestToLog(qDef)
 
+	// Check if objectives are immediately met (mirrors AzerothCore Player::AddQuestAndCheckCompletion)
+	if qm.CanCompleteQuest(playerQuests, questID) {
+		if status, exists := playerQuests[questID]; exists {
+			status.Status = quest.QuestStatusComplete
+		}
+		gc.setQuestLogState(questID, QuestSlotStateComplete)
+		gc.socket.Send(quest.BuildQuestUpdateComplete(questID))
+	}
+
 	// Persist quest progress immediately (embedded in the character document).
 	gc.saveQuests()
 
@@ -373,6 +419,24 @@ func (gc *WorldSession) HandleQuestgiverCompleteQuest(data wow.PacketData) {
 		return
 	}
 
+	// Recheck if incomplete quest is now complete
+	if status.Status == quest.QuestStatusIncomplete && qm.CanCompleteQuest(playerQuests, questID) {
+		status.Status = quest.QuestStatusComplete
+		gc.setQuestLogState(questID, QuestSlotStateComplete)
+		gc.socket.Send(quest.BuildQuestUpdateComplete(questID))
+	}
+
+	// Check if quest can complete
+	canComplete := status.Status == quest.QuestStatusComplete || qDef.CanTurnInWhileIncomplete()
+
+	if !canComplete {
+		// Not completed yet — show progress dialog with requirements
+		pkt := quest.BuildQuestGiverRequestItems(wow.GUID(npcGUID), qDef, false)
+		gc.socket.Send(pkt)
+
+		return
+	}
+
 	// Check if quest has required items
 	hasRequiredItems := false
 	for i := 0; i < 6; i++ {
@@ -383,11 +447,9 @@ func (gc *WorldSession) HandleQuestgiverCompleteQuest(data wow.PacketData) {
 		}
 	}
 
-	canComplete := status.Status == quest.QuestStatusComplete || qDef.CanTurnInWhileIncomplete()
-
 	if hasRequiredItems {
-		// Send request items
-		pkt := quest.BuildQuestGiverRequestItems(wow.GUID(npcGUID), qDef, canComplete)
+		// Send request items with canComplete = true
+		pkt := quest.BuildQuestGiverRequestItems(wow.GUID(npcGUID), qDef, true)
 		gc.socket.Send(pkt)
 	} else {
 		// Send offer reward
@@ -549,7 +611,18 @@ func (gc *WorldSession) HandleQuestLogRemoveQuest(data wow.PacketData) {
 	reader := wow.NewPacketReader(data)
 
 	var questID uint32
-	_ = reader.Read(&questID)
+	if len(data) == 1 {
+		slot := uint8(data[0])
+		if int(slot) < maxQuestLogSlots {
+			questID = gc.questLog[slot]
+		}
+	} else {
+		_ = reader.Read(&questID)
+	}
+
+	if questID == 0 {
+		return
+	}
 
 	qm := gc.getQuestManager()
 	if qm == nil {
@@ -571,14 +644,15 @@ func (gc *WorldSession) sendGossipComplete(guid wow.GUID) {
 	gc.socket.Send(pkt)
 }
 
-// questIconForStatus returns the quest icon for a given status.
+// questIconForStatus returns the quest icon for a given status matching WoW 3.3.5a.
 func questIconForStatus(status quest.QuestStatus) uint32 {
 	switch status {
 	case quest.QuestStatusComplete:
-		return 1 // yellow ? (turn-in)
+		return 5 // yellow ? (turn-in ready)
 	case quest.QuestStatusIncomplete:
-		return 1 // yellow ? (in progress)
+		return 4 // silver ? (in progress)
 	default:
-		return 0 // exclamation mark (!)
+		return 2 // exclamation mark (!)
 	}
 }
+

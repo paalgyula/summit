@@ -8,6 +8,7 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -145,9 +146,9 @@ func (gc *WorldSession) scheduleNextSwing(now time.Time) {
 		return
 	}
 
-	swingDelay := time.Duration(SwingTimerMS) * time.Millisecond
-	if gc.player.BaseAttackSpeed > 0 {
-		swingDelay = gc.player.BaseAttackSpeed
+	swingDelay := gc.player.GetWeaponSpeed(0)
+	if swingDelay <= 0 {
+		swingDelay = time.Duration(SwingTimerMS) * time.Millisecond
 	}
 
 	gc.player.NextAttackTime = now.UnixMilli() + swingDelay.Milliseconds()
@@ -174,12 +175,17 @@ func (gc *WorldSession) playerAttack(victim CombatUnit, meleeAttack bool) {
 		return
 	}
 
+	swingDelay := gc.player.GetWeaponSpeed(0)
+	if swingDelay <= 0 {
+		swingDelay = time.Duration(SwingTimerMS) * time.Millisecond
+	}
+
 	// If already attacking same target, toggle melee state
 	if gc.player.AttackTarget == uint64(victim.GetGUID()) {
 		if meleeAttack {
 			if gc.player.AttackState != AttackStateSwinging {
 				gc.player.AttackState = AttackStateSwinging
-				gc.player.NextAttackTime = time.Now().UnixMilli() + SwingTimerMS
+				gc.player.NextAttackTime = time.Now().UnixMilli() + swingDelay.Milliseconds()
 				gc.sendAttackStart(gc.player.GUID(), victim.GetGUID())
 			}
 		} else {
@@ -201,7 +207,7 @@ func (gc *WorldSession) playerAttack(victim CombatUnit, meleeAttack bool) {
 	gc.player.Victim = victim
 	if meleeAttack {
 		gc.player.AttackState = AttackStateSwinging
-		gc.player.NextAttackTime = time.Now().UnixMilli() + SwingTimerMS
+		gc.player.NextAttackTime = time.Now().UnixMilli() + swingDelay.Milliseconds()
 	}
 
 	// Add this player as attacker on victim
@@ -349,19 +355,33 @@ func CalculateMeleeDamage(attacker, victim CombatUnit, attackType WeaponAttackTy
 	// Calculate base weapon damage
 	weaponMin, weaponMax := attacker.GetWeaponDamage(uint8(attackType))
 	if weaponMin == 0 && weaponMax == 0 {
-		weaponMin = 1
-		weaponMax = 2
+		if attackType == BaseAttack {
+			weaponMin = 1
+			weaponMax = 2
+		}
 	}
 
-	// Add attack power contribution (1 damage per 14 AP)
+	// Add attack power contribution: (AP / 14.0) * weapon_speed_seconds
+	// Reference: TrinityCore Unit::GetAPMultiplier (Unit.cpp:10779) & Player::CalculateMinMaxDamage (StatSystem.cpp:564)
 	attackPower := attacker.GetAttackPower()
-	apBonus := attackPower / 14
+	weaponSpeed := attacker.GetWeaponSpeed(uint8(attackType))
+	if weaponSpeed <= 0 {
+		weaponSpeed = 2000 * time.Millisecond
+	}
 
-	baseDamage := uint32(0)
-	if weaponMax > weaponMin {
-		baseDamage = weaponMin + uint32(rand.Intn(int(weaponMax-weaponMin+1))) + apBonus
+	apBonus := (float64(attackPower) / 14.0) * weaponSpeed.Seconds()
+
+	minDmg := float64(weaponMin) + apBonus
+	maxDmg := float64(weaponMax) + apBonus
+
+	var baseDamage uint32
+	if maxDmg > minDmg {
+		baseDamage = uint32(math.Round(minDmg + rand.Float64()*(maxDmg-minDmg)))
 	} else {
-		baseDamage = weaponMin + apBonus
+		baseDamage = uint32(math.Round(minDmg))
+	}
+	if baseDamage == 0 {
+		baseDamage = 1
 	}
 
 	// Apply hit outcome modifiers (Unit::CalculateMeleeDamage): misses and
@@ -410,14 +430,24 @@ func CalculateMeleeDamage(attacker, victim CombatUnit, attackType WeaponAttackTy
 		damageInfo.HitInfo |= HitInfoCrushing
 	}
 
-	// Apply armor mitigation
+	// Apply armor mitigation (TrinityCore Unit::CalcArmorReducedDamage)
 	armor := victim.GetArmor()
 	if armor > 0 {
 		attackerLevel := attacker.GetLevel()
 		reduction := CalcArmorReduction(armor, uint32(attackerLevel))
+		if reduction > 0.75 {
+			reduction = 0.75
+		}
 		mitigated := uint32(float64(baseDamage) * reduction)
 		damageInfo.CleanDamage += mitigated
-		baseDamage -= mitigated
+		if mitigated >= baseDamage {
+			baseDamage = 1
+		} else {
+			baseDamage -= mitigated
+		}
+	}
+	if baseDamage == 0 {
+		baseDamage = 1
 	}
 
 	damageInfo.Damages[0].Damage = baseDamage
@@ -704,12 +734,47 @@ func handleCreatureDeath(attacker CombatUnit, victim CombatUnit, damageInfo *Cal
 			qm := gc.getQuestManager()
 			if qm != nil {
 				playerQuests := gc.getPlayerQuests()
-				completedQuests := qm.OnCreatureKilled(playerQuests, npc.EntryID)
-				for _, questID := range completedQuests {
-					gc.log.Debug().
-						Uint32("quest", questID).
-						Uint32("creature", npc.EntryID).
-						Msg("quest completed via kill credit")
+				for questID, status := range playerQuests {
+					if status.Status != quest.QuestStatusIncomplete {
+						continue
+					}
+					qDef := qm.GetQuest(questID)
+					if qDef == nil {
+						continue
+					}
+
+					updated := false
+					for i := 0; i < 4; i++ {
+						if qDef.RequiredNpcOrGo[i] > 0 &&
+							uint32(qDef.RequiredNpcOrGo[i]) == npc.EntryID &&
+							status.CreatureOrGOCount[i] < qDef.RequiredNpcOrGoCount[i] {
+							status.CreatureOrGOCount[i]++
+							updated = true
+
+							pkt := quest.BuildQuestUpdateAddKill(
+								questID,
+								npc.EntryID,
+								uint32(status.CreatureOrGOCount[i]),
+								uint32(qDef.RequiredNpcOrGoCount[i]),
+								npc.GUID(),
+							)
+							gc.socket.Send(pkt)
+						}
+					}
+
+					if updated {
+						gc.updateQuestLogCounters(questID, status.CreatureOrGOCount)
+						if qm.CanCompleteQuest(playerQuests, questID) {
+							status.Status = quest.QuestStatusComplete
+							gc.setQuestLogState(questID, QuestSlotStateComplete)
+							gc.socket.Send(quest.BuildQuestUpdateComplete(questID))
+							gc.log.Debug().
+								Uint32("quest", questID).
+								Uint32("creature", npc.EntryID).
+								Msg("quest completed via kill credit")
+						}
+						gc.saveQuests()
+					}
 				}
 			}
 		}

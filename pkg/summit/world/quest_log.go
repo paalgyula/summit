@@ -70,6 +70,45 @@ func (gc *WorldSession) addQuestIDToLog(questID uint32) {
 	obj.SetUInt32Value(questLogField(slot, 2), 0)       // objective counters 0-1
 	obj.SetUInt32Value(questLogField(slot, 3), 0)       // objective counters 2-3
 	obj.SetUInt32Value(questLogField(slot, 4), 0)       // timer
+
+	gc.pushQuestLogUpdate()
+}
+
+// pushQuestLogUpdate pushes an incremental SMSG_UPDATE_OBJECT packet containing
+// changed quest-log fields to the client immediately.
+func (gc *WorldSession) pushQuestLogUpdate() {
+	if gc.player == nil || gc.player.Object == nil || gc.socket == nil {
+		return
+	}
+
+	upd := Updater{}
+	pkt := upd.BuildValuesUpdateObject(gc.player, gc.player)
+	if pkt != nil {
+		gc.socket.Send(pkt)
+	}
+}
+
+// QuestSlotState flags for quest-log slot state (offset 1).
+const (
+	QuestSlotStateNone     uint32 = 0x0000
+	QuestSlotStateComplete uint32 = 0x0001
+	QuestSlotStateFail     uint32 = 0x0002
+)
+
+// setQuestLogState updates the state flag for a quest slot (e.g. QUEST_STATE_COMPLETE).
+func (gc *WorldSession) setQuestLogState(questID uint32, state uint32) {
+	if gc.player == nil || gc.player.Object == nil {
+		return
+	}
+
+	for slot := 0; slot < maxQuestLogSlots; slot++ {
+		if gc.questLog[slot] == questID {
+			gc.player.Object.SetUInt32Value(questLogField(slot, 1), state)
+			gc.pushQuestLogUpdate()
+
+			return
+		}
+	}
 }
 
 // rebuildQuestLog repopulates the client quest log from the player's persisted
@@ -91,14 +130,23 @@ func (gc *WorldSession) rebuildQuestLog() {
 
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 
+	qm := gc.getQuestManager()
 	for _, id := range ids {
 		s := status[id]
 		if s == nil || s.Status == quest.QuestStatusRewarded {
 			continue // rewarded quests are not part of the active log
 		}
 
+		// Re-evaluate if incomplete quest objectives are met (e.g. talk-to quest)
+		if s.Status == quest.QuestStatusIncomplete && qm != nil && qm.CanCompleteQuest(status, id) {
+			s.Status = quest.QuestStatusComplete
+		}
+
 		gc.addQuestIDToLog(id)
 		gc.updateQuestLogCounters(id, s.CreatureOrGOCount)
+		if s.Status == quest.QuestStatusComplete {
+			gc.setQuestLogState(id, QuestSlotStateComplete)
+		}
 	}
 }
 
@@ -134,6 +182,7 @@ func (gc *WorldSession) updateQuestLogCounters(questID uint32, creatureOrGO [4]u
 		obj := gc.player.Object
 		obj.SetUInt32Value(questLogField(slot, 2), uint32(creatureOrGO[0])|uint32(creatureOrGO[1])<<16)
 		obj.SetUInt32Value(questLogField(slot, 3), uint32(creatureOrGO[2])|uint32(creatureOrGO[3])<<16)
+		gc.pushQuestLogUpdate()
 
 		return
 	}
@@ -156,6 +205,7 @@ func (gc *WorldSession) removeQuestFromLog(questID uint32) {
 		for offset := 0; offset < questLogFieldStep; offset++ {
 			obj.SetUInt32Value(questLogField(slot, offset), 0)
 		}
+		gc.pushQuestLogUpdate()
 
 		return
 	}

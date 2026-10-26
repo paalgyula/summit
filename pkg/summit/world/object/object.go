@@ -395,7 +395,7 @@ func GetUpdateFieldDataForTesting(obj, target *Object) uint32 {
 	visibleFlag := uint32(UFFlagPublic)
 
 	if obj == target {
-		visibleFlag |= UFFlagPrivate
+		visibleFlag |= UFFlagPrivate | UFFlagPartyMember | UFFlagOwner
 	}
 
 	return visibleFlag
@@ -407,11 +407,11 @@ func GetUpdateFieldDataForTesting(obj, target *Object) uint32 {
 func (o *Object) BuildFilteredUpdateMask(target *Object, isSelf bool) *UpdateMask {
 	visibleFlag := uint32(UFFlagPublic)
 	if isSelf {
-		visibleFlag |= UFFlagPrivate
+		visibleFlag |= UFFlagPrivate | UFFlagPartyMember | UFFlagOwner
 
 		// For items isSelf means the target owns it (Object::GetUpdateFieldData)
 		if o.objectTypeID == wow.TypeIDItem || o.objectTypeID == wow.TypeIDContainer {
-			visibleFlag |= UFFlagOwner | UFFlagItemOwner
+			visibleFlag |= UFFlagItemOwner
 		}
 	}
 
@@ -434,8 +434,8 @@ func (o *Object) BuildFilteredUpdateMask(target *Object, isSelf bool) *UpdateMas
 // Used for UPDATETYPE_VALUES (incremental updates).
 func (o *Object) BuildIncrementalUpdateMask(target *Object) *UpdateMask {
 	var visibleFlag uint32 = UFFlagPublic
-	if target == o {
-		visibleFlag |= UFFlagPrivate
+	if target == o || target == nil {
+		visibleFlag |= UFFlagPrivate | UFFlagPartyMember | UFFlagOwner
 	}
 
 	mask := &UpdateMask{}

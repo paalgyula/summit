@@ -78,6 +78,14 @@ func (m *Manager) AddQuestStarter(creatureEntry, questID uint32) {
 	m.creatureQuests[creatureEntry] = append(m.creatureQuests[creatureEntry], questID)
 }
 
+// AddQuestInvolved maps a creature entry as a quest completer / finisher.
+func (m *Manager) AddQuestInvolved(creatureEntry, questID uint32) {
+	if m.creatureInvolved == nil {
+		m.creatureInvolved = make(map[uint32][]uint32)
+	}
+	m.creatureInvolved[creatureEntry] = append(m.creatureInvolved[creatureEntry], questID)
+}
+
 // PlayerInfo carries the player attributes needed to decide whether a quest is
 // available to them.
 type PlayerInfo struct {

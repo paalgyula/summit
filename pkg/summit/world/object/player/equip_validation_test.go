@@ -60,6 +60,10 @@ func testBaseData() *basedata.Store {
 			{Entry: 1012, Class: 4, SubClass: 1, DisplayID: 5011, Name: "Test Cloak",
 				Quality: 2, InventoryType: 16, RequiredLevel: 1, AllowableClass: -1, AllowableRace: -1,
 				Armor: 50, FireRes: 10, FrostRes: 5},
+			// Battleworn Hammer (2H Mace, starting weapon for paladin/warrior)
+			{Entry: 2361, Class: 2, SubClass: 5, DisplayID: 8690, Name: "Battleworn Hammer",
+				Quality: 1, InventoryType: 17, RequiredLevel: 1, AllowableClass: -1, AllowableRace: -1,
+				Damage: [2]basedata.ItemDamage{{Min: 3, Max: 5, Type: 0}}, Delay: 2900},
 		},
 	}
 }

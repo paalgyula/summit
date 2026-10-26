@@ -570,6 +570,11 @@ func (p *Player) Init() {
 
 	// Base auto-attack damage (placeholder)
 	p.BaseDamage = 5.0
+
+	// Initialize base stats, apply equipped item mods, and calculate attack power and damage
+	p.InitBaseStats()
+	p.ApplyAllItemMods()
+	p.UpdateAttackPowerAndDamage()
 }
 
 // primaryPowerType returns the primary power type for this class.
@@ -999,33 +1004,136 @@ func (p *Player) GetAttackPower() uint32 { return p.AttackPower }
 
 // GetWeaponDamage returns (min, max) damage for the given attack type.
 // attackType: 0=BaseAttack, 1=OffAttack, 2=RangedAttack
+// Checks update fields, Player damage range fields, and equipped inventory item templates.
+// Reference: TrinityCore Unit::CalculateDamage / Player::CalculateMinMaxDamage
 func (p *Player) GetWeaponDamage(attackType uint8) (uint32, uint32) {
 	switch attackType {
 	case 1: // OffAttack
-		// Read from update fields (set by applyItemDamage)
-		minDmg := p.Object.GetFloatValue(object.UnitFieldMindamage)
-		maxDmg := p.Object.GetFloatValue(object.UnitFieldMaxdamage)
-		if minDmg > 0 || maxDmg > 0 {
-			return uint32(minDmg), uint32(maxDmg)
+		if p.Object != nil {
+			minDmg := p.Object.GetFloatValue(object.UnitFieldMinoffhanddamage)
+			maxDmg := p.Object.GetFloatValue(object.UnitFieldMaxoffhanddamage)
+			if minDmg > 0 || maxDmg > 0 {
+				return uint32(minDmg), uint32(maxDmg)
+			}
 		}
-		return p.OffHandDamageMin, p.OffHandDamageMax
+		if p.OffHandDamageMin > 0 || p.OffHandDamageMax > 0 {
+			return p.OffHandDamageMin, p.OffHandDamageMax
+		}
+		if p.Inventory != nil {
+			if item := p.Inventory.GetEquipment(EquipmentSlotOffHand); item != nil {
+				if tpl := basedata.GetInstance().LookupItem(item.ItemEntry); tpl != nil && tpl.IsWeapon() {
+					for _, dmg := range tpl.Damage {
+						if dmg.Min > 0 || dmg.Max > 0 {
+							return uint32(dmg.Min), uint32(dmg.Max)
+						}
+					}
+				}
+			}
+		}
+		return 0, 0
+
+	case 2: // RangedAttack
+		if p.Object != nil {
+			minDmg := p.Object.GetFloatValue(object.UnitFieldMinrangeddamage)
+			maxDmg := p.Object.GetFloatValue(object.UnitFieldMaxrangeddamage)
+			if minDmg > 0 || maxDmg > 0 {
+				return uint32(minDmg), uint32(maxDmg)
+			}
+		}
+		if p.Inventory != nil {
+			if item := p.Inventory.GetEquipment(EquipmentSlotRanged); item != nil {
+				if tpl := basedata.GetInstance().LookupItem(item.ItemEntry); tpl != nil && tpl.IsWeapon() {
+					for _, dmg := range tpl.Damage {
+						if dmg.Min > 0 || dmg.Max > 0 {
+							return uint32(dmg.Min), uint32(dmg.Max)
+						}
+					}
+				}
+			}
+		}
+		return 0, 0
+
 	default: // BaseAttack
-		// Read from update fields (set by applyItemDamage)
-		minDmg := p.Object.GetFloatValue(object.UnitFieldMindamage)
-		maxDmg := p.Object.GetFloatValue(object.UnitFieldMaxdamage)
-		if minDmg > 0 || maxDmg > 0 {
-			return uint32(minDmg), uint32(maxDmg)
+		if p.Object != nil {
+			minDmg := p.Object.GetFloatValue(object.UnitFieldMindamage)
+			maxDmg := p.Object.GetFloatValue(object.UnitFieldMaxdamage)
+			if minDmg > 0 || maxDmg > 0 {
+				return uint32(minDmg), uint32(maxDmg)
+			}
 		}
-		return p.MainHandDamageMin, p.MainHandDamageMax
+		if p.MainHandDamageMin > 0 || p.MainHandDamageMax > 0 {
+			return p.MainHandDamageMin, p.MainHandDamageMax
+		}
+		if p.Inventory != nil {
+			if item := p.Inventory.GetEquipment(EquipmentSlotMainHand); item != nil {
+				if tpl := basedata.GetInstance().LookupItem(item.ItemEntry); tpl != nil && tpl.IsWeapon() {
+					for _, dmg := range tpl.Damage {
+						if dmg.Min > 0 || dmg.Max > 0 {
+							return uint32(dmg.Min), uint32(dmg.Max)
+						}
+					}
+				}
+			}
+		}
+		// Unarmed base damage (BASE_MINDAMAGE=1, BASE_MAXDAMAGE=2)
+		return 1, 2
 	}
 }
 
 // GetWeaponSpeed returns the base attack speed for the given attack type.
-func (p *Player) GetWeaponSpeed(_ uint8) time.Duration {
-	if p.BaseAttackSpeed > 0 {
-		return p.BaseAttackSpeed
+func (p *Player) GetWeaponSpeed(attackType uint8) time.Duration {
+	switch attackType {
+	case 1: // OffAttack
+		if p.Object != nil {
+			delay := p.Object.GetUInt32Value(object.UnitFieldBaseattacktime + 1)
+			if delay > 0 {
+				return time.Duration(delay) * time.Millisecond
+			}
+		}
+		if p.Inventory != nil {
+			if item := p.Inventory.GetEquipment(EquipmentSlotOffHand); item != nil {
+				if tpl := basedata.GetInstance().LookupItem(item.ItemEntry); tpl != nil && tpl.Delay > 0 {
+					return time.Duration(tpl.Delay) * time.Millisecond
+				}
+			}
+		}
+		return 2000 * time.Millisecond
+
+	case 2: // RangedAttack
+		if p.Object != nil {
+			delay := p.Object.GetUInt32Value(object.UnitFieldRangedattacktime)
+			if delay > 0 {
+				return time.Duration(delay) * time.Millisecond
+			}
+		}
+		if p.Inventory != nil {
+			if item := p.Inventory.GetEquipment(EquipmentSlotRanged); item != nil {
+				if tpl := basedata.GetInstance().LookupItem(item.ItemEntry); tpl != nil && tpl.Delay > 0 {
+					return time.Duration(tpl.Delay) * time.Millisecond
+				}
+			}
+		}
+		return 2000 * time.Millisecond
+
+	default: // BaseAttack
+		if p.BaseAttackSpeed > 0 {
+			return p.BaseAttackSpeed
+		}
+		if p.Object != nil {
+			delay := p.Object.GetUInt32Value(object.UnitFieldBaseattacktime)
+			if delay > 0 {
+				return time.Duration(delay) * time.Millisecond
+			}
+		}
+		if p.Inventory != nil {
+			if item := p.Inventory.GetEquipment(EquipmentSlotMainHand); item != nil {
+				if tpl := basedata.GetInstance().LookupItem(item.ItemEntry); tpl != nil && tpl.Delay > 0 {
+					return time.Duration(tpl.Delay) * time.Millisecond
+				}
+			}
+		}
+		return 2000 * time.Millisecond // default 2.0s
 	}
-	return 2000 * time.Millisecond // default 2.0s
 }
 
 // GetCombatRating returns the player's combat rating value.
@@ -1644,6 +1752,13 @@ func (p *Player) EquipItem(item *Item) *Item {
 	// Update item update fields
 	item.initUpdateFields()
 
+	// Apply item stat/damage modifications
+	if prev != nil {
+		p.ApplyItemMods(prev, slot, false)
+	}
+	p.ApplyItemMods(item, slot, true)
+	p.UpdateAttackPowerAndDamage()
+
 	// Update player's inventory update fields
 	p.UpdateInventoryFields()
 
@@ -1658,6 +1773,8 @@ func (p *Player) UnequipItem(slot int) *Item {
 
 	item := p.Inventory.RemoveItem(slot)
 	if item != nil {
+		p.ApplyItemMods(item, slot, false)
+		p.UpdateAttackPowerAndDamage()
 		// Update player's inventory update fields
 		p.UpdateInventoryFields()
 	}
@@ -1709,4 +1826,228 @@ func (p *Player) ModifyMoney(amount int32) {
 
 	p.Money = uint32(newMoney)
 	p.Object.SetUInt32Value(object.PlayerFieldCoinage, p.Money)
+}
+
+// LevelStats holds the base primary attributes for a character.
+type LevelStats struct {
+	Str uint32
+	Agi uint32
+	Sta uint32
+	Int uint32
+	Spi uint32
+}
+
+// level1BaseStats holds official WotLK (3.3.5a) level 1 base stats by race and class.
+// Sourced from player_levelstats table in TrinityCore / AzerothCore / MaNGOS.
+// Key is [race, class].
+var level1BaseStats = map[[2]uint8]LevelStats{
+	{uint8(wow.RaceHuman), uint8(wow.ClassWarior)}:        {Str: 23, Agi: 20, Sta: 22, Int: 20, Spi: 20},
+	{uint8(wow.RaceHuman), uint8(wow.ClassPaladin)}:       {Str: 22, Agi: 20, Sta: 22, Int: 20, Spi: 21},
+	{uint8(wow.RaceHuman), uint8(wow.ClassRogue)}:         {Str: 21, Agi: 23, Sta: 21, Int: 20, Spi: 20},
+	{uint8(wow.RaceHuman), uint8(wow.ClassPriest)}:        {Str: 20, Agi: 20, Sta: 20, Int: 22, Spi: 23},
+	{uint8(wow.RaceHuman), uint8(wow.ClassDeathKnight)}:   {Str: 23, Agi: 20, Sta: 22, Int: 20, Spi: 20},
+	{uint8(wow.RaceHuman), uint8(wow.ClassMage)}:          {Str: 20, Agi: 20, Sta: 20, Int: 23, Spi: 22},
+	{uint8(wow.RaceHuman), uint8(wow.ClassWarlock)}:       {Str: 20, Agi: 20, Sta: 21, Int: 22, Spi: 22},
+	{uint8(wow.RaceOrc), uint8(wow.ClassWarior)}:          {Str: 26, Agi: 17, Sta: 24, Int: 17, Spi: 23},
+	{uint8(wow.RaceOrc), uint8(wow.ClassHunter)}:          {Str: 23, Agi: 20, Sta: 23, Int: 17, Spi: 24},
+	{uint8(wow.RaceOrc), uint8(wow.ClassRogue)}:           {Str: 24, Agi: 20, Sta: 23, Int: 17, Spi: 23},
+	{uint8(wow.RaceOrc), uint8(wow.ClassDeathKnight)}:     {Str: 26, Agi: 17, Sta: 24, Int: 17, Spi: 23},
+	{uint8(wow.RaceOrc), uint8(wow.ClassShaman)}:          {Str: 24, Agi: 17, Sta: 23, Int: 18, Spi: 25},
+	{uint8(wow.RaceOrc), uint8(wow.ClassWarlock)}:         {Str: 23, Agi: 17, Sta: 23, Int: 19, Spi: 25},
+	{uint8(wow.RaceDwarf), uint8(wow.ClassWarior)}:        {Str: 25, Agi: 16, Sta: 25, Int: 19, Spi: 19},
+	{uint8(wow.RaceDwarf), uint8(wow.ClassPaladin)}:       {Str: 24, Agi: 16, Sta: 25, Int: 19, Spi: 20},
+	{uint8(wow.RaceDwarf), uint8(wow.ClassHunter)}:        {Str: 22, Agi: 19, Sta: 24, Int: 19, Spi: 20},
+	{uint8(wow.RaceDwarf), uint8(wow.ClassRogue)}:         {Str: 23, Agi: 19, Sta: 24, Int: 19, Spi: 19},
+	{uint8(wow.RaceDwarf), uint8(wow.ClassPriest)}:        {Str: 22, Agi: 16, Sta: 23, Int: 21, Spi: 22},
+	{uint8(wow.RaceDwarf), uint8(wow.ClassDeathKnight)}:   {Str: 25, Agi: 16, Sta: 25, Int: 19, Spi: 19},
+	{uint8(wow.RaceNightElf), uint8(wow.ClassWarior)}:     {Str: 20, Agi: 25, Sta: 21, Int: 20, Spi: 20},
+	{uint8(wow.RaceNightElf), uint8(wow.ClassHunter)}:     {Str: 17, Agi: 28, Sta: 20, Int: 20, Spi: 21},
+	{uint8(wow.RaceNightElf), uint8(wow.ClassRogue)}:      {Str: 18, Agi: 28, Sta: 20, Int: 20, Spi: 20},
+	{uint8(wow.RaceNightElf), uint8(wow.ClassPriest)}:     {Str: 17, Agi: 25, Sta: 19, Int: 22, Spi: 23},
+	{uint8(wow.RaceNightElf), uint8(wow.ClassDeathKnight)}: {Str: 20, Agi: 25, Sta: 21, Int: 20, Spi: 20},
+	{uint8(wow.RaceNightElf), uint8(wow.ClassDruid)}:      {Str: 18, Agi: 25, Sta: 19, Int: 22, Spi: 22},
+	{uint8(wow.RaceUndead), uint8(wow.ClassWarior)}:       {Str: 22, Agi: 18, Sta: 23, Int: 18, Spi: 25},
+	{uint8(wow.RaceUndead), uint8(wow.ClassRogue)}:        {Str: 20, Agi: 21, Sta: 22, Int: 18, Spi: 25},
+	{uint8(wow.RaceUndead), uint8(wow.ClassPriest)}:       {Str: 19, Agi: 18, Sta: 21, Int: 20, Spi: 28},
+	{uint8(wow.RaceUndead), uint8(wow.ClassDeathKnight)}:  {Str: 22, Agi: 18, Sta: 23, Int: 18, Spi: 25},
+	{uint8(wow.RaceUndead), uint8(wow.ClassMage)}:         {Str: 19, Agi: 18, Sta: 21, Int: 21, Spi: 27},
+	{uint8(wow.RaceUndead), uint8(wow.ClassWarlock)}:      {Str: 19, Agi: 18, Sta: 22, Int: 20, Spi: 27},
+	{uint8(wow.RaceTauren), uint8(wow.ClassWarior)}:       {Str: 28, Agi: 15, Sta: 24, Int: 15, Spi: 22},
+	{uint8(wow.RaceTauren), uint8(wow.ClassHunter)}:       {Str: 25, Agi: 18, Sta: 23, Int: 15, Spi: 23},
+	{uint8(wow.RaceTauren), uint8(wow.ClassDeathKnight)}:  {Str: 28, Agi: 15, Sta: 24, Int: 15, Spi: 22},
+	{uint8(wow.RaceTauren), uint8(wow.ClassShaman)}:       {Str: 26, Agi: 15, Sta: 23, Int: 16, Spi: 24},
+	{uint8(wow.RaceTauren), uint8(wow.ClassDruid)}:        {Str: 26, Agi: 15, Sta: 22, Int: 17, Spi: 24},
+	{uint8(wow.RaceGnome), uint8(wow.ClassWarior)}:        {Str: 18, Agi: 23, Sta: 21, Int: 24, Spi: 20},
+	{uint8(wow.RaceGnome), uint8(wow.ClassRogue)}:         {Str: 16, Agi: 26, Sta: 20, Int: 24, Spi: 20},
+	{uint8(wow.RaceGnome), uint8(wow.ClassDeathKnight)}:   {Str: 18, Agi: 23, Sta: 21, Int: 24, Spi: 20},
+	{uint8(wow.RaceGnome), uint8(wow.ClassMage)}:          {Str: 15, Agi: 23, Sta: 19, Int: 27, Spi: 22},
+	{uint8(wow.RaceGnome), uint8(wow.ClassWarlock)}:       {Str: 15, Agi: 23, Sta: 20, Int: 26, Spi: 22},
+	{uint8(wow.RaceTroll), uint8(wow.ClassWarior)}:        {Str: 24, Agi: 22, Sta: 23, Int: 16, Spi: 21},
+	{uint8(wow.RaceTroll), uint8(wow.ClassHunter)}:        {Str: 21, Agi: 25, Sta: 22, Int: 16, Spi: 22},
+	{uint8(wow.RaceTroll), uint8(wow.ClassRogue)}:         {Str: 22, Agi: 25, Sta: 22, Int: 16, Spi: 21},
+	{uint8(wow.RaceTroll), uint8(wow.ClassPriest)}:        {Str: 21, Agi: 22, Sta: 21, Int: 18, Spi: 24},
+	{uint8(wow.RaceTroll), uint8(wow.ClassDeathKnight)}:   {Str: 24, Agi: 22, Sta: 23, Int: 16, Spi: 21},
+	{uint8(wow.RaceTroll), uint8(wow.ClassShaman)}:        {Str: 22, Agi: 22, Sta: 22, Int: 17, Spi: 23},
+	{uint8(wow.RaceTroll), uint8(wow.ClassMage)}:          {Str: 21, Agi: 22, Sta: 21, Int: 19, Spi: 23},
+	{uint8(wow.RaceBloodElf), uint8(wow.ClassPaladin)}:    {Str: 19, Agi: 22, Sta: 21, Int: 24, Spi: 20},
+	{uint8(wow.RaceBloodElf), uint8(wow.ClassHunter)}:     {Str: 17, Agi: 25, Sta: 20, Int: 24, Spi: 20},
+	{uint8(wow.RaceBloodElf), uint8(wow.ClassRogue)}:      {Str: 18, Agi: 25, Sta: 20, Int: 24, Spi: 19},
+	{uint8(wow.RaceBloodElf), uint8(wow.ClassPriest)}:     {Str: 17, Agi: 22, Sta: 19, Int: 26, Spi: 22},
+	{uint8(wow.RaceBloodElf), uint8(wow.ClassDeathKnight)}: {Str: 18, Agi: 23, Sta: 21, Int: 24, Spi: 20},
+	{uint8(wow.RaceBloodElf), uint8(wow.ClassMage)}:       {Str: 17, Agi: 22, Sta: 19, Int: 27, Spi: 21},
+	{uint8(wow.RaceBloodElf), uint8(wow.ClassWarlock)}:    {Str: 17, Agi: 22, Sta: 20, Int: 26, Spi: 21},
+	{uint8(wow.RaceDraenei), uint8(wow.ClassWarior)}:      {Str: 24, Agi: 17, Sta: 21, Int: 21, Spi: 22},
+	{uint8(wow.RaceDraenei), uint8(wow.ClassPaladin)}:     {Str: 23, Agi: 17, Sta: 21, Int: 21, Spi: 23},
+	{uint8(wow.RaceDraenei), uint8(wow.ClassHunter)}:      {Str: 21, Agi: 20, Sta: 20, Int: 21, Spi: 23},
+	{uint8(wow.RaceDraenei), uint8(wow.ClassPriest)}:      {Str: 21, Agi: 17, Sta: 19, Int: 23, Spi: 25},
+	{uint8(wow.RaceDraenei), uint8(wow.ClassDeathKnight)}: {Str: 24, Agi: 17, Sta: 21, Int: 21, Spi: 22},
+	{uint8(wow.RaceDraenei), uint8(wow.ClassShaman)}:      {Str: 22, Agi: 17, Sta: 20, Int: 22, Spi: 24},
+	{uint8(wow.RaceDraenei), uint8(wow.ClassMage)}:        {Str: 21, Agi: 17, Sta: 19, Int: 24, Spi: 24},
+}
+
+// InitBaseStats initializes the player's primary attributes based on race, class, and level.
+// Reference: TrinityCore Player::InitStatsForLevel (Player.cpp:2582)
+func (p *Player) InitBaseStats() {
+	if p.Strength == 0 && p.Agility == 0 && p.Stamina == 0 {
+		key := [2]uint8{uint8(p.Race), uint8(p.Class)}
+		if base, ok := level1BaseStats[key]; ok {
+			p.Strength = base.Str
+			p.Agility = base.Agi
+			p.Stamina = base.Sta
+			p.Intellect = base.Int
+			p.Spirit = base.Spi
+		} else {
+			p.Strength = 20
+			p.Agility = 20
+			p.Stamina = 20
+			p.Intellect = 20
+			p.Spirit = 20
+		}
+	}
+
+	if p.Armor == 0 {
+		p.Armor = p.Agility * 2
+	}
+
+	if p.Object != nil {
+		p.Object.SetUInt32Value(object.UnitFieldStat0, p.Strength)
+		p.Object.SetUInt32Value(object.UnitFieldStat1, p.Agility)
+		p.Object.SetUInt32Value(object.UnitFieldStat2, p.Stamina)
+		p.Object.SetUInt32Value(object.UnitFieldStat3, p.Intellect)
+		p.Object.SetUInt32Value(object.UnitFieldStat4, p.Spirit)
+		p.Object.SetUInt32Value(object.UnitFieldResistances, p.Armor)
+	}
+}
+
+// CalculateAttackPower computes the player's melee attack power based on class, level, and stats.
+// Reference: TrinityCore Player::UpdateAttackPowerAndDamage (StatSystem.cpp:340)
+func (p *Player) CalculateAttackPower() uint32 {
+	level := float64(p.Level)
+	if level < 1 {
+		level = 1
+	}
+	str := float64(p.Strength)
+	agi := float64(p.Agility)
+
+	var ap float64
+	switch p.Class {
+	case wow.ClassWarior, wow.ClassPaladin, wow.ClassDeathKnight:
+		ap = level*3.0 + str*2.0 - 20.0
+	case wow.ClassRogue, wow.ClassHunter, wow.ClassShaman:
+		ap = level*2.0 + str + agi - 20.0
+	case wow.ClassDruid:
+		ap = str*2.0 - 20.0
+	case wow.ClassMage, wow.ClassPriest, wow.ClassWarlock:
+		ap = str - 10.0
+	default:
+		ap = level*2.0 + str - 20.0
+	}
+	if ap < 0 {
+		ap = 0
+	}
+	return uint32(ap)
+}
+
+// CalculateRangedAttackPower computes the player's ranged attack power.
+// Reference: TrinityCore Player::UpdateAttackPowerAndDamage (StatSystem.cpp:347)
+func (p *Player) CalculateRangedAttackPower() uint32 {
+	level := float64(p.Level)
+	if level < 1 {
+		level = 1
+	}
+	agi := float64(p.Agility)
+
+	var rap float64
+	switch p.Class {
+	case wow.ClassHunter:
+		rap = level*2.0 + agi - 10.0
+	case wow.ClassRogue, wow.ClassWarior:
+		rap = level + agi - 10.0
+	default:
+		rap = agi - 10.0
+	}
+	if rap < 0 {
+		rap = 0
+	}
+	return uint32(rap)
+}
+
+// ApplyAllItemMods iterates over all equipped inventory items and applies their stat,
+// armor, resistance, and damage modifications.
+func (p *Player) ApplyAllItemMods() {
+	if p.Inventory == nil {
+		return
+	}
+
+	for slot := 0; slot < EquipmentSlotEnd; slot++ {
+		item := p.Inventory.GetEquipment(slot)
+		if item != nil {
+			p.ApplyItemMods(item, slot, true)
+		}
+	}
+}
+
+// UpdateAttackPowerAndDamage recalculates attack power and ensures update fields
+// and player fields reflect current stats and equipped weapon(s).
+func (p *Player) UpdateAttackPowerAndDamage() {
+	p.AttackPower = p.CalculateAttackPower()
+	if p.Object != nil {
+		p.Object.SetUInt32Value(object.UnitFieldAttackPower, p.AttackPower)
+		p.Object.SetUInt32Value(object.UnitFieldRangedAttackPower, p.CalculateRangedAttackPower())
+	}
+
+	if p.Inventory != nil {
+		mainWeapon := p.Inventory.GetEquipment(EquipmentSlotMainHand)
+		if mainWeapon != nil {
+			p.ApplyItemDamageFromTemplate(mainWeapon, EquipmentSlotMainHand)
+		} else {
+			if p.BaseAttackSpeed <= 0 {
+				p.BaseAttackSpeed = 2000 * time.Millisecond
+			}
+			if p.Object != nil {
+				p.Object.SetUInt32Value(object.UnitFieldBaseattacktime, 2000)
+			}
+		}
+
+		offWeapon := p.Inventory.GetEquipment(EquipmentSlotOffHand)
+		if offWeapon != nil {
+			p.ApplyItemDamageFromTemplate(offWeapon, EquipmentSlotOffHand)
+		}
+
+		rangedWeapon := p.Inventory.GetEquipment(EquipmentSlotRanged)
+		if rangedWeapon != nil {
+			p.ApplyItemDamageFromTemplate(rangedWeapon, EquipmentSlotRanged)
+		}
+	}
+}
+
+// ApplyItemDamageFromTemplate applies damage and speed to player fields from an item's template.
+func (p *Player) ApplyItemDamageFromTemplate(item *Item, slot int) {
+	if item == nil {
+		return
+	}
+	tpl := basedata.GetInstance().LookupItem(item.ItemEntry)
+	if tpl != nil && tpl.IsWeapon() {
+		p.applyItemDamage(tpl, slot, true)
+	}
 }

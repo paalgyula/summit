@@ -1,6 +1,8 @@
 package player
 
 import (
+	"time"
+
 	"github.com/paalgyula/summit/pkg/summit/world/basedata"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 )
@@ -112,27 +114,72 @@ func (p *Player) applyItemResistances(tpl *basedata.ItemTemplate, apply bool) {
 	}
 }
 
-// applyItemDamage applies or removes weapon damage values.
+// applyItemDamage applies or removes weapon damage values and attack speed for equipped weapons.
+// Reference: TrinityCore Player::_ApplyWeaponDamage (Player.cpp:7391)
 func (p *Player) applyItemDamage(tpl *basedata.ItemTemplate, slot int, apply bool) {
 	if !tpl.IsWeapon() {
 		return
 	}
 
+	dmgMin := float32(0)
+	dmgMax := float32(0)
 	for _, dmg := range tpl.Damage {
-		if dmg.Min == 0 && dmg.Max == 0 {
-			continue
+		if dmg.Min > 0 || dmg.Max > 0 {
+			dmgMin = dmg.Min
+			dmgMax = dmg.Max
+			break
 		}
+	}
 
+	switch slot {
+	case EquipmentSlotMainHand:
 		if apply {
-			p.Object.SetFloatValue(object.UnitFieldMindamage, dmg.Min)
-			p.Object.SetFloatValue(object.UnitFieldMaxdamage, dmg.Max)
+			p.Object.SetFloatValue(object.UnitFieldMindamage, dmgMin)
+			p.Object.SetFloatValue(object.UnitFieldMaxdamage, dmgMax)
+			p.MainHandDamageMin = uint32(dmgMin)
+			p.MainHandDamageMax = uint32(dmgMax)
+			if tpl.Delay > 0 {
+				p.BaseAttackSpeed = time.Duration(tpl.Delay) * time.Millisecond
+				p.Object.SetUInt32Value(object.UnitFieldBaseattacktime, tpl.Delay)
+			}
 		} else {
 			p.Object.SetFloatValue(object.UnitFieldMindamage, 0)
 			p.Object.SetFloatValue(object.UnitFieldMaxdamage, 0)
+			p.MainHandDamageMin = 0
+			p.MainHandDamageMax = 0
+			p.BaseAttackSpeed = 2000 * time.Millisecond
+			p.Object.SetUInt32Value(object.UnitFieldBaseattacktime, 2000)
 		}
 
-		// Only apply first damage entry
-		break
+	case EquipmentSlotOffHand:
+		if apply {
+			p.Object.SetFloatValue(object.UnitFieldMinoffhanddamage, dmgMin)
+			p.Object.SetFloatValue(object.UnitFieldMaxoffhanddamage, dmgMax)
+			p.OffHandDamageMin = uint32(dmgMin)
+			p.OffHandDamageMax = uint32(dmgMax)
+			if tpl.Delay > 0 {
+				p.Object.SetUInt32Value(object.UnitFieldBaseattacktime+1, tpl.Delay)
+			}
+		} else {
+			p.Object.SetFloatValue(object.UnitFieldMinoffhanddamage, 0)
+			p.Object.SetFloatValue(object.UnitFieldMaxoffhanddamage, 0)
+			p.OffHandDamageMin = 0
+			p.OffHandDamageMax = 0
+			p.Object.SetUInt32Value(object.UnitFieldBaseattacktime+1, 0)
+		}
+
+	case EquipmentSlotRanged:
+		if apply {
+			p.Object.SetFloatValue(object.UnitFieldMinrangeddamage, dmgMin)
+			p.Object.SetFloatValue(object.UnitFieldMaxrangeddamage, dmgMax)
+			if tpl.Delay > 0 {
+				p.Object.SetUInt32Value(object.UnitFieldRangedattacktime, tpl.Delay)
+			}
+		} else {
+			p.Object.SetFloatValue(object.UnitFieldMinrangeddamage, 0)
+			p.Object.SetFloatValue(object.UnitFieldMaxrangeddamage, 0)
+			p.Object.SetUInt32Value(object.UnitFieldRangedattacktime, 0)
+		}
 	}
 }
 

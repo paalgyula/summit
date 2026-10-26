@@ -36,7 +36,7 @@ func (q *Quest) XPValue(playerLevel uint8) uint32 {
 
 	entry, exists := QuestXPStore[uint32(questLevel)]
 	if !exists {
-		return 0
+		return q.RewardXP
 	}
 
 	// Difficulty factor based on level difference

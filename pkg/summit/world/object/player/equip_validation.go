@@ -294,6 +294,7 @@ func (p *Player) EquipItemWithValidation(item *Item, tpl *basedata.ItemTemplate,
 		}
 	}
 
+	p.UpdateAttackPowerAndDamage()
 	item.UpdateFields()
 	p.UpdateInventoryFields()
 

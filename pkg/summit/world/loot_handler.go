@@ -5,6 +5,7 @@ import (
 	"github.com/paalgyula/summit/pkg/summit/world/loot"
 	"github.com/paalgyula/summit/pkg/summit/world/object"
 	"github.com/paalgyula/summit/pkg/summit/world/object/player"
+	"github.com/paalgyula/summit/pkg/summit/world/quest"
 	"github.com/paalgyula/summit/pkg/wow"
 )
 
@@ -152,13 +153,11 @@ func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 	questCount := len(l.QuestItems)
 
 	var item *loot.LootItem
-	var isQuestItem bool
 
 	if int(slot) < normalCount {
 		item = &l.Items[slot]
 	} else if questSlot := int(slot) - normalCount; questSlot < questCount {
 		item = &l.QuestItems[questSlot]
-		isQuestItem = true
 	} else {
 		gc.log.Warn().Uint8("slot", slot).Msg("invalid loot slot")
 		return
@@ -211,7 +210,48 @@ func (gc *WorldSession) HandleAutostoreLootItem(data wow.PacketData) {
 	// Update player's inventory fields
 	gc.player.UpdateInventoryFields()
 
-	_ = isQuestItem // TODO: quest item notification logic
+	// Process quest item collection
+	qm := gc.getQuestManager()
+	if qm != nil {
+		playerQuests := gc.getPlayerQuests()
+		for questID, status := range playerQuests {
+			if status.Status != quest.QuestStatusIncomplete {
+				continue
+			}
+			qDef := qm.GetQuest(questID)
+			if qDef == nil {
+				continue
+			}
+
+			updated := false
+			for i := 0; i < 6; i++ {
+				if qDef.RequiredItemId[i] == item.ItemID && status.ItemCount[i] < qDef.RequiredItemCount[i] {
+					newCount := status.ItemCount[i] + uint16(item.Count)
+					if newCount > qDef.RequiredItemCount[i] {
+						newCount = qDef.RequiredItemCount[i]
+					}
+					status.ItemCount[i] = newCount
+					updated = true
+
+					pkt := quest.BuildQuestUpdateAddItem(questID, item.ItemID, uint32(newCount))
+					gc.socket.Send(pkt)
+				}
+			}
+
+			if updated {
+				if qm.CanCompleteQuest(playerQuests, questID) {
+					status.Status = quest.QuestStatusComplete
+					gc.setQuestLogState(questID, QuestSlotStateComplete)
+					gc.socket.Send(quest.BuildQuestUpdateComplete(questID))
+					gc.log.Debug().
+						Uint32("quest", questID).
+						Uint32("item", item.ItemID).
+						Msg("quest completed via item credit")
+				}
+				gc.saveQuests()
+			}
+		}
+	}
 
 	// If all items looted and no gold, auto-release
 	if l.Empty() {

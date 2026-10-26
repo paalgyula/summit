@@ -109,6 +109,16 @@ func (upd *Updater) buildValuesUpdateFiltered(source *player.Player, target *pla
 // BuildValuesUpdateObject builds an incremental SMSG_UPDATE_OBJECT with a
 // Values-only block containing only changed fields visible to the target.
 func (upd *Updater) BuildValuesUpdateObject(source *player.Player, target *player.Player) *wow.Packet {
+	if source == nil || source.Object == nil || target == nil || target.Object == nil {
+		return nil
+	}
+
+	// Values update — incremental, visibility-filtered
+	mask := source.Object.BuildIncrementalUpdateMask(target.Object)
+	if mask.GetUpdateBlockCount() == 0 {
+		return nil
+	}
+
 	ud := object.NewUpdateData()
 
 	buf := object.NewUpdateBlockBuffer()
@@ -119,8 +129,6 @@ func (upd *Updater) BuildValuesUpdateObject(source *player.Player, target *playe
 	// GUID
 	_ = buf.Write(source.GUID())
 
-	// Values update — incremental, visibility-filtered
-	mask := source.Object.BuildIncrementalUpdateMask(target.Object)
 	block := source.Object.BuildValuesUpdateBlock(mask, target.Object)
 	buf.WriteBytes(block)
 
